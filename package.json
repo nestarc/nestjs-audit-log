@@ -4,7 +4,9 @@
   "description": "Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -41,6 +43,7 @@
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.0.0",
     "ts-jest": "^29.2.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.5.0"
   }
 }
