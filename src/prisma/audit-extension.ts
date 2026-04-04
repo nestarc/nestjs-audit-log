@@ -82,6 +82,18 @@ async function insertAuditLog(
   `;
 }
 
+function shouldSkip(
+  model: string,
+  trackedModels?: string[],
+  ignoredModels?: string[],
+): boolean {
+  return (
+    AuditContext.isNoAudit() ||
+    AuditContext.isAuditBypass() ||
+    !shouldTrackModel(model, trackedModels, ignoredModels)
+  );
+}
+
 export function createAuditExtension(options: AuditExtensionOptions) {
   const sensitiveFields = options.sensitiveFields ?? [];
   const { trackedModels, ignoredModels } = options;
@@ -94,186 +106,262 @@ export function createAuditExtension(options: AuditExtensionOptions) {
       query: {
         $allModels: {
           async create({ model, args, query }: any) {
-            if (
-              AuditContext.isNoAudit() ||
-              !shouldTrackModel(model, trackedModels, ignoredModels)
-            ) {
+            if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
-            const result = await query(args);
-            const changes = computeCreateChanges(
-              result as Record<string, unknown>,
-              sensitiveFields,
-            );
-            const params = buildAuditInsertParams({
-              action: `${model}.created`,
-              targetType: model,
-              targetId: String((result as any).id ?? null),
-              changes,
+            const store = AuditContext.getStore();
+            const delegateName = modelDelegateName(model);
+
+            return client.$transaction(async (tx: any) => {
+              if (store) store._auditBypass = true;
+              try {
+                const result = await tx[delegateName].create(args);
+                const targetId = String((result as any).id ?? null);
+
+                // Canonical fetch for full record (projection-safe)
+                const canonical =
+                  targetId !== 'null'
+                    ? await tx[delegateName].findFirst({
+                        where: { id: (result as any).id },
+                      })
+                    : null;
+
+                const changes = computeCreateChanges(
+                  (canonical ?? result) as Record<string, unknown>,
+                  sensitiveFields,
+                );
+                const params = buildAuditInsertParams({
+                  action: `${model}.created`,
+                  targetType: model,
+                  targetId,
+                  changes,
+                });
+                await insertAuditLog(tx, params);
+                return result;
+              } finally {
+                if (store) store._auditBypass = false;
+              }
             });
-            await insertAuditLog(client, params);
-            return result;
           },
 
           async update({ model, args, query }: any) {
-            if (
-              AuditContext.isNoAudit() ||
-              !shouldTrackModel(model, trackedModels, ignoredModels)
-            ) {
+            if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
-            const delegate = (client as any)[modelDelegateName(model)];
-            const before = await delegate.findFirst({ where: args.where });
-            const result = await query(args);
-            const changes = before
-              ? computeUpdateChanges(
-                  before as Record<string, unknown>,
-                  result as Record<string, unknown>,
-                  sensitiveFields,
-                )
-              : {};
-            const params = buildAuditInsertParams({
-              action: `${model}.updated`,
-              targetType: model,
-              targetId: String((result as any).id ?? null),
-              changes,
+            const store = AuditContext.getStore();
+            const delegateName = modelDelegateName(model);
+
+            return client.$transaction(async (tx: any) => {
+              if (store) store._auditBypass = true;
+              try {
+                const before = await tx[delegateName].findFirst({
+                  where: args.where,
+                });
+                const result = await tx[delegateName].update(args);
+
+                // Canonical after-state (projection-safe)
+                const afterCanonical = await tx[delegateName].findFirst({
+                  where: args.where,
+                });
+
+                const changes = before
+                  ? computeUpdateChanges(
+                      before as Record<string, unknown>,
+                      (afterCanonical ?? result) as Record<string, unknown>,
+                      sensitiveFields,
+                    )
+                  : {};
+                const params = buildAuditInsertParams({
+                  action: `${model}.updated`,
+                  targetType: model,
+                  targetId: String((result as any).id ?? null),
+                  changes,
+                });
+                await insertAuditLog(tx, params);
+                return result;
+              } finally {
+                if (store) store._auditBypass = false;
+              }
             });
-            await insertAuditLog(client, params);
-            return result;
           },
 
           async delete({ model, args, query }: any) {
-            if (
-              AuditContext.isNoAudit() ||
-              !shouldTrackModel(model, trackedModels, ignoredModels)
-            ) {
+            if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
-            const delegate = (client as any)[modelDelegateName(model)];
-            const before = await delegate.findFirst({ where: args.where });
-            const result = await query(args);
-            const changes = before
-              ? computeDeleteChanges(
-                  before as Record<string, unknown>,
-                  sensitiveFields,
-                )
-              : {};
-            const params = buildAuditInsertParams({
-              action: `${model}.deleted`,
-              targetType: model,
-              targetId: String((result as any).id ?? null),
-              changes,
+            const store = AuditContext.getStore();
+            const delegateName = modelDelegateName(model);
+
+            return client.$transaction(async (tx: any) => {
+              if (store) store._auditBypass = true;
+              try {
+                const before = await tx[delegateName].findFirst({
+                  where: args.where,
+                });
+                const result = await tx[delegateName].delete(args);
+
+                const changes = before
+                  ? computeDeleteChanges(
+                      before as Record<string, unknown>,
+                      sensitiveFields,
+                    )
+                  : {};
+                const params = buildAuditInsertParams({
+                  action: `${model}.deleted`,
+                  targetType: model,
+                  targetId: String(
+                    (before as any)?.id ?? (result as any).id ?? null,
+                  ),
+                  changes,
+                });
+                await insertAuditLog(tx, params);
+                return result;
+              } finally {
+                if (store) store._auditBypass = false;
+              }
             });
-            await insertAuditLog(client, params);
-            return result;
           },
 
           async upsert({ model, args, query }: any) {
-            if (
-              AuditContext.isNoAudit() ||
-              !shouldTrackModel(model, trackedModels, ignoredModels)
-            ) {
+            if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
-            const delegate = (client as any)[modelDelegateName(model)];
-            const before = await delegate.findFirst({ where: args.where });
-            const result = await query(args);
-            const isCreate = !before;
-            const changes = isCreate
-              ? computeCreateChanges(
-                  result as Record<string, unknown>,
-                  sensitiveFields,
-                )
-              : computeUpdateChanges(
-                  before as Record<string, unknown>,
-                  result as Record<string, unknown>,
-                  sensitiveFields,
-                );
-            const params = buildAuditInsertParams({
-              action: isCreate
-                ? `${model}.created`
-                : `${model}.updated`,
-              targetType: model,
-              targetId: String((result as any).id ?? null),
-              changes,
+            const store = AuditContext.getStore();
+            const delegateName = modelDelegateName(model);
+
+            return client.$transaction(async (tx: any) => {
+              if (store) store._auditBypass = true;
+              try {
+                const before = await tx[delegateName].findFirst({
+                  where: args.where,
+                });
+                const result = await tx[delegateName].upsert(args);
+                const isCreate = !before;
+
+                // Canonical after-state
+                const canonical = await tx[delegateName].findFirst({
+                  where: { id: (result as any).id },
+                });
+
+                const changes = isCreate
+                  ? computeCreateChanges(
+                      (canonical ?? result) as Record<string, unknown>,
+                      sensitiveFields,
+                    )
+                  : computeUpdateChanges(
+                      before as Record<string, unknown>,
+                      (canonical ?? result) as Record<string, unknown>,
+                      sensitiveFields,
+                    );
+                const params = buildAuditInsertParams({
+                  action: isCreate
+                    ? `${model}.created`
+                    : `${model}.updated`,
+                  targetType: model,
+                  targetId: String((result as any).id ?? null),
+                  changes,
+                });
+                await insertAuditLog(tx, params);
+                return result;
+              } finally {
+                if (store) store._auditBypass = false;
+              }
             });
-            await insertAuditLog(client, params);
-            return result;
           },
 
           async createMany({ model, args, query }: any) {
-            if (
-              AuditContext.isNoAudit() ||
-              !shouldTrackModel(model, trackedModels, ignoredModels)
-            ) {
+            if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
-            const result = await query(args);
-            const params = buildAuditInsertParams({
-              action: `${model}.createdMany`,
-              targetType: model,
-              targetId: null,
-              changes: {},
-              metadata: { count: (result as any).count },
+            const store = AuditContext.getStore();
+            const delegateName = modelDelegateName(model);
+
+            return client.$transaction(async (tx: any) => {
+              if (store) store._auditBypass = true;
+              try {
+                const result = await tx[delegateName].createMany(args);
+                const params = buildAuditInsertParams({
+                  action: `${model}.createdMany`,
+                  targetType: model,
+                  targetId: null,
+                  changes: {},
+                  metadata: { count: (result as any).count },
+                });
+                await insertAuditLog(tx, params);
+                return result;
+              } finally {
+                if (store) store._auditBypass = false;
+              }
             });
-            await insertAuditLog(client, params);
-            return result;
           },
 
           async updateMany({ model, args, query }: any) {
-            if (
-              AuditContext.isNoAudit() ||
-              !shouldTrackModel(model, trackedModels, ignoredModels)
-            ) {
+            if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
-            const result = await query(args);
-            const params = buildAuditInsertParams({
-              action: `${model}.updatedMany`,
-              targetType: model,
-              targetId: null,
-              changes: {},
-              metadata: { count: (result as any).count },
+            const store = AuditContext.getStore();
+            const delegateName = modelDelegateName(model);
+
+            return client.$transaction(async (tx: any) => {
+              if (store) store._auditBypass = true;
+              try {
+                const result = await tx[delegateName].updateMany(args);
+                const params = buildAuditInsertParams({
+                  action: `${model}.updatedMany`,
+                  targetType: model,
+                  targetId: null,
+                  changes: {},
+                  metadata: { count: (result as any).count },
+                });
+                await insertAuditLog(tx, params);
+                return result;
+              } finally {
+                if (store) store._auditBypass = false;
+              }
             });
-            await insertAuditLog(client, params);
-            return result;
           },
 
           async deleteMany({ model, args, query }: any) {
-            if (
-              AuditContext.isNoAudit() ||
-              !shouldTrackModel(model, trackedModels, ignoredModels)
-            ) {
+            if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
-            const delegate = (client as any)[modelDelegateName(model)];
-            const records = await delegate.findMany({
-              where: args.where,
+            const store = AuditContext.getStore();
+            const delegateName = modelDelegateName(model);
+
+            return client.$transaction(async (tx: any) => {
+              if (store) store._auditBypass = true;
+              try {
+                const records = await tx[delegateName].findMany({
+                  where: args.where,
+                });
+                const result = await tx[delegateName].deleteMany(args);
+
+                for (const record of records) {
+                  const changes = computeDeleteChanges(
+                    record as Record<string, unknown>,
+                    sensitiveFields,
+                  );
+                  const params = buildAuditInsertParams({
+                    action: `${model}.deleted`,
+                    targetType: model,
+                    targetId: String((record as any).id ?? null),
+                    changes,
+                  });
+                  await insertAuditLog(tx, params);
+                }
+
+                return result;
+              } finally {
+                if (store) store._auditBypass = false;
+              }
             });
-            const result = await query(args);
-
-            for (const record of records) {
-              const changes = computeDeleteChanges(
-                record as Record<string, unknown>,
-                sensitiveFields,
-              );
-              const params = buildAuditInsertParams({
-                action: `${model}.deleted`,
-                targetType: model,
-                targetId: String((record as any).id ?? null),
-                changes,
-              });
-              await insertAuditLog(client, params);
-            }
-
-            return result;
           },
         },
       },

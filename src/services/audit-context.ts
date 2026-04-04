@@ -5,6 +5,8 @@ export interface AuditContextStore {
   actor: AuditActor | null;
   noAudit: boolean;
   actionOverride?: string;
+  /** @internal Recursion guard for transactional audit extension */
+  _auditBypass?: boolean;
 }
 
 export class AuditContext {
@@ -28,5 +30,9 @@ export class AuditContext {
 
   static getActionOverride(): string | undefined {
     return this.storage.getStore()?.actionOverride;
+  }
+
+  static isAuditBypass(): boolean {
+    return this.storage.getStore()?._auditBypass ?? false;
   }
 }
