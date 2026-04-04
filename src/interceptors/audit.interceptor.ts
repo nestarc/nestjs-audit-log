@@ -15,12 +15,13 @@ export class AuditInterceptor implements NestInterceptor {
   constructor(private readonly reflector: Reflector) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const handler = context.getHandler();
+    const targets = [context.getHandler(), context.getClass()];
     const noAudit =
-      this.reflector.get<boolean>(NO_AUDIT_KEY, handler) ?? false;
-    const actionOverride = this.reflector.get<string>(
+      this.reflector.getAllAndOverride<boolean>(NO_AUDIT_KEY, targets) ??
+      false;
+    const actionOverride = this.reflector.getAllAndOverride<string>(
       AUDIT_ACTION_KEY,
-      handler,
+      targets,
     );
 
     const store = AuditContext.getStore();

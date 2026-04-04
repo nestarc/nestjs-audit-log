@@ -22,6 +22,11 @@ export class AuditService {
     const client = tx ?? this.options.prisma;
     const actor = AuditContext.getActor();
     const tenantId = getTenantId();
+    if (!tenantId && this.options.tenantRequired) {
+      throw new Error(
+        '[@nestarc/audit-log] tenant context required but not available.',
+      );
+    }
     const metadataJson = input.metadata
       ? JSON.stringify(input.metadata)
       : null;
@@ -47,6 +52,12 @@ export class AuditService {
 
   async query(options: AuditQueryOptions): Promise<AuditQueryResult> {
     const tenantId = getTenantId();
+    if (!tenantId && this.options.tenantRequired) {
+      throw new Error(
+        '[@nestarc/audit-log] tenant context required but not available. ' +
+          'Ensure @nestarc/tenancy is installed and the request has a valid tenant context.',
+      );
+    }
     const conditions: Prisma.Sql[] = [];
 
     if (tenantId) {

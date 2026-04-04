@@ -3,10 +3,9 @@ import { ActorExtractor } from './actor.interface';
 
 export interface AuditLogModuleOptions {
   prisma: any;
-  trackedModels?: string[];
-  ignoredModels?: string[];
   actorExtractor: ActorExtractor;
-  sensitiveFields?: string[];
+  /** When true, query() throws if tenant context is unavailable. Default: false */
+  tenantRequired?: boolean;
 }
 
 export interface AuditLogModuleAsyncOptions

@@ -45,16 +45,6 @@ describe('AuditContext', () => {
     });
   });
 
-  it('returns false for auditBypass outside a context', () => {
-    expect(AuditContext.isAuditBypass()).toBe(false);
-  });
-
-  it('supports _auditBypass flag for recursion guard', () => {
-    AuditContext.run({ actor, noAudit: false, _auditBypass: true }, () => {
-      expect(AuditContext.isAuditBypass()).toBe(true);
-    });
-  });
-
   it('isolates contexts between nested runs', async () => {
     await new Promise<void>((resolve) => {
       AuditContext.run({ actor, noAudit: false }, () => {

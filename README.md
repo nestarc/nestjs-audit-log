@@ -104,13 +104,12 @@ import { PrismaService } from './prisma.service';
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) => ({
         prisma: prisma.base, // AuditService uses the base client
-        trackedModels: ['User', 'Invoice', 'Document'],
         actorExtractor: (req) => ({
           id: req.user?.id ?? null,
           type: req.user ? 'user' : 'system',
           ip: req.ip,
         }),
-        sensitiveFields: ['password', 'ssn'],
+        // tenantRequired: true, // fail-closed for multi-tenant deployments
       }),
     }),
   ],
@@ -190,11 +189,13 @@ const result = await auditService.query({
 
 ### Transaction Guarantees
 
-| Path | Transactional? | Details |
-|------|---------------|---------|
-| Automatic tracking (extension) | Always | Business write + audit insert share one `$transaction` |
-| Manual logging (`log()`) | When `tx` provided | Pass Prisma transaction client as second argument |
-| Manual logging (`log()`) | When `tx` omitted | Uses base client independently (not transactional with caller) |
+| Path | Caller tx participation | Audit insert |
+|------|------------------------|--------------|
+| Automatic tracking (extension) | Yes — `query(args)` joins caller's `$transaction` | Best-effort — runs after business write, warns on failure |
+| Manual logging (`log(input, tx)`) | Yes — when `tx` provided | Participates in provided transaction |
+| Manual logging (`log(input)`) | No | Independent write via base client |
+
+Automatic tracking uses Prisma's `query(args)` to preserve caller transaction participation. The audit insert runs separately and does not block or fail the business operation.
 
 ## Multi-Tenancy
 

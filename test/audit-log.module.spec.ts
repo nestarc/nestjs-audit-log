@@ -14,7 +14,6 @@ describe('AuditLogModule', () => {
       id: req.user?.id ?? null,
       type: 'user' as const,
     }),
-    trackedModels: ['User'],
   };
 
   describe('forRoot', () => {
