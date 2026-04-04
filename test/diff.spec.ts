@@ -3,6 +3,7 @@ import {
   computeUpdateChanges,
   computeDeleteChanges,
   shouldTrackModel,
+  isDeepEqual,
 } from '../src/prisma/diff';
 
 describe('shouldTrackModel', () => {
@@ -88,6 +89,85 @@ describe('computeUpdateChanges', () => {
     );
     expect(result).toEqual({
       password: { before: '[REDACTED]', after: '[REDACTED]' },
+    });
+  });
+
+  it('treats identical JSON objects as unchanged (deep equal)', () => {
+    const result = computeUpdateChanges(
+      { config: { theme: 'dark', lang: 'en' } },
+      { config: { theme: 'dark', lang: 'en' } },
+      [],
+    );
+    expect(result).toEqual({});
+  });
+
+  it('detects changed JSON objects', () => {
+    const result = computeUpdateChanges(
+      { config: { theme: 'dark' } },
+      { config: { theme: 'light' } },
+      [],
+    );
+    expect(result).toEqual({
+      config: { before: { theme: 'dark' }, after: { theme: 'light' } },
+    });
+  });
+
+  it('treats identical arrays as unchanged', () => {
+    const result = computeUpdateChanges(
+      { tags: ['a', 'b', 'c'] },
+      { tags: ['a', 'b', 'c'] },
+      [],
+    );
+    expect(result).toEqual({});
+  });
+
+  it('detects changed arrays', () => {
+    const result = computeUpdateChanges(
+      { tags: ['a', 'b'] },
+      { tags: ['a', 'c'] },
+      [],
+    );
+    expect(result).toEqual({
+      tags: { before: ['a', 'b'], after: ['a', 'c'] },
+    });
+  });
+
+  it('handles key order difference in objects as unchanged', () => {
+    const before = { config: JSON.parse('{"b":2,"a":1}') };
+    const after = { config: JSON.parse('{"a":1,"b":2}') };
+    const result = computeUpdateChanges(before, after, []);
+    expect(result).toEqual({});
+  });
+
+  it('treats identical Date instances as unchanged', () => {
+    const date = new Date('2026-01-01');
+    const result = computeUpdateChanges(
+      { createdAt: new Date('2026-01-01') },
+      { createdAt: new Date('2026-01-01') },
+      [],
+    );
+    expect(result).toEqual({});
+  });
+
+  it('detects changed Date values', () => {
+    const result = computeUpdateChanges(
+      { createdAt: new Date('2026-01-01') },
+      { createdAt: new Date('2026-06-01') },
+      [],
+    );
+    expect(result.createdAt).toBeDefined();
+    expect(result.createdAt.before).toEqual(new Date('2026-01-01'));
+    expect(result.createdAt.after).toEqual(new Date('2026-06-01'));
+  });
+
+  it('distinguishes null from undefined', () => {
+    const result = computeUpdateChanges(
+      { field: null },
+      { field: undefined },
+      [],
+    );
+    expect(result).toEqual({
+      field: { before: null, after: undefined },
     });
   });
 });
