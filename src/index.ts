@@ -31,3 +31,6 @@ export type {
 
 // Constants
 export { AUDIT_LOG_OPTIONS } from './audit-log.constants';
+
+// SQL
+export { getAuditTableSQL } from './sql';

@@ -9,7 +9,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && cp src/sql/*.sql dist/sql/",
     "test": "jest",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config test/e2e/jest-e2e.config.ts --runInBand",
