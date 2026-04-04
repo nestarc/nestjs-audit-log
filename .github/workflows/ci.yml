@@ -44,14 +44,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma client
+        run: npx prisma generate --schema=test/e2e/prisma/schema.prisma
+
       - name: Build
         run: npm run build
 
       - name: Unit tests
         run: npm test
-
-      - name: Generate Prisma client
-        run: npx prisma generate --schema=test/e2e/prisma/schema.prisma
 
       - name: Push test schema
         run: npx prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate
