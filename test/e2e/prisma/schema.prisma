@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String?  @map("tenant_id")
+  actorId    String?  @map("actor_id")
+  actorType  String   @default("user") @map("actor_type")
+  actorIp    String?  @map("actor_ip")
+  action     String
+  targetType String?  @map("target_type")
+  targetId   String?  @map("target_id")
+  source     String   @default("auto")
+  changes    Json?
+  metadata   Json?
+  result     String   @default("success")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
