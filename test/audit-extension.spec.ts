@@ -1,7 +1,21 @@
 import { AuditContext } from '../src/services/audit-context';
-import { modelDelegateName, buildAuditInsertParams } from '../src/prisma/audit-extension';
+import { modelDelegateName, buildAuditInsertParams, getPkField } from '../src/prisma/audit-extension';
 
 describe('Prisma Audit Extension helpers', () => {
+  describe('getPkField', () => {
+    it('returns "id" by default when no primaryKey map', () => {
+      expect(getPkField('User', {})).toBe('id');
+    });
+
+    it('returns "id" when model is not in primaryKey map', () => {
+      expect(getPkField('User', { primaryKey: { Order: 'orderNumber' } })).toBe('id');
+    });
+
+    it('returns custom PK when model is in primaryKey map', () => {
+      expect(getPkField('Order', { primaryKey: { Order: 'orderNumber' } })).toBe('orderNumber');
+    });
+  });
+
   describe('modelDelegateName', () => {
     it('converts User to user', () => {
       expect(modelDelegateName('User')).toBe('user');

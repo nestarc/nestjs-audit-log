@@ -12,6 +12,15 @@ export interface AuditExtensionOptions {
   trackedModels?: string[];
   ignoredModels?: string[];
   sensitiveFields?: string[];
+  /** Map of model name → primary key field name. Defaults to 'id'. */
+  primaryKey?: Record<string, string>;
+}
+
+export function getPkField(
+  model: string,
+  options: AuditExtensionOptions,
+): string {
+  return options.primaryKey?.[model] ?? 'id';
 }
 
 export function modelDelegateName(model: string): string {
@@ -116,16 +125,17 @@ export function createAuditExtension(options: AuditExtensionOptions) {
             return client.$transaction(async (tx: any) => {
               if (store) store._auditBypass = true;
               try {
+                const pkField = getPkField(model, options);
                 const result = await tx[delegateName].create(args);
-                const targetId = String((result as any).id ?? null);
+                const pkValue = (result as any)[pkField] ?? null;
+                const targetId = pkValue != null ? String(pkValue) : null;
 
                 // Canonical fetch for full record (projection-safe)
-                const canonical =
-                  targetId !== 'null'
-                    ? await tx[delegateName].findFirst({
-                        where: { id: (result as any).id },
-                      })
-                    : null;
+                const canonical = pkValue != null
+                  ? await tx[delegateName].findFirst({
+                      where: { [pkField]: pkValue },
+                    })
+                  : null;
 
                 const changes = computeCreateChanges(
                   (canonical ?? result) as Record<string, unknown>,
@@ -156,15 +166,20 @@ export function createAuditExtension(options: AuditExtensionOptions) {
             return client.$transaction(async (tx: any) => {
               if (store) store._auditBypass = true;
               try {
+                const pkField = getPkField(model, options);
                 const before = await tx[delegateName].findFirst({
                   where: args.where,
                 });
                 const result = await tx[delegateName].update(args);
 
-                // Canonical after-state (projection-safe)
-                const afterCanonical = await tx[delegateName].findFirst({
-                  where: args.where,
-                });
+                // Canonical after-state using before's PK (not args.where,
+                // which may reference a field that just changed)
+                const beforePk = (before as any)?.[pkField];
+                const afterCanonical = beforePk != null
+                  ? await tx[delegateName].findFirst({
+                      where: { [pkField]: beforePk },
+                    })
+                  : null;
 
                 const changes = before
                   ? computeUpdateChanges(
@@ -176,7 +191,7 @@ export function createAuditExtension(options: AuditExtensionOptions) {
                 const params = buildAuditInsertParams({
                   action: `${model}.updated`,
                   targetType: model,
-                  targetId: String((result as any).id ?? null),
+                  targetId: beforePk != null ? String(beforePk) : String((result as any)[pkField] ?? null),
                   changes,
                 });
                 await insertAuditLog(tx, params);
@@ -198,6 +213,7 @@ export function createAuditExtension(options: AuditExtensionOptions) {
             return client.$transaction(async (tx: any) => {
               if (store) store._auditBypass = true;
               try {
+                const pkField = getPkField(model, options);
                 const before = await tx[delegateName].findFirst({
                   where: args.where,
                 });
@@ -209,12 +225,11 @@ export function createAuditExtension(options: AuditExtensionOptions) {
                       sensitiveFields,
                     )
                   : {};
+                const pkValue = (before as any)?.[pkField] ?? (result as any)[pkField] ?? null;
                 const params = buildAuditInsertParams({
                   action: `${model}.deleted`,
                   targetType: model,
-                  targetId: String(
-                    (before as any)?.id ?? (result as any).id ?? null,
-                  ),
+                  targetId: pkValue != null ? String(pkValue) : null,
                   changes,
                 });
                 await insertAuditLog(tx, params);
@@ -236,16 +251,20 @@ export function createAuditExtension(options: AuditExtensionOptions) {
             return client.$transaction(async (tx: any) => {
               if (store) store._auditBypass = true;
               try {
+                const pkField = getPkField(model, options);
                 const before = await tx[delegateName].findFirst({
                   where: args.where,
                 });
                 const result = await tx[delegateName].upsert(args);
                 const isCreate = !before;
+                const pkValue = (result as any)[pkField] ?? null;
 
                 // Canonical after-state
-                const canonical = await tx[delegateName].findFirst({
-                  where: { id: (result as any).id },
-                });
+                const canonical = pkValue != null
+                  ? await tx[delegateName].findFirst({
+                      where: { [pkField]: pkValue },
+                    })
+                  : null;
 
                 const changes = isCreate
                   ? computeCreateChanges(
@@ -262,7 +281,7 @@ export function createAuditExtension(options: AuditExtensionOptions) {
                     ? `${model}.created`
                     : `${model}.updated`,
                   targetType: model,
-                  targetId: String((result as any).id ?? null),
+                  targetId: pkValue != null ? String(pkValue) : null,
                   changes,
                 });
                 await insertAuditLog(tx, params);
@@ -338,6 +357,7 @@ export function createAuditExtension(options: AuditExtensionOptions) {
             return client.$transaction(async (tx: any) => {
               if (store) store._auditBypass = true;
               try {
+                const pkField = getPkField(model, options);
                 const records = await tx[delegateName].findMany({
                   where: args.where,
                 });
@@ -348,10 +368,11 @@ export function createAuditExtension(options: AuditExtensionOptions) {
                     record as Record<string, unknown>,
                     sensitiveFields,
                   );
+                  const recordPk = (record as any)[pkField] ?? null;
                   const params = buildAuditInsertParams({
                     action: `${model}.deleted`,
                     targetType: model,
-                    targetId: String((record as any).id ?? null),
+                    targetId: recordPk != null ? String(recordPk) : null,
                     changes,
                   });
                   await insertAuditLog(tx, params);
