@@ -18,14 +18,15 @@ export class AuditService {
     private readonly options: AuditLogModuleOptions,
   ) {}
 
-  async log(input: ManualAuditLogInput): Promise<void> {
+  async log(input: ManualAuditLogInput, tx?: any): Promise<void> {
+    const client = tx ?? this.options.prisma;
     const actor = AuditContext.getActor();
     const tenantId = getTenantId();
     const metadataJson = input.metadata
       ? JSON.stringify(input.metadata)
       : null;
 
-    await this.options.prisma.$executeRaw`
+    await client.$executeRaw`
       INSERT INTO audit_logs
         (tenant_id, actor_id, actor_type, actor_ip, action,
          target_type, target_id, source, metadata, result)

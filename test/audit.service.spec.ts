@@ -40,6 +40,13 @@ describe('AuditService', () => {
       await service.log({ action: 'system.startup' });
       expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
     });
+
+    it('uses provided tx client instead of base prisma', async () => {
+      const mockTx = { $executeRaw: jest.fn().mockResolvedValue(1) };
+      await service.log({ action: 'invoice.approved' }, mockTx);
+      expect(mockTx.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
+    });
   });
 
   describe('query()', () => {
