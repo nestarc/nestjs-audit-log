@@ -23,3 +23,9 @@ lerna-debug.log*
 # temp directory
 .temp
 .tmp
+
+# Coverage
+/coverage
+
+# OS files
+.DS_Store
