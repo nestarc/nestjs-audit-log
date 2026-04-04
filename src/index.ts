@@ -33,4 +33,4 @@ export type {
 export { AUDIT_LOG_OPTIONS } from './audit-log.constants';
 
 // SQL
-export { getAuditTableSQL } from './sql';
+export { getAuditTableSQL, getAuditTableStatements, applyAuditTableSchema } from './sql';

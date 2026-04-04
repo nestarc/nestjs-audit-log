@@ -7,6 +7,7 @@ import { createAuditExtension } from '../../src/prisma/audit-extension';
 import { AuditContext } from '../../src/services/audit-context';
 import { NoAudit } from '../../src/decorators/no-audit.decorator';
 import { AuditAction } from '../../src/decorators/audit-action.decorator';
+import { applyAuditTableSchema } from '../../src/sql';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -28,19 +29,9 @@ describe('AuditLog E2E', () => {
       datasources: { db: { url: DATABASE_URL } },
     });
 
-    // Create append-only rules (SOC2 compliance)
-    await basePrisma.$executeRawUnsafe(`
-      DO $$ BEGIN
-        CREATE RULE audit_logs_no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$;
-    `);
-    await basePrisma.$executeRawUnsafe(`
-      DO $$ BEGIN
-        CREATE RULE audit_logs_no_delete AS ON DELETE TO audit_logs DO INSTEAD NOTHING;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$;
-    `);
+    // Provision audit_logs table + append-only rules + indexes
+    // Self-contained: works even if prisma db push was not run
+    await applyAuditTableSchema(basePrisma);
 
     prisma = basePrisma.$extends(createAuditExtension(extensionOptions));
 

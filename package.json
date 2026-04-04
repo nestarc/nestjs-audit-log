@@ -14,7 +14,7 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config test/e2e/jest-e2e.config.ts --runInBand",
     "prisma:test:generate": "prisma generate --schema=test/e2e/prisma/schema.prisma",
-    "prisma:test:push": "dotenv -e .env.test -- prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate",
+    "prisma:test:push": "npx dotenv -e .env.test -- npx prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate",
     "docker:up": "docker compose -f test/e2e/docker-compose.yml up -d",
     "docker:down": "docker compose -f test/e2e/docker-compose.yml down",
     "test:e2e:setup": "npm run docker:up && sleep 2 && npm run prisma:test:push && npm run prisma:test:generate",
