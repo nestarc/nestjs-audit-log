@@ -13,14 +13,14 @@ Audit logging module for NestJS with automatic Prisma change tracking and append
 ## Features
 
 - **Automatic CUD tracking** via Prisma `$extends` — create, update, delete, upsert, and batch operations
-- **Transactional** — automatic tracking wraps business write + audit insert in one database transaction
+- **Caller transaction aware** — automatic tracking participates in caller's `$transaction`; audit insert is best-effort
 - **Before/after diffs** with deep comparison for JSON fields
 - **Sensitive field masking** — configurable `[REDACTED]` replacement
 - **Manual logging API** — `AuditService.log()` for business events (with optional transaction support)
 - **Query API** — `AuditService.query()` with wildcard filters, pagination
-- **Decorators** — `@NoAudit()` to skip, `@AuditAction()` to override action name
+- **Decorators** — `@NoAudit()` / `@AuditAction()` on handlers or controllers
 - **Custom primary keys** — configurable per-model PK field (defaults to `id`)
-- **Multi-tenant** — optional `@nestarc/tenancy` integration with graceful degradation
+- **Multi-tenant** — optional `@nestarc/tenancy` integration with fail-closed mode
 - **Append-only** — ships PostgreSQL rules to prevent UPDATE/DELETE on audit records
 
 ## Quick Start
@@ -103,7 +103,7 @@ import { PrismaService } from './prisma.service';
     AuditLogModule.forRootAsync({
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) => ({
-        prisma: prisma.base, // AuditService uses the base client
+        prisma: prisma.base,
         actorExtractor: (req) => ({
           id: req.user?.id ?? null,
           type: req.user ? 'user' : 'system',
@@ -132,6 +132,14 @@ export class UserService {
 
 ## API
 
+### AuditLogModule.forRoot(options) / forRootAsync(options)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
+| `actorExtractor` | `(req) => AuditActor` | *required* | Extracts actor from HTTP request |
+| `tenantRequired` | `boolean` | `false` | When `true`, throws if tenant context is unavailable |
+
 ### AuditService
 
 ```typescript
@@ -143,11 +151,11 @@ await auditService.log({
   metadata: { amount: 5000, currency: 'USD' },
 });
 
-// Manual logging inside a transaction (audit participates in caller's tx)
+// Manual logging inside a transaction
 await prisma.base.$transaction(async (tx) => {
   await tx.invoice.update({ where: { id }, data: { status: 'approved' } });
   await auditService.log({ action: 'invoice.approved', targetId: id }, tx);
-  // If anything fails, both the update and audit log roll back
+  // Both roll back together if anything fails
 });
 
 // Querying
@@ -165,9 +173,11 @@ const result = await auditService.query({
 
 ### Decorators
 
+Apply to individual handlers or entire controllers:
+
 ```typescript
-@NoAudit()      // Skip audit tracking for this route
-@AuditAction('user.role.changed')  // Override the auto-generated action name
+@NoAudit()      // Skip audit tracking for this route or controller
+@AuditAction('user.role.changed')  // Override auto-generated action name
 ```
 
 ### createAuditExtension(options)
@@ -187,7 +197,7 @@ const result = await auditService.query({
 | `getAuditTableStatements()` | Returns SQL split into individual executable statements |
 | `applyAuditTableSchema(prisma)` | Executes the schema SQL statement by statement via Prisma |
 
-### Transaction Guarantees
+### Transaction Model
 
 | Path | Caller tx participation | Audit insert |
 |------|------------------------|--------------|
@@ -195,15 +205,18 @@ const result = await auditService.query({
 | Manual logging (`log(input, tx)`) | Yes — when `tx` provided | Participates in provided transaction |
 | Manual logging (`log(input)`) | No | Independent write via base client |
 
-Automatic tracking uses Prisma's `query(args)` to preserve caller transaction participation. The audit insert runs separately and does not block or fail the business operation.
+The automatic extension uses Prisma's `query(args)` callback, which preserves the caller's transaction context. The audit insert runs separately via the base client and does not block or fail the business operation. If audit insert fails, a warning is logged.
 
 ## Multi-Tenancy
 
-If `@nestarc/tenancy` is installed, `tenant_id` is automatically included in all audit records and query filters. No configuration needed.
+If `@nestarc/tenancy` is installed, `tenant_id` is automatically included in all audit records and query filters.
 
-If not installed, `tenant_id` is `null` and the library works normally.
-
-If installed but context retrieval fails, a warning is logged and `tenant_id` falls back to `null`.
+| Scenario | Behavior |
+|----------|----------|
+| Not installed | `tenant_id` is `null`, library works normally |
+| Installed, context available | `tenant_id` auto-injected |
+| Installed, context fails | Warning logged, `tenant_id` falls back to `null` |
+| `tenantRequired: true` + context fails | `log()` and `query()` throw an error |
 
 ## Development
 
