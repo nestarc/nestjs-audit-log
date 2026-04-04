@@ -1,6 +1,14 @@
 # @nestarc/audit-log
 
+[![CI](https://github.com/nestarc/nestjs-audit-log/actions/workflows/ci.yml/badge.svg)](https://github.com/nestarc/nestjs-audit-log/actions/workflows/ci.yml)
+
 Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage.
+
+## Requirements
+
+- NestJS 10 or 11
+- Prisma 5 or 6
+- PostgreSQL
 
 ## Features
 
