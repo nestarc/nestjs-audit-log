@@ -19,7 +19,7 @@ model User {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId   String?  @map("tenant_id")
   actorId    String?  @map("actor_id")
   actorType  String   @default("user") @map("actor_type")
