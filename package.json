@@ -7,6 +7,20 @@
   "files": [
     "dist"
   ],
+  "keywords": [
+    "nestjs",
+    "audit-log",
+    "audit-trail",
+    "change-tracking",
+    "prisma",
+    "prisma-extension",
+    "postgresql",
+    "before-after-diff",
+    "soc2",
+    "compliance",
+    "nestjs-module",
+    "saas"
+  ],
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/sql/*.sql dist/sql/",
