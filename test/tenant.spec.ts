@@ -19,4 +19,8 @@ describe('getTenantId', () => {
     // No error thrown on repeated calls — probe is cached
     expect(getTenantId()).toBeNull();
   });
+
+  // Note: The success path (tenancy installed) and error path (getTenantId throws)
+  // require runtime @nestarc/tenancy installation which cannot be reliably
+  // mocked with jest.mock + require.resolve. These paths are covered by E2E tests.
 });

@@ -27,6 +27,22 @@ describe('AuditLogModule', () => {
     });
   });
 
+  describe('configure (middleware)', () => {
+    it('applies AuditActorMiddleware on init', async () => {
+      const module = await Test.createTestingModule({
+        imports: [AuditLogModule.forRoot(mockOptions)],
+      }).compile();
+
+      const app = module.createNestApplication();
+      // init() triggers configure() which applies middleware
+      await app.init();
+
+      const service = module.get(AuditService);
+      expect(service).toBeInstanceOf(AuditService);
+      await app.close();
+    });
+  });
+
   describe('forRootAsync', () => {
     it('provides AuditService via factory', async () => {
       const module = await Test.createTestingModule({

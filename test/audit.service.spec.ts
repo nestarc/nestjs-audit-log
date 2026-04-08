@@ -85,5 +85,62 @@ describe('AuditService', () => {
 
       expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
     });
+
+    it('handles exact action filter (no wildcard)', async () => {
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ count: 0n }]);
+
+      await service.query({ action: 'user.created' });
+
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+    });
+
+    it('handles targetType and targetId filters', async () => {
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ count: 0n }]);
+
+      await service.query({ targetType: 'Invoice', targetId: 'inv-1' });
+
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+    });
+
+    it('handles from/to date range filters', async () => {
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ count: 0n }]);
+
+      await service.query({
+        from: new Date('2026-01-01'),
+        to: new Date('2026-12-31'),
+      });
+
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('tenantRequired', () => {
+    let strictService: AuditService;
+
+    beforeEach(() => {
+      strictService = new AuditService({
+        prisma: mockPrisma,
+        actorExtractor: () => ({ id: null, type: 'system' }),
+        tenantRequired: true,
+      });
+    });
+
+    it('throws on log() when tenantRequired is true and no tenant', async () => {
+      await expect(
+        strictService.log({ action: 'test.action' }),
+      ).rejects.toThrow('tenant context required');
+    });
+
+    it('throws on query() when tenantRequired is true and no tenant', async () => {
+      await expect(
+        strictService.query({}),
+      ).rejects.toThrow('tenant context required');
+    });
   });
 });
