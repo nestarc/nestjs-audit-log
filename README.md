@@ -218,6 +218,21 @@ If `@nestarc/tenancy` is installed, `tenant_id` is automatically included in all
 | Installed, context fails | Warning logged, `tenant_id` falls back to `null` |
 | `tenantRequired: true` + context fails | `log()` and `query()` throw an error |
 
+## Performance
+
+Measured with PostgreSQL 16, Prisma 6, 300 iterations on Apple Silicon:
+
+| Scenario | Avg | P50 | P95 | P99 |
+|----------|-----|-----|-----|-----|
+| create — no audit (baseline) | 0.40ms | 0.40ms | 0.52ms | 0.57ms |
+| **create — with audit** | **1.44ms** | **1.37ms** | **1.84ms** | **3.11ms** |
+| **update — with audit + diff** | **2.06ms** | **2.01ms** | **2.54ms** | **2.85ms** |
+| **delete — with audit** | **1.71ms** | **1.57ms** | **2.09ms** | **3.91ms** |
+
+Create overhead: **+1.04ms** per write. Update is slowest due to before/after diff calculation.
+
+> Reproduce: `docker compose -f test/e2e/docker-compose.yml up -d && npx ts-node benchmarks/audit-overhead.ts`
+
 ## Development
 
 ### Prerequisites
