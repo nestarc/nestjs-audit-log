@@ -17,6 +17,7 @@
     "prisma:test:push": "npx dotenv -e .env.test -- npx prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate",
     "docker:up": "docker compose -f test/e2e/docker-compose.yml up -d",
     "docker:down": "docker compose -f test/e2e/docker-compose.yml down",
+    "bench": "npx ts-node benchmarks/audit-overhead.ts",
     "test:e2e:setup": "npm run docker:up && sleep 2 && npm run prisma:test:push && npm run prisma:test:generate",
     "test:e2e:full": "npm run test:e2e:setup && npm run test:e2e",
     "test:e2e:teardown": "npm run docker:down"
