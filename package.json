@@ -1,6 +1,6 @@
 {
   "name": "@nestarc/audit-log",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,7 +23,8 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "test": "jest",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config test/e2e/jest-e2e.config.ts --runInBand",
