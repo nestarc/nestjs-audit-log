@@ -4,6 +4,10 @@
   "description": "Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nestarc/nestjs-audit-log.git"
+  },
   "files": [
     "dist"
   ],
