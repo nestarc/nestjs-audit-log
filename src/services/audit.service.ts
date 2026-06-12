@@ -420,13 +420,22 @@ export class AuditService {
       };
     }
 
+    const succeeded: string[] = [];
     for (const partition of targets) {
-      if (mode === 'detach') {
-        await client.$executeRawUnsafe(
-          `ALTER TABLE ${this.tableName} DETACH PARTITION ${partition}`,
+      try {
+        if (mode === 'detach') {
+          await client.$executeRawUnsafe(
+            `ALTER TABLE ${this.tableName} DETACH PARTITION ${partition}`,
+          );
+        } else {
+          await client.$executeRawUnsafe(`DROP TABLE ${partition}`);
+        }
+        succeeded.push(partition);
+      } catch (error) {
+        throw new Error(
+          `[@nestarc/audit-log] failed to prune partition '${partition}': ${this.errorMessage(error)}; ` +
+            `already pruned: ${succeeded.length > 0 ? succeeded.join(', ') : '(none)'}`,
         );
-      } else {
-        await client.$executeRawUnsafe(`DROP TABLE ${partition}`);
       }
     }
 
@@ -470,14 +479,31 @@ export class AuditService {
       ) AS "exists"`,
     ) as Array<{ exists: boolean }>;
     const hasTrigger = triggerRows[0]?.exists === true;
+    const ruleRows = hasTrigger
+      ? [{ exists: false }]
+      : await client.$queryRaw(
+          Prisma.sql!`SELECT EXISTS (
+            SELECT 1 FROM pg_rewrite WHERE rulename = ${names.deleteRule}
+          ) AS "exists"`,
+        ) as Array<{ exists: boolean }>;
+    const hasRule = ruleRows[0]?.exists === true;
     const tableRef = this.tableRef ?? Prisma.raw!('audit_logs');
     const deleteTriggerRef = Prisma.raw!(names.deleteTrigger);
+    const deleteRuleRef = Prisma.raw!(names.deleteRule);
 
     const deletedRows = await client.$transaction(
       async (tx: any) => {
         if (hasTrigger) {
           await tx.$executeRaw(
             Prisma.sql!`ALTER TABLE ${tableRef} DISABLE TRIGGER ${deleteTriggerRef}`,
+          );
+        } else if (hasRule) {
+          await tx.$executeRaw(
+            Prisma.sql!`DROP RULE ${deleteRuleRef} ON ${tableRef}`,
+          );
+        } else {
+          this.warn(
+            `[@nestarc/audit-log] append-only delete enforcement not found on '${this.tableName}'; pruning with plain DELETE.`,
           );
         }
         const deleted = await tx.$executeRaw(
@@ -486,6 +512,10 @@ export class AuditService {
         if (hasTrigger) {
           await tx.$executeRaw(
             Prisma.sql!`ALTER TABLE ${tableRef} ENABLE TRIGGER ${deleteTriggerRef}`,
+          );
+        } else if (hasRule) {
+          await tx.$executeRaw(
+            Prisma.sql!`CREATE RULE ${deleteRuleRef} AS ON DELETE TO ${tableRef} DO INSTEAD NOTHING`,
           );
         }
         return Number(deleted ?? 0);
@@ -577,5 +607,9 @@ export class AuditService {
     const error = new Error(message);
     (error as Error & { cause?: unknown }).cause = cause;
     return error;
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 }

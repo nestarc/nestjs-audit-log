@@ -116,6 +116,18 @@ describe('SQL utilities', () => {
         'syntax error',
       );
     });
+
+    it('rejects partitioned schema application over an existing flat table before running DDL', async () => {
+      const mockPrisma = {
+        $queryRawUnsafe: jest.fn().mockResolvedValue([{ relkind: 'r' }]),
+        $executeRawUnsafe: jest.fn(),
+      };
+
+      await expect(
+        applyAuditTableSchema(mockPrisma, { partitioned: true }),
+      ).rejects.toThrow('flat audit table already exists');
+      expect(mockPrisma.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
   });
 
   describe('ensurePartitions()', () => {
@@ -127,8 +139,13 @@ describe('SQL utilities', () => {
       jest.useRealTimers();
     });
 
-    it('creates current and ahead monthly partitions and returns their names', async () => {
+    it('creates missing current and ahead monthly partitions and returns only newly created names', async () => {
       const mockPrisma = {
+        $queryRawUnsafe: jest
+          .fn()
+          .mockResolvedValueOnce([{ relkind: 'p' }])
+          .mockResolvedValueOnce([{ exists: 'audit.events_y2026m06' }])
+          .mockResolvedValueOnce([{ exists: null }]),
         $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
       };
 
@@ -137,14 +154,36 @@ describe('SQL utilities', () => {
         ahead: 1,
       });
 
-      expect(created).toEqual(['audit.events_y2026m06', 'audit.events_y2026m07']);
-      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
+      expect(created).toEqual(['audit.events_y2026m07']);
+      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(1);
       expect(mockPrisma.$executeRawUnsafe.mock.calls[0][0]).toContain(
-        'CREATE TABLE IF NOT EXISTS audit.events_y2026m06 PARTITION OF audit.events',
+        'CREATE TABLE IF NOT EXISTS audit.events_y2026m07 PARTITION OF audit.events',
       );
       expect(mockPrisma.$executeRawUnsafe.mock.calls[0][0]).toContain(
-        "FOR VALUES FROM ('2026-06-01 00:00:00+00') TO ('2026-07-01 00:00:00+00')",
+        "FOR VALUES FROM ('2026-07-01 00:00:00+00') TO ('2026-08-01 00:00:00+00')",
       );
+    });
+
+    it('rejects non-partitioned target tables and invalid ahead values', async () => {
+      await expect(
+        ensurePartitions(
+          {
+            $queryRawUnsafe: jest.fn().mockResolvedValue([{ relkind: 'r' }]),
+            $executeRawUnsafe: jest.fn(),
+          },
+          { ahead: 1 },
+        ),
+      ).rejects.toThrow('must be a partitioned table');
+
+      await expect(
+        ensurePartitions(
+          {
+            $queryRawUnsafe: jest.fn(),
+            $executeRawUnsafe: jest.fn(),
+          },
+          { ahead: -1 },
+        ),
+      ).rejects.toThrow('ahead must be a non-negative integer');
     });
 
     it('rejects invalid tableName', async () => {

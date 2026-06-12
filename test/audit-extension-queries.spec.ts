@@ -2,6 +2,7 @@ import { AuditContext } from '../src/services/audit-context';
 import {
   createAuditExtension,
   _resetNestedWriteWarnings,
+  _resetTxAuditWarning,
 } from '../src/prisma/audit-extension';
 
 /**
@@ -63,6 +64,7 @@ describe('createAuditExtension — query handlers', () => {
   afterEach(() => {
     jest.clearAllMocks();
     _resetNestedWriteWarnings();
+    _resetTxAuditWarning();
   });
 
   describe('factory configuration', () => {
@@ -125,6 +127,79 @@ describe('createAuditExtension — query handlers', () => {
           tableName: 'audit-logs',
         }),
       ).toThrow('Invalid audit tableName');
+    });
+
+    it('routes audit reads and inserts through the interactive transaction client when experimentalTxAudit is available', async () => {
+      const txClient = buildMockClient();
+      txClient.user.findFirst.mockResolvedValue({ id: 'u1', name: 'Alice' });
+      const mockClient: any = buildMockClient({
+        _createItxClient: jest.fn(() => txClient),
+      });
+      createAuditExtension({
+        trackedModels: ['User'],
+        experimentalTxAudit: true,
+      });
+      capturedFactory(mockClient);
+      const handlers = mockClient.$extends.mock.calls[0][0].query.$allModels;
+      const created = { id: 'u1', name: 'Alice' };
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: jest.fn().mockResolvedValue(created),
+            __internalParams: {
+              transaction: { kind: 'itx', id: 'tx-1', payload: {} },
+            },
+          }),
+      );
+
+      expect(mockClient._createItxClient).toHaveBeenCalledWith({
+        kind: 'itx',
+        id: 'tx-1',
+        payload: {},
+      });
+      expect(txClient.user.findFirst).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('warns once and falls back when experimentalTxAudit cannot create a transaction client', async () => {
+      const logger = { warn: jest.fn(), error: jest.fn() };
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        experimentalTxAudit: true,
+        logger,
+      });
+      const created = { id: 'u1', name: 'Alice' };
+      mockClient.user.findFirst.mockResolvedValue(created);
+
+      for (let i = 0; i < 2; i++) {
+        await AuditContext.run(
+          { actor: defaultActor, noAudit: false },
+          () =>
+            handlers.create({
+              model: 'User',
+              args: { data: { name: 'Alice' } },
+              query: jest.fn().mockResolvedValue(created),
+              __internalParams: {
+                transaction: { kind: 'itx', id: `tx-${i}`, payload: {} },
+              },
+            }),
+        );
+      }
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('tx-aware audit unavailable'),
+      );
+      expect(
+        logger.warn.mock.calls.filter(([message]) =>
+          String(message).includes('tx-aware audit unavailable'),
+        ),
+      ).toHaveLength(1);
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(2);
     });
 
     it('uses the configured tableName for automatic audit inserts', async () => {

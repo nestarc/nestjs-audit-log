@@ -223,13 +223,48 @@ export function getAuditTableSQL(options: AuditTableSQLOptions = {}): string {
   return getAuditTableStatements(options).join('\n\n');
 }
 
+async function getTableRelkind(
+  prisma: any,
+  tableName: string,
+): Promise<string | null> {
+  const rows = await prisma.$queryRawUnsafe(
+    'SELECT relkind FROM pg_class WHERE oid = to_regclass($1)',
+    tableName,
+  ) as Array<{ relkind?: string }>;
+  return rows[0]?.relkind ?? null;
+}
+
 export async function applyAuditTableSchema(
   prisma: any,
   options: AuditTableSQLOptions = {},
 ): Promise<void> {
+  const tableName = validateAuditTableName(options.tableName);
+  if (options.partitioned) {
+    const relkind = await getTableRelkind(prisma, tableName);
+    if (relkind === 'r') {
+      throw new Error(
+        `[@nestarc/audit-log] flat audit table already exists for '${tableName}'. ` +
+          'Follow the documented flat-to-partitioned migration procedure before applying partitioned DDL.',
+      );
+    }
+    if (relkind !== null && relkind !== 'p') {
+      throw new Error(
+        `[@nestarc/audit-log] audit table '${tableName}' exists but is not a supported partitioned table.`,
+      );
+    }
+  }
+
   for (const stmt of getAuditTableStatements(options)) {
     await prisma.$executeRawUnsafe(stmt);
   }
+}
+
+function duplicateTableError(error: unknown): boolean {
+  const maybePgError = error as { code?: string; message?: string };
+  return (
+    maybePgError?.code === '42P07' ||
+    maybePgError?.message?.includes('already exists') === true
+  );
 }
 
 export async function ensurePartitions(
@@ -239,11 +274,40 @@ export async function ensurePartitions(
   const tableName = validateAuditTableName(options.tableName);
   const names = deriveAuditObjectNames(tableName);
   const ahead = options.ahead ?? 1;
-  const partitions = partitionPlan(names, ahead);
-
-  for (const partition of partitions) {
-    await prisma.$executeRawUnsafe(partition.statement);
+  if (!Number.isInteger(ahead) || ahead < 0) {
+    throw new Error(
+      '[@nestarc/audit-log] ahead must be a non-negative integer.',
+    );
   }
 
-  return partitions.map((partition) => partition.name);
+  const relkind = await getTableRelkind(prisma, tableName);
+  if (relkind !== 'p') {
+    throw new Error(
+      `[@nestarc/audit-log] ensurePartitions target '${tableName}' must be a partitioned table.`,
+    );
+  }
+
+  const partitions = partitionPlan(names, ahead);
+  const created: string[] = [];
+
+  for (const partition of partitions) {
+    const existsRows = await prisma.$queryRawUnsafe(
+      'SELECT to_regclass($1) AS "exists"',
+      partition.name,
+    ) as Array<{ exists: string | null }>;
+    if (existsRows[0]?.exists) {
+      continue;
+    }
+
+    try {
+      await prisma.$executeRawUnsafe(partition.statement);
+      created.push(partition.name);
+    } catch (error) {
+      if (!duplicateTableError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return created;
 }

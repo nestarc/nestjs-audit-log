@@ -23,9 +23,14 @@ const NO_CONTEXT_WARNING_MESSAGE =
   '[@nestarc/audit-log] audited write executed without an audit context store — actorId will be null. Wrap background work in AuditContext.runAs(actor, fn). (warned once per process)';
 
 let noContextWarningReported = false;
+let txAuditUnavailableWarned = false;
 
 export function _resetNoContextWarning(): void {
   noContextWarningReported = false;
+}
+
+export function _resetTxAuditWarning(): void {
+  txAuditUnavailableWarned = false;
 }
 
 export interface AuditExtensionOptions extends AuditSharedOptions {
@@ -303,6 +308,52 @@ function reportAuditError(
     );
   } catch {
     // Reporting must never affect the caller's mutation.
+  }
+}
+
+function warnTxAuditUnavailable(
+  options: AuditExtensionOptions,
+  error?: unknown,
+): void {
+  if (txAuditUnavailableWarned) {
+    return;
+  }
+  txAuditUnavailableWarned = true;
+
+  const suffix = error ? `: ${errorMessage(error)}` : '';
+  try {
+    (options.logger ?? console).warn(
+      `[@nestarc/audit-log] tx-aware audit unavailable on this Prisma version, falling back to best-effort${suffix}`,
+    );
+  } catch {
+    // Reporting must never affect the caller's mutation.
+  }
+}
+
+function resolveAuditClient(
+  client: any,
+  options: AuditExtensionOptions,
+  internalParams?: { transaction?: { kind?: string } },
+): any {
+  if (!options.experimentalTxAudit) {
+    return client;
+  }
+
+  const transaction = internalParams?.transaction;
+  if (!transaction || transaction.kind !== 'itx') {
+    return client;
+  }
+
+  if (typeof client?._createItxClient !== 'function') {
+    warnTxAuditUnavailable(options);
+    return client;
+  }
+
+  try {
+    return client._createItxClient(transaction);
+  } catch (error) {
+    warnTxAuditUnavailable(options, error);
+    return client;
   }
 }
 
@@ -655,11 +706,16 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
     return client.$extends({
       query: {
         $allModels: {
-          async create({ model, args, query }: any) {
+          async create({ model, args, query, __internalParams }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
+            const auditClient = resolveAuditClient(
+              client,
+              options,
+              __internalParams,
+            );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
             warnForNestedWrites(model, 'create', args, options, Prisma);
@@ -671,7 +727,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             try {
               result = await query(args);
             } catch (error) {
-              await tryLogFailure(client, options, {
+              await tryLogFailure(auditClient, options, {
                 model,
                 operation: 'create',
                 args,
@@ -693,7 +749,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               let postReadFailed = false;
               if (pkValue != null) {
                 try {
-                  canonical = await (client as any)[delegateName].findFirst({
+                  canonical = await (auditClient as any)[delegateName].findFirst({
                     where: { [pkField]: pkValue },
                   });
                 } catch (error) {
@@ -718,7 +774,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 metadata: auditFlags({ postReadFailed }),
                 operation: 'create',
               }, options);
-              await tryAuditLog(client, params, options, {
+              await tryAuditLog(auditClient, params, options, {
                 model,
                 operation: 'create',
               }, auditTableRef);
@@ -734,14 +790,19 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async update({ model, args, query }: any) {
+          async update({ model, args, query, __internalParams }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
+            const auditClient = resolveAuditClient(
+              client,
+              options,
+              __internalParams,
+            );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
-            const delegate = (client as any)[delegateName];
+            const delegate = (auditClient as any)[delegateName];
             warnForNestedWrites(model, 'update', args, options, Prisma);
             const pkInjected = tryInjectPk(args, pkField, options, {
               model,
@@ -766,7 +827,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             try {
               result = await query(args);
             } catch (error) {
-              await tryLogFailure(client, options, {
+              await tryLogFailure(auditClient, options, {
                 model,
                 operation: 'update',
                 args,
@@ -832,7 +893,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 metadata: auditFlags({ preReadFailed, postReadFailed }),
                 operation: 'update',
               }, options);
-              await tryAuditLog(client, params, options, {
+              await tryAuditLog(auditClient, params, options, {
                 model,
                 operation: 'update',
               }, auditTableRef);
@@ -848,17 +909,22 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async delete({ model, args, query }: any) {
+          async delete({ model, args, query, __internalParams }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
+            const auditClient = resolveAuditClient(
+              client,
+              options,
+              __internalParams,
+            );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
             let before: any = null;
             let preReadFailed = false;
             try {
-              before = await (client as any)[
+              before = await (auditClient as any)[
                 delegateName
               ].findFirst({ where: args.where });
             } catch (error) {
@@ -874,7 +940,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             try {
               result = await query(args);
             } catch (error) {
-              await tryLogFailure(client, options, {
+              await tryLogFailure(auditClient, options, {
                 model,
                 operation: 'delete',
                 args,
@@ -907,7 +973,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                   : undefined,
                 operation: 'delete',
               }, options);
-              await tryAuditLog(client, params, options, {
+              await tryAuditLog(auditClient, params, options, {
                 model,
                 operation: 'delete',
               }, auditTableRef);
@@ -922,14 +988,19 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async upsert({ model, args, query }: any) {
+          async upsert({ model, args, query, __internalParams }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
+            const auditClient = resolveAuditClient(
+              client,
+              options,
+              __internalParams,
+            );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
-            const delegate = (client as any)[delegateName];
+            const delegate = (auditClient as any)[delegateName];
             warnForNestedWrites(model, 'upsert', args, options, Prisma);
             const pkInjected = tryInjectPk(args, pkField, options, {
               model,
@@ -954,7 +1025,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             try {
               result = await query(args);
             } catch (error) {
-              await tryLogFailure(client, options, {
+              await tryLogFailure(auditClient, options, {
                 model,
                 operation: 'upsert',
                 args,
@@ -1034,7 +1105,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 metadata: auditFlags({ preReadFailed, postReadFailed }),
                 operation: 'upsert',
               }, options);
-              await tryAuditLog(client, params, options, {
+              await tryAuditLog(auditClient, params, options, {
                 model,
                 operation: 'upsert',
               }, auditTableRef);
@@ -1050,16 +1121,21 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async createMany({ model, args, query }: any) {
+          async createMany({ model, args, query, __internalParams }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
+            const auditClient = resolveAuditClient(
+              client,
+              options,
+              __internalParams,
+            );
             let result: any;
             try {
               result = await query(args);
             } catch (error) {
-              await tryLogFailure(client, options, {
+              await tryLogFailure(auditClient, options, {
                 model,
                 operation: 'createMany',
                 args,
@@ -1078,7 +1154,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 metadata: { count: (result as any).count },
                 operation: 'createMany',
               }, options);
-              await tryAuditLog(client, params, options, {
+              await tryAuditLog(auditClient, params, options, {
                 model,
                 operation: 'createMany',
               }, auditTableRef);
@@ -1093,16 +1169,21 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async updateMany({ model, args, query }: any) {
+          async updateMany({ model, args, query, __internalParams }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
+            const auditClient = resolveAuditClient(
+              client,
+              options,
+              __internalParams,
+            );
             let result: any;
             try {
               result = await query(args);
             } catch (error) {
-              await tryLogFailure(client, options, {
+              await tryLogFailure(auditClient, options, {
                 model,
                 operation: 'updateMany',
                 args,
@@ -1121,7 +1202,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 metadata: { count: (result as any).count },
                 operation: 'updateMany',
               }, options);
-              await tryAuditLog(client, params, options, {
+              await tryAuditLog(auditClient, params, options, {
                 model,
                 operation: 'updateMany',
               }, auditTableRef);
@@ -1136,17 +1217,22 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async deleteMany({ model, args, query }: any) {
+          async deleteMany({ model, args, query, __internalParams }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
 
+            const auditClient = resolveAuditClient(
+              client,
+              options,
+              __internalParams,
+            );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
             let records: any[] = [];
             let preReadFailed = false;
             try {
-              records = await (client as any)[
+              records = await (auditClient as any)[
                 delegateName
               ].findMany({ where: args.where });
             } catch (error) {
@@ -1162,7 +1248,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             try {
               result = await query(args);
             } catch (error) {
-              await tryLogFailure(client, options, {
+              await tryLogFailure(auditClient, options, {
                 model,
                 operation: 'deleteMany',
                 args,
@@ -1185,7 +1271,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                   },
                   operation: 'deleteMany',
                 }, options);
-                await tryAuditLog(client, params, options, {
+                await tryAuditLog(auditClient, params, options, {
                   model,
                   operation: 'deleteMany',
                 }, auditTableRef);
@@ -1215,7 +1301,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                     changes,
                     operation: 'deleteMany',
                   }, options);
-                  await tryAuditLog(client, params, options, {
+                  await tryAuditLog(auditClient, params, options, {
                     model,
                     operation: 'deleteMany',
                   }, auditTableRef);

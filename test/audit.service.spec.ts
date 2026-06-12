@@ -781,5 +781,52 @@ describe('AuditService', () => {
         'DROP TABLE audit_logs_y2025m12',
       );
     });
+
+    it('reports successful partition pruning before a later partition failure', async () => {
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([{ relkind: 'p' }])
+        .mockResolvedValueOnce([
+          {
+            partitionName: 'audit_logs_y2025m11',
+            upperBound: '2025-12-01 00:00:00+00',
+          },
+          {
+            partitionName: 'audit_logs_y2025m12',
+            upperBound: '2026-01-01 00:00:00+00',
+          },
+        ]);
+      mockPrisma.$executeRawUnsafe = jest
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('locked'));
+
+      await expect(
+        service.prune({
+          olderThan: new Date('2026-02-01T00:00:00.000Z'),
+        }),
+      ).rejects.toThrow('already pruned: audit_logs_y2025m11');
+    });
+
+    it('temporarily drops and recreates legacy delete RULEs on flat tables', async () => {
+      const tx = {
+        $executeRaw: jest
+          .fn()
+          .mockResolvedValueOnce(0)
+          .mockResolvedValueOnce(4)
+          .mockResolvedValueOnce(0),
+      };
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([{ relkind: 'r' }])
+        .mockResolvedValueOnce([{ exists: false }])
+        .mockResolvedValueOnce([{ exists: true }]);
+      mockPrisma.$transaction = jest.fn(async (fn: any) => fn(tx));
+
+      const result = await service.prune({
+        olderThan: new Date('2026-01-01T00:00:00.000Z'),
+      });
+
+      expect(result.deletedRows).toBe(4);
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(3);
+    });
   });
 });

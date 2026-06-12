@@ -51,4 +51,27 @@ describe('v0.2.0 documentation gates', () => {
     expect(ci).toContain('prisma: 6');
     expect(ci).toContain('npm run test:e2e');
   });
+
+  it('documents v0.2.0 release notes in CHANGELOG', () => {
+    const changelog = read('CHANGELOG.md');
+
+    expect(changelog).toContain('## [0.2.0]');
+    expect(changelog).toContain('Tracking default changed');
+    expect(changelog).toContain('AuditService.query(): keyset cursor pagination');
+    expect(changelog).toContain('append-only default enforcement changed');
+    expect(changelog).toContain('AuditService.prune');
+    expect(changelog).toContain('experimentalTxAudit');
+  });
+
+  it('documents v0.2.0 storage, query, and nested-write behavior in README', () => {
+    const readme = read('README.md');
+
+    expect(readme).toContain('Retention & Partitioning');
+    expect(readme).toContain('ensurePartitions');
+    expect(readme).toContain('AuditService.prune');
+    expect(readme).toContain('Query API v2');
+    expect(readme).toContain('includeTotal: false');
+    expect(readme).toContain('Nested writes');
+    expect(readme).toContain('trigger enforcement');
+  });
 });
