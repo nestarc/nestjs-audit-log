@@ -11,6 +11,7 @@ export type { AuditContextStore } from './services/audit-context';
 // Prisma Extension
 export { createAuditExtension } from './prisma/audit-extension';
 export type { AuditExtensionOptions } from './prisma/audit-extension';
+export type { PrismaModuleLike } from './prisma/prisma-namespace';
 
 // Decorators
 export { NoAudit, NO_AUDIT_KEY } from './decorators/no-audit.decorator';
@@ -28,6 +29,12 @@ export type {
   AuditLogModuleOptions,
   AuditLogModuleAsyncOptions,
 } from './interfaces/audit-log-options.interface';
+export type {
+  AuditSharedOptions,
+  AuditErrorContext,
+  AuditErrorPhase,
+  AuditLogger,
+} from './interfaces/audit-shared-options.interface';
 
 // Constants
 export { AUDIT_LOG_OPTIONS } from './audit-log.constants';

@@ -40,6 +40,7 @@ describe('Prisma Audit Extension helpers', () => {
             targetType: 'User',
             targetId: 'user-1',
             changes: { name: { after: 'Alice' } },
+            result: 'failure',
           }),
       );
 
@@ -51,6 +52,7 @@ describe('Prisma Audit Extension helpers', () => {
       expect(result.targetId).toBe('user-1');
       expect(result.source).toBe('auto');
       expect(result.changes).toEqual({ name: { after: 'Alice' } });
+      expect(result.result).toBe('failure');
     });
 
     it('uses actionOverride when present in context', () => {

@@ -1,6 +1,10 @@
-import { getTenantId, _resetTenancyProbe } from '../src/utils/tenant';
+import {
+  resolveTenantId,
+  getTenantId,
+  _resetTenancyProbe,
+} from '../src/utils/tenant';
 
-describe('getTenantId', () => {
+describe('resolveTenantId', () => {
   beforeEach(() => {
     _resetTenancyProbe();
     jest.restoreAllMocks();
@@ -13,11 +17,31 @@ describe('getTenantId', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it('uses tenantResolver before probing @nestarc/tenancy', () => {
+    const result = resolveTenantId({
+      tenantResolver: () => 'tenant-1',
+    });
+
+    expect(result).toBe('tenant-1');
+  });
+
+  it('propagates tenantResolver errors to the caller', () => {
+    const error = new Error('resolver failed');
+
+    expect(() =>
+      resolveTenantId({
+        tenantResolver: () => {
+          throw error;
+        },
+      }),
+    ).toThrow(error);
+  });
+
   it('caches the tenancy availability probe', () => {
-    getTenantId();
-    getTenantId();
+    resolveTenantId();
+    resolveTenantId();
     // No error thrown on repeated calls — probe is cached
-    expect(getTenantId()).toBeNull();
+    expect(resolveTenantId()).toBeNull();
   });
 
   // Note: The success path (tenancy installed) and error path (getTenantId throws)

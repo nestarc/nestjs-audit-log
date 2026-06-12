@@ -1,11 +1,14 @@
 import { ModuleMetadata } from '@nestjs/common';
 import { ActorExtractor } from './actor.interface';
+import { AuditSharedOptions } from './audit-shared-options.interface';
+import { PrismaModuleLike } from '../prisma/prisma-namespace';
 
-export interface AuditLogModuleOptions {
+export interface AuditLogModuleOptions extends AuditSharedOptions {
   prisma: any;
   actorExtractor: ActorExtractor;
-  /** When true, query() throws if tenant context is unavailable. Default: false */
-  tenantRequired?: boolean;
+  prismaModule?: PrismaModuleLike;
+  sensitiveFields?: string[];
+  sensitiveFieldsByModel?: Record<string, string[]>;
 }
 
 export interface AuditLogModuleAsyncOptions

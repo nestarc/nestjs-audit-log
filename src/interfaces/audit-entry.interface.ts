@@ -23,6 +23,8 @@ export interface AuditQueryOptions {
   to?: Date;
   limit?: number;
   offset?: number;
+  tenantId?: string;
+  allTenants?: boolean;
 }
 
 export interface AuditQueryResult {

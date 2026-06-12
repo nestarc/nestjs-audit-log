@@ -1,6 +1,12 @@
 let tenancyAvailable: boolean | null = null;
 
-export function getTenantId(): string | null {
+export function resolveTenantId(opts?: {
+  tenantResolver?: () => string | null;
+}): string | null {
+  if (opts?.tenantResolver) {
+    return opts.tenantResolver();
+  }
+
   if (tenancyAvailable === null) {
     try {
       require.resolve('@nestarc/tenancy');
@@ -14,18 +20,13 @@ export function getTenantId(): string | null {
     return null;
   }
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { TenancyContext } = require('@nestarc/tenancy');
-    return new TenancyContext().getTenantId();
-  } catch (error) {
-    console.warn(
-      '[@nestarc/audit-log] @nestarc/tenancy is installed but getTenantId() failed. ' +
-        'Audit log will be written without tenant_id.',
-      error instanceof Error ? error.message : error,
-    );
-    return null;
-  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { TenancyContext } = require('@nestarc/tenancy');
+  return new TenancyContext().getTenantId();
+}
+
+export function getTenantId(): string | null {
+  return resolveTenantId();
 }
 
 /** @internal Reset cached probe for testing */

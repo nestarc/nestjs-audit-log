@@ -1,5 +1,8 @@
 import { AuditContext } from '../src/services/audit-context';
-import { createAuditExtension } from '../src/prisma/audit-extension';
+import {
+  createAuditExtension,
+  _resetNestedWriteWarnings,
+} from '../src/prisma/audit-extension';
 
 /**
  * Mock @prisma/client — capture the factory passed to Prisma.defineExtension
@@ -59,6 +62,108 @@ describe('createAuditExtension — query handlers', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    _resetNestedWriteWarnings();
+  });
+
+  describe('factory configuration', () => {
+    it('warns and audits all models when no tracking lists are configured', async () => {
+      const logger = {
+        warn: jest.fn(),
+        error: jest.fn(),
+      };
+      const { handlers, mockClient } = getHandlers({ logger });
+      const created = { id: 'p1', title: 'Post' };
+      const mockQuery = jest.fn().mockResolvedValue(created);
+      mockClient.post.findFirst.mockResolvedValue(created);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'Post',
+            args: { data: { title: 'Post' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('auditing ALL models'),
+      );
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses the provided prismaModule namespace to define the extension', () => {
+      const defineExtension = jest.fn((factory: any) => factory);
+
+      createAuditExtension({
+        trackedModels: ['User'],
+        prismaModule: {
+          Prisma: {
+            defineExtension,
+          },
+        },
+      });
+
+      expect(defineExtension).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws a helpful error when prismaModule is missing defineExtension', () => {
+      expect(() =>
+        createAuditExtension({
+          trackedModels: ['User'],
+          prismaModule: {
+            Prisma: {} as any,
+          },
+        }),
+      ).toThrow('prismaModule.Prisma.defineExtension is not a function');
+    });
+
+    it('throws a helpful error for invalid tableName', () => {
+      expect(() =>
+        createAuditExtension({
+          trackedModels: ['User'],
+          tableName: 'audit-logs',
+        }),
+      ).toThrow('Invalid audit tableName');
+    });
+
+    it('uses the configured tableName for automatic audit inserts', async () => {
+      let localFactory: (client: any) => any = () => undefined;
+      const raw = jest.fn((value: string) => ({ raw: value }));
+      const defineExtension = jest.fn((factory: any) => {
+        localFactory = factory;
+        return factory;
+      });
+      createAuditExtension({
+        trackedModels: ['User'],
+        tableName: 'audit.audit_logs',
+        prismaModule: {
+          Prisma: {
+            defineExtension,
+            raw,
+          },
+        },
+      });
+      const mockClient = buildMockClient();
+      localFactory(mockClient);
+      const handlers = mockClient.$extends.mock.calls[0][0].query.$allModels;
+      const created = { id: 'u1', name: 'Alice' };
+      mockClient.user.findFirst.mockResolvedValue(created);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: jest.fn().mockResolvedValue(created),
+          }),
+      );
+
+      expect(raw).toHaveBeenCalledWith('audit.audit_logs');
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[0]).toEqual({ raw: 'audit.audit_logs' });
+    });
   });
 
   // ─── shouldSkip ──────────────────────────────────────────────
@@ -104,6 +209,152 @@ describe('createAuditExtension — query handlers', () => {
     });
   });
 
+  describe('nested write boundary warnings', () => {
+    it('warns once per model and relation when a tracked mutation contains a nested write', async () => {
+      const logger = {
+        warn: jest.fn(),
+        error: jest.fn(),
+      };
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        logger,
+      });
+      const mockQuery = jest.fn().mockResolvedValue({ id: 'u1', name: 'Alice' });
+      mockClient.user.findFirst.mockResolvedValue({ id: 'u1', name: 'Alice' });
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice', posts: { create: { title: 'One' } } } },
+            query: mockQuery,
+          }),
+      );
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { posts: { create: { title: 'Two' } } } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('nested write on User.posts is not audited'),
+      );
+    });
+
+    it('does not warn for connect-only relation changes', async () => {
+      const logger = {
+        warn: jest.fn(),
+        error: jest.fn(),
+      };
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        logger,
+      });
+      mockClient.user.findFirst.mockResolvedValue({ id: 'u1', name: 'Alice' });
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.update({
+            model: 'User',
+            args: {
+              where: { id: 'u1' },
+              data: { posts: { connect: { id: 'p1' } } },
+            },
+            query: jest.fn().mockResolvedValue({ id: 'u1', name: 'Alice' }),
+          }),
+      );
+
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('nested write on User.posts'),
+      );
+    });
+  });
+
+  describe('tenant isolation', () => {
+    it('skips automatic audit insert when tenantRequired is true and tenant is unavailable', async () => {
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        tenantRequired: true,
+        tenantResolver: () => null,
+        onAuditError,
+      });
+      const created = { id: 'u1', name: 'Alice' };
+      const mockQuery = jest.fn().mockResolvedValue(created);
+      mockClient.user.findFirst.mockResolvedValue(created);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(result).toEqual(created);
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+      expect(onAuditError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('tenant context required'),
+        }),
+        expect.objectContaining({
+          phase: 'tenant-resolution',
+          model: 'User',
+          operation: 'create',
+          action: 'User.created',
+          targetId: 'u1',
+          tenantId: null,
+        }),
+      );
+    });
+
+    it('reports resolver errors once and records a NULL tenant when tenantRequired is false', async () => {
+      const resolverError = new Error('resolver failed');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        tenantResolver: () => {
+          throw resolverError;
+        },
+        onAuditError,
+      });
+      const created = { id: 'u1', name: 'Alice' };
+      const mockQuery = jest.fn().mockResolvedValue(created);
+      mockClient.user.findFirst.mockResolvedValue(created);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(onAuditError).toHaveBeenCalledTimes(1);
+      expect(onAuditError).toHaveBeenCalledWith(
+        resolverError,
+        expect.objectContaining({
+          phase: 'tenant-resolution',
+          model: 'User',
+          operation: 'create',
+        }),
+      );
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[0]).toBeNull();
+    });
+  });
+
   // ─── create ──────────────────────────────────────────────────
 
   describe('create()', () => {
@@ -141,6 +392,32 @@ describe('createAuditExtension — query handlers', () => {
       expect(rawCall).toBeDefined();
     });
 
+    it('redacts model-specific sensitive fields in create changes', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        sensitiveFields: ['password'],
+        sensitiveFieldsByModel: { User: ['ssn'] },
+      });
+      const created = {
+        id: 'u1',
+        name: 'Alice',
+        password: 'secret123',
+        ssn: '123-45-6789',
+      };
+      const mockQuery = jest.fn().mockResolvedValue(created);
+      mockClient.user.findFirst.mockResolvedValue(created);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () => handlers.create({ model: 'User', args: { data: created }, query: mockQuery }),
+      );
+
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      const changes = JSON.parse(values[8]);
+      expect(changes.password.after).toBe('[REDACTED]');
+      expect(changes.ssn.after).toBe('[REDACTED]');
+    });
+
     it('handles create when findFirst returns null (no canonical)', async () => {
       const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
       const created = { id: 'u1', name: 'Alice' };
@@ -156,6 +433,44 @@ describe('createAuditExtension — query handlers', () => {
       expect(mockClient.$executeRaw).toHaveBeenCalled();
     });
 
+    it('records create using result fallback when post-read fails', async () => {
+      const postReadError = new Error('canonical fetch failed');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      const created = { id: 'u1', name: 'Alice' };
+      const mockQuery = jest.fn().mockResolvedValue(created);
+      mockClient.user.findFirst.mockRejectedValueOnce(postReadError);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(onAuditError).toHaveBeenCalledWith(
+        postReadError,
+        expect.objectContaining({
+          phase: 'post-read',
+          model: 'User',
+          operation: 'create',
+        }),
+      );
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(values[8])).toEqual({
+        id: { after: 'u1' },
+        name: { after: 'Alice' },
+      });
+      expect(JSON.parse(values[9])).toEqual({ postReadFailed: true });
+    });
+
     it('handles create when result has no PK value', async () => {
       const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
       const created = { name: 'Alice' }; // no id field
@@ -167,6 +482,114 @@ describe('createAuditExtension — query handlers', () => {
       );
 
       expect(result).toEqual(created);
+    });
+
+    it('injects a selected primary key for auditing and strips it from create result', async () => {
+      const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
+      const created = { id: 'u1', name: 'Alice' };
+      const returned = { ...created };
+      const args = { data: { name: 'Alice' }, select: { name: true } };
+      const mockQuery = jest.fn().mockResolvedValue(returned);
+      mockClient.user.findFirst.mockResolvedValue(created);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () => handlers.create({ model: 'User', args, query: mockQuery }),
+      );
+
+      expect(mockQuery).toHaveBeenCalledWith({
+        data: { name: 'Alice' },
+        select: { name: true, id: true },
+      });
+      expect(result).toEqual({ name: 'Alice' });
+      expect(mockClient.user.findFirst).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+      });
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[6]).toBe('u1');
+    });
+
+    it('un-omits a primary key for auditing and strips it from create result', async () => {
+      const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
+      const created = { id: 'u1', name: 'Alice' };
+      const returned = { ...created };
+      const args = { data: { name: 'Alice' }, omit: { id: true } };
+      const mockQuery = jest.fn().mockResolvedValue(returned);
+      mockClient.user.findFirst.mockResolvedValue(created);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () => handlers.create({ model: 'User', args, query: mockQuery }),
+      );
+
+      expect(mockQuery).toHaveBeenCalledWith({
+        data: { name: 'Alice' },
+        omit: { id: false },
+      });
+      expect(result).toEqual({ name: 'Alice' });
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[6]).toBe('u1');
+    });
+
+    it('records a failure audit entry when create throws and logFailures is true', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        logFailures: true,
+      });
+      const businessError: any = new Error('unique violation');
+      businessError.code = 'P2002';
+      const mockQuery = jest.fn().mockRejectedValue(businessError);
+
+      await expect(
+        AuditContext.run(
+          { actor: defaultActor, noAudit: false },
+          () =>
+            handlers.create({
+              model: 'User',
+              args: { data: { id: 'u1', name: 'Alice' } },
+              query: mockQuery,
+            }),
+        ),
+      ).rejects.toBe(businessError);
+
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[4]).toBe('User.created');
+      expect(values[6]).toBe('u1');
+      expect(JSON.parse(values[8])).toEqual({});
+      expect(JSON.parse(values[9])).toEqual({
+        operation: 'create',
+        error: {
+          name: 'Error',
+          code: 'P2002',
+          message: 'unique violation',
+        },
+      });
+      expect(values[10]).toBe('failure');
+    });
+
+    it('does not record a failure audit entry for Prisma validation errors', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        logFailures: true,
+      });
+      const businessError: any = new Error('invalid query');
+      businessError.name = 'PrismaClientValidationError';
+      const mockQuery = jest.fn().mockRejectedValue(businessError);
+
+      await expect(
+        AuditContext.run(
+          { actor: defaultActor, noAudit: false },
+          () =>
+            handlers.create({
+              model: 'User',
+              args: { data: { name: 'Alice' } },
+              query: mockQuery,
+            }),
+        ),
+      ).rejects.toBe(businessError);
+
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
     });
   });
 
@@ -195,6 +618,83 @@ describe('createAuditExtension — query handlers', () => {
       expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
     });
 
+    it('continues the update when pre-read fails and records a degraded audit entry', async () => {
+      const preReadError = new Error('pre-read unavailable');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      mockClient.user.findFirst.mockRejectedValueOnce(preReadError);
+      const after = { id: 'u1', name: 'Alice' };
+      const mockQuery = jest.fn().mockResolvedValue(after);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.update({
+            model: 'User',
+            args: { where: { id: 'u1' }, data: { name: 'Alice' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(result).toEqual(after);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(onAuditError).toHaveBeenCalledWith(
+        preReadError,
+        expect.objectContaining({
+          phase: 'pre-read',
+          model: 'User',
+          operation: 'update',
+        }),
+      );
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(values[8])).toEqual({});
+      expect(JSON.parse(values[9])).toEqual({ preReadFailed: true });
+    });
+
+    it('records update using result fallback when post-read fails', async () => {
+      const postReadError = new Error('canonical fetch failed');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      const before = { id: 'u1', name: 'Old' };
+      const after = { id: 'u1', name: 'New' };
+      mockClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockRejectedValueOnce(postReadError);
+      const mockQuery = jest.fn().mockResolvedValue(after);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.update({
+            model: 'User',
+            args: { where: { id: 'u1' }, data: { name: 'New' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(onAuditError).toHaveBeenCalledWith(
+        postReadError,
+        expect.objectContaining({
+          phase: 'post-read',
+          model: 'User',
+          operation: 'update',
+        }),
+      );
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(values[8])).toEqual({
+        name: { before: 'Old', after: 'New' },
+      });
+      expect(JSON.parse(values[9])).toEqual({ postReadFailed: true });
+    });
+
     it('handles update when before record is not found', async () => {
       const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
       mockClient.user.findFirst.mockResolvedValue(null); // no before
@@ -212,6 +712,155 @@ describe('createAuditExtension — query handlers', () => {
 
       expect(result).toEqual(after);
       expect(mockClient.$executeRaw).toHaveBeenCalled();
+    });
+
+    it('injects a selected primary key for auditing and strips it from update result', async () => {
+      const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
+      const before = { id: 'u1', name: 'Old' };
+      const after = { id: 'u1', name: 'New' };
+      const returned = { ...after };
+      const args = {
+        where: { id: 'u1' },
+        data: { name: 'New' },
+        select: { name: true },
+      };
+      mockClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(after);
+      const mockQuery = jest.fn().mockResolvedValue(returned);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () => handlers.update({ model: 'User', args, query: mockQuery }),
+      );
+
+      expect(mockQuery).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { name: 'New' },
+        select: { name: true, id: true },
+      });
+      expect(result).toEqual({ name: 'New' });
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[6]).toBe('u1');
+    });
+
+    it('records a failure audit entry with pre-read target id when update throws', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        logFailures: true,
+      });
+      const before = { id: 'u1', name: 'Old' };
+      mockClient.user.findFirst.mockResolvedValueOnce(before);
+      const businessError: any = new Error('foreign key violation');
+      businessError.code = 'P2003';
+      const mockQuery = jest.fn().mockRejectedValue(businessError);
+
+      await expect(
+        AuditContext.run(
+          { actor: defaultActor, noAudit: false },
+          () =>
+            handlers.update({
+              model: 'User',
+              args: { where: { id: 'u1' }, data: { name: 'New' } },
+              query: mockQuery,
+            }),
+        ),
+      ).rejects.toBe(businessError);
+
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[4]).toBe('User.updated');
+      expect(values[6]).toBe('u1');
+      expect(JSON.parse(values[8])).toEqual({});
+      expect(JSON.parse(values[9])).toEqual({
+        operation: 'update',
+        error: {
+          name: 'Error',
+          code: 'P2003',
+          message: 'foreign key violation',
+        },
+      });
+      expect(values[10]).toBe('failure');
+    });
+
+    it('does not record a failure audit entry for P2025', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        logFailures: true,
+      });
+      mockClient.user.findFirst.mockResolvedValueOnce(null);
+      const businessError: any = new Error('Record not found');
+      businessError.code = 'P2025';
+      const mockQuery = jest.fn().mockRejectedValue(businessError);
+
+      await expect(
+        AuditContext.run(
+          { actor: defaultActor, noAudit: false },
+          () =>
+            handlers.update({
+              model: 'User',
+              args: { where: { id: 'u1' }, data: { name: 'New' } },
+              query: mockQuery,
+            }),
+        ),
+      ).rejects.toBe(businessError);
+
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('suppresses updatedAt-only update entries when ignoreTimestampOnlyUpdates is true', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        ignoreTimestampOnlyUpdates: true,
+      });
+      const before = { id: 'u1', name: 'Alice', updatedAt: new Date('2026-01-01') };
+      const after = { id: 'u1', name: 'Alice', updatedAt: new Date('2026-01-02') };
+      mockClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(after);
+      const mockQuery = jest.fn().mockResolvedValue(after);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.update({
+            model: 'User',
+            args: { where: { id: 'u1' }, data: { updatedAt: after.updatedAt } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(result).toEqual(after);
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('removes updatedAt from non-empty update diffs when ignoreTimestampOnlyUpdates is true', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        ignoreTimestampOnlyUpdates: true,
+      });
+      const before = { id: 'u1', name: 'Old', updatedAt: new Date('2026-01-01') };
+      const after = { id: 'u1', name: 'New', updatedAt: new Date('2026-01-02') };
+      mockClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(after);
+      const mockQuery = jest.fn().mockResolvedValue(after);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.update({
+            model: 'User',
+            args: { where: { id: 'u1' }, data: { name: 'New' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(values[8])).toEqual({
+        name: { before: 'Old', after: 'New' },
+      });
     });
   });
 
@@ -252,6 +901,41 @@ describe('createAuditExtension — query handlers', () => {
       );
 
       expect(mockClient.$executeRaw).toHaveBeenCalled();
+    });
+
+    it('continues delete when pre-read fails and uses the result primary key', async () => {
+      const preReadError = new Error('pre-read unavailable');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      mockClient.user.findFirst.mockRejectedValueOnce(preReadError);
+      const mockQuery = jest.fn().mockResolvedValue({ id: 'u1', name: 'Alice' });
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.delete({
+            model: 'User',
+            args: { where: { id: 'u1' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(onAuditError).toHaveBeenCalledWith(
+        preReadError,
+        expect.objectContaining({
+          phase: 'pre-read',
+          model: 'User',
+          operation: 'delete',
+        }),
+      );
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[6]).toBe('u1');
+      expect(JSON.parse(values[8])).toEqual({});
+      expect(JSON.parse(values[9])).toEqual({ preReadFailed: true });
     });
   });
 
@@ -304,6 +988,154 @@ describe('createAuditExtension — query handlers', () => {
       );
 
       expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('records an upserted snapshot when upsert pre-read fails', async () => {
+      const preReadError = new Error('pre-read unavailable');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      mockClient.user.findFirst
+        .mockRejectedValueOnce(preReadError)
+        .mockResolvedValueOnce({ id: 'u1', name: 'Alice' });
+      const mockQuery = jest.fn().mockResolvedValue({ id: 'u1', name: 'Alice' });
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.upsert({
+            model: 'User',
+            args: {
+              where: { id: 'u1' },
+              create: { name: 'Alice' },
+              update: { name: 'Alice Updated' },
+            },
+            query: mockQuery,
+          }),
+      );
+
+      expect(onAuditError).toHaveBeenCalledWith(
+        preReadError,
+        expect.objectContaining({
+          phase: 'pre-read',
+          model: 'User',
+          operation: 'upsert',
+        }),
+      );
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[4]).toBe('User.upserted');
+      expect(JSON.parse(values[8])).toEqual({
+        id: { after: 'u1' },
+        name: { after: 'Alice' },
+      });
+      expect(JSON.parse(values[9])).toEqual({ preReadFailed: true });
+    });
+
+    it('records upsert using result fallback when post-read fails', async () => {
+      const postReadError = new Error('canonical fetch failed');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      const before = { id: 'u1', name: 'Old' };
+      const after = { id: 'u1', name: 'New' };
+      mockClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockRejectedValueOnce(postReadError);
+      const mockQuery = jest.fn().mockResolvedValue(after);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.upsert({
+            model: 'User',
+            args: {
+              where: { id: 'u1' },
+              create: { name: 'New' },
+              update: { name: 'New' },
+            },
+            query: mockQuery,
+          }),
+      );
+
+      expect(onAuditError).toHaveBeenCalledWith(
+        postReadError,
+        expect.objectContaining({
+          phase: 'post-read',
+          model: 'User',
+          operation: 'upsert',
+        }),
+      );
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(values[8])).toEqual({
+        name: { before: 'Old', after: 'New' },
+      });
+      expect(JSON.parse(values[9])).toEqual({ postReadFailed: true });
+    });
+
+    it('injects a selected primary key for auditing and strips it from upsert result', async () => {
+      const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
+      const before = { id: 'u1', name: 'Old' };
+      const after = { id: 'u1', name: 'New' };
+      const returned = { ...after };
+      const args = {
+        where: { id: 'u1' },
+        create: { name: 'New' },
+        update: { name: 'New' },
+        select: { name: true },
+      };
+      mockClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(after);
+      const mockQuery = jest.fn().mockResolvedValue(returned);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () => handlers.upsert({ model: 'User', args, query: mockQuery }),
+      );
+
+      expect(mockQuery).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        create: { name: 'New' },
+        update: { name: 'New' },
+        select: { name: true, id: true },
+      });
+      expect(result).toEqual({ name: 'New' });
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[6]).toBe('u1');
+    });
+
+    it('suppresses updatedAt-only upsert update entries when ignoreTimestampOnlyUpdates is true', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        ignoreTimestampOnlyUpdates: true,
+      });
+      const before = { id: 'u1', name: 'Alice', updatedAt: new Date('2026-01-01') };
+      const after = { id: 'u1', name: 'Alice', updatedAt: new Date('2026-01-02') };
+      mockClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(after);
+      const mockQuery = jest.fn().mockResolvedValue(after);
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.upsert({
+            model: 'User',
+            args: {
+              where: { id: 'u1' },
+              create: { name: 'Alice' },
+              update: { updatedAt: after.updatedAt },
+            },
+            query: mockQuery,
+          }),
+      );
+
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
     });
   });
 
@@ -388,11 +1220,170 @@ describe('createAuditExtension — query handlers', () => {
 
       expect(mockClient.$executeRaw).not.toHaveBeenCalled();
     });
+
+    it('records one deletedMany fallback entry when pre-read fails', async () => {
+      const preReadError = new Error('pre-read unavailable');
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      mockClient.user.findMany.mockRejectedValueOnce(preReadError);
+      const mockQuery = jest.fn().mockResolvedValue({ count: 2 });
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.deleteMany({
+            model: 'User',
+            args: { where: { name: { contains: 'test' } } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(onAuditError).toHaveBeenCalledWith(
+        preReadError,
+        expect.objectContaining({
+          phase: 'pre-read',
+          model: 'User',
+          operation: 'deleteMany',
+        }),
+      );
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[4]).toBe('User.deletedMany');
+      expect(JSON.parse(values[8])).toEqual({});
+      expect(JSON.parse(values[9])).toEqual({
+        count: 2,
+        preReadFailed: true,
+      });
+    });
+
+    it('continues auditing remaining deleteMany records when one record fails during assembly', async () => {
+      const contextError = new Error('bad getter');
+      const badRecord: Record<string, unknown> = { id: 'bad' };
+      Object.defineProperty(badRecord, 'name', {
+        enumerable: true,
+        get() {
+          throw contextError;
+        },
+      });
+      const onAuditError = jest.fn();
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+      });
+      mockClient.user.findMany.mockResolvedValue([
+        { id: 'u1', name: 'One' },
+        badRecord,
+        { id: 'u3', name: 'Three' },
+      ]);
+      const mockQuery = jest.fn().mockResolvedValue({ count: 3 });
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.deleteMany({
+            model: 'User',
+            args: { where: { name: { contains: 'test' } } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(onAuditError).toHaveBeenCalledWith(
+        contextError,
+        expect.objectContaining({
+          phase: 'context',
+          model: 'User',
+          operation: 'deleteMany',
+        }),
+      );
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(2);
+      const targetIds = mockClient.$executeRaw.mock.calls.map(
+        (call) => call.slice(1)[6],
+      );
+      expect(targetIds).toEqual(['u1', 'u3']);
+    });
   });
 
   // ─── tryAuditLog error handling ──────────────────────────────
 
   describe('error handling (tryAuditLog)', () => {
+    it('reports insert failures through onAuditError without logger.warn', async () => {
+      const insertError = new Error('DB connection lost');
+      const onAuditError = jest.fn();
+      const logger = {
+        warn: jest.fn(),
+        error: jest.fn(),
+      };
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError,
+        logger,
+      });
+      const created = { id: 'u1', name: 'Alice' };
+      const mockQuery = jest.fn().mockResolvedValue(created);
+      mockClient.user.findFirst.mockResolvedValue(created);
+      mockClient.$executeRaw.mockRejectedValue(insertError);
+
+      const result = await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(result).toEqual(created);
+      expect(onAuditError).toHaveBeenCalledWith(
+        insertError,
+        expect.objectContaining({
+          phase: 'insert',
+          model: 'User',
+          operation: 'create',
+          action: 'User.created',
+          targetId: 'u1',
+          tenantId: null,
+        }),
+      );
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('logs an error when onAuditError throws', async () => {
+      const logger = {
+        warn: jest.fn(),
+        error: jest.fn(),
+      };
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        onAuditError: () => {
+          throw new Error('observer failed');
+        },
+        logger,
+      });
+      const created = { id: 'u1', name: 'Alice' };
+      const mockQuery = jest.fn().mockResolvedValue(created);
+      mockClient.user.findFirst.mockResolvedValue(created);
+      mockClient.$executeRaw.mockRejectedValue(new Error('DB connection lost'));
+
+      await AuditContext.run(
+        { actor: defaultActor, noAudit: false },
+        () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: mockQuery,
+          }),
+      );
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('onAuditError callback threw'),
+      );
+    });
+
     it('warns but does not throw when audit insert fails', async () => {
       const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
       const created = { id: 'u1', name: 'Alice' };
@@ -409,13 +1400,12 @@ describe('createAuditExtension — query handlers', () => {
 
       expect(result).toEqual(created);
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('audit insert failed'),
-        expect.any(String),
+        expect.stringContaining('audit insert failed for User.create'),
       );
       warnSpy.mockRestore();
     });
 
-    it('warns when post-query audit tracking throws', async () => {
+    it('warns with post-read phase when canonical tracking read throws', async () => {
       const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
       const before = { id: 'u1', name: 'Old' };
       const mockQuery = jest.fn().mockResolvedValue({ id: 'u1', name: 'New' });
@@ -437,8 +1427,7 @@ describe('createAuditExtension — query handlers', () => {
       // Original operation should still succeed
       expect(result).toEqual({ id: 'u1', name: 'New' });
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('audit tracking failed'),
-        expect.any(String),
+        expect.stringContaining('audit post-read failed for User.update'),
       );
       warnSpy.mockRestore();
     });

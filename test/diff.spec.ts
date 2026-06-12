@@ -4,6 +4,8 @@ import {
   computeDeleteChanges,
   shouldTrackModel,
   isDeepEqual,
+  getSensitiveFieldsFor,
+  redactObject,
 } from '../src/prisma/diff';
 
 describe('shouldTrackModel', () => {
@@ -27,12 +29,20 @@ describe('shouldTrackModel', () => {
     expect(shouldTrackModel('User', ['User'], ['User'])).toBe(true);
   });
 
-  it('returns false when neither list is provided', () => {
-    expect(shouldTrackModel('User')).toBe(false);
+  it('returns true when neither list is provided', () => {
+    expect(shouldTrackModel('User')).toBe(true);
+  });
+
+  it('returns true when ignoredModels is an empty array', () => {
+    expect(shouldTrackModel('User', undefined, [])).toBe(true);
   });
 
   it('returns false when trackedModels is empty array', () => {
     expect(shouldTrackModel('User', [])).toBe(false);
+  });
+
+  it('empty trackedModels takes precedence over ignoredModels', () => {
+    expect(shouldTrackModel('User', [], ['Session'])).toBe(false);
   });
 });
 
@@ -170,6 +180,30 @@ describe('computeUpdateChanges', () => {
       field: { before: null, after: undefined },
     });
   });
+
+  it('omits ignored fields from update changes', () => {
+    const result = computeUpdateChanges(
+      { name: 'Alice', updatedAt: new Date('2026-01-01') },
+      { name: 'Alice B', updatedAt: new Date('2026-01-02') },
+      [],
+      ['updatedAt'],
+    );
+
+    expect(result).toEqual({
+      name: { before: 'Alice', after: 'Alice B' },
+    });
+  });
+
+  it('returns an empty diff when only ignored fields changed', () => {
+    const result = computeUpdateChanges(
+      { updatedAt: new Date('2026-01-01') },
+      { updatedAt: new Date('2026-01-02') },
+      [],
+      ['updatedAt'],
+    );
+
+    expect(result).toEqual({});
+  });
 });
 
 describe('computeDeleteChanges', () => {
@@ -193,5 +227,45 @@ describe('computeDeleteChanges', () => {
       name: { before: 'Alice' },
       password: { before: '[REDACTED]' },
     });
+  });
+});
+
+describe('getSensitiveFieldsFor', () => {
+  it('merges global and model-specific sensitive fields', () => {
+    expect(
+      getSensitiveFieldsFor('User', {
+        sensitiveFields: ['password'],
+        sensitiveFieldsByModel: { User: ['ssn'] },
+      }),
+    ).toEqual(['password', 'ssn']);
+  });
+
+  it('uses global sensitive fields when model is missing', () => {
+    expect(
+      getSensitiveFieldsFor('Post', {
+        sensitiveFields: ['password'],
+        sensitiveFieldsByModel: { User: ['ssn'] },
+      }),
+    ).toEqual(['password']);
+  });
+});
+
+describe('redactObject', () => {
+  it('returns a redacted shallow copy without mutating the input', () => {
+    const input = {
+      email: 'alice@test.com',
+      nested: { email: 'nested@test.com' },
+      token: null,
+    };
+
+    const result = redactObject(input, ['email', 'token']);
+
+    expect(result).toEqual({
+      email: '[REDACTED]',
+      nested: { email: 'nested@test.com' },
+      token: '[REDACTED]',
+    });
+    expect(input.email).toBe('alice@test.com');
+    expect(input.token).toBeNull();
   });
 });

@@ -5,6 +5,34 @@ export interface FieldChange {
 
 export type Changes = Record<string, FieldChange>;
 
+export function getSensitiveFieldsFor(
+  model: string | null,
+  options: {
+    sensitiveFields?: string[];
+    sensitiveFieldsByModel?: Record<string, string[]>;
+  },
+): string[] {
+  return Array.from(
+    new Set([
+      ...(options.sensitiveFields ?? []),
+      ...(model ? options.sensitiveFieldsByModel?.[model] ?? [] : []),
+    ]),
+  );
+}
+
+export function redactObject(
+  obj: Record<string, unknown>,
+  fields: string[],
+): Record<string, unknown> {
+  const redacted = { ...obj };
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(redacted, field)) {
+      redacted[field] = '[REDACTED]';
+    }
+  }
+  return redacted;
+}
+
 function stableStringify(value: unknown): string {
   if (value === null || value === undefined) return String(value);
   if (typeof value !== 'object') return JSON.stringify(value);
@@ -38,13 +66,13 @@ export function shouldTrackModel(
   trackedModels?: string[],
   ignoredModels?: string[],
 ): boolean {
-  if (trackedModels && trackedModels.length > 0) {
+  if (trackedModels !== undefined) {
     return trackedModels.includes(model);
   }
   if (ignoredModels && ignoredModels.length > 0) {
     return !ignoredModels.includes(model);
   }
-  return false;
+  return true;
 }
 
 export function computeCreateChanges(
@@ -64,9 +92,13 @@ export function computeUpdateChanges(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
   sensitiveFields: string[],
+  ignoreFields: readonly string[] = [],
 ): Changes {
   const changes: Changes = {};
   for (const [key, value] of Object.entries(after)) {
+    if (ignoreFields.includes(key)) {
+      continue;
+    }
     if (!isDeepEqual(before[key], value)) {
       changes[key] = {
         before: sensitiveFields.includes(key) ? '[REDACTED]' : before[key],
