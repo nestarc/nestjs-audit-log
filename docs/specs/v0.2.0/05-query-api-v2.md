@@ -65,6 +65,12 @@ Roadmap items: #7 (연계: #4의 `query()` 테넌트 플래그 — spec 03과 �
   `includeTotal?: boolean`은 하위 호환을 위해 기본 true(문서는 피드 용도에
   false 권장). 신규 필터 `actorType`/`source`/`result`. `getById(id)`.
   `*` 변환 전 리터럴 `%`/`_` 이스케이프.
+- **prismaModule (spec 02 B46)**: 본 스펙이 재작성하는 `query()`/`getById()`의 SQL
+  조립이 사용하는 Prisma 네임스페이스(`sql`/`raw`/`join`/`empty`)는 정적
+  `import { Prisma } from '@prisma/client'`(`src/services/audit.service.ts:2` —
+  제거됨)가 아니라, `AuditService` 생성자가 spec 02 §8의
+  `resolvePrismaNamespace({ prismaModule: options.prismaModule })`로 1회 해소·보관한
+  네임스페이스다. 본 스펙의 코드 예시는 가독성을 위해 `Prisma.sql` 표기를 유지한다.
 
 ## Public API Changes
 
@@ -357,7 +363,12 @@ export function escapeLikePattern(value: string): string;
 
 - **B30.** `limit`은 양의 정수여야 한다(`Number.isInteger(limit) && limit >= 1`).
   위반 시 SQL 실행 전 throw (E5). 기본 50 유지. 상한 캡은 0.2.0에서 도입하지
-  않는다(Out of Scope).
+  않는다(Out of Scope). 주의 — `limit: 0`은 0.1.0에서 throw가 아니었다: 현행 코드
+  (`src/services/audit.service.ts:95`의 `options.limit ?? 50`)는 `LIMIT 0`을 실행해
+  `{ entries: [], total }`을 반환했다. 음수/소수 limit과 음수 offset은 0.1.0에서도
+  PostgreSQL 에러였으므로, **`limit: 0` throw가 본 스펙의 유일한 런타임 동작 변경**
+  이다 — CHANGELOG Changed와 Breaking-change notes에 명시한다(fail-loud 의도적 채택;
+  빈 페이지가 필요하면 `includeTotal`만 쓰는 별도 호출이 올바른 표현).
 - **B31.** `offset`은 0 이상의 정수여야 한다. 위반 시 SQL 실행 전 throw (E5).
   기본 0 유지.
 - **B32.** `hasMore`와 `nextCursor`는 모든 `query()` 결과에 항상 존재한다
@@ -483,14 +494,16 @@ query 단계가 없음) 읽기 경로에서는 **사용하지 않는다**. 삼�
 | U10. cursor + from/to/actorId/actorType/source/result 조합 시 모든 조건 AND 결합 | B10 |
 | U11. `includeTotal: false` → `$queryRaw` 1회만 호출, `'total' in result === false` | B13 |
 | U12. `includeTotal` 미지정 → COUNT 실행, total number; COUNT WHERE에 keyset 조건 부재 | B12 |
-| U13. actorType/source/result 각각 단독 지정 시 대응 SQL 조건 생성, 미지정 시 부재 | B14-B16 |
+| U13. actorType/source/result 각각 단독 지정 시 대응 SQL 조건 생성, 미지정 시 부재; `actorType: ''`(빈 문자열) → `actor_type` 조건 미생성 (truthiness 의미론 고정) | B14-B17 |
 | U14. B20 표의 6개 입력 각각에 대해 정확한 LIKE 패턴/정확 일치 분기 검증 (`ESCAPE '\'` 포함) | B18-B20 |
 | U15. `escapeLikePattern` 단독: `\` → `\\` 선행 순서 (입력 `\%` → `\\\%`) | B19 |
 | U16. getById: UUID 검증 실패 → null, SQL 미실행; 유효 UUID → `WHERE id = ?` + LIMIT 1 | B22, B23, E6 |
 | U17. getById 테넌트 매트릭스 5행 각각 (allTenants / tenantId / ambient / required+없음 throw / 미required+없음 무스코프) | B24, E4 |
+| U17b. getById + throw하는 tenantResolver: `tenantRequired: true` → 원본 예외를 cause로 throw; false → 무스코프 조회 + spec 03 B20과 공유하는 인스턴스당 1회 경고 (spec 03 B19의 getById 대응) | B24, spec 03 B19/B20 |
 | U18. `tenantId` + `allTenants` → E3 throw (query, getById 각각) | B25, E3 |
 | U19. query 테넌트 플래그: tenantId 우선, allTenants 시 조건 생략, required+부재 throw 메시지 | B27-B29, E4 |
-| U20. limit 0 / -1 / 1.5 / NaN → E5; offset -1 / 1.5 → E5 | B30, B31, E5 |
+| U20. limit 0 / -1 / 1.5 / NaN → E5; offset -1 / 1.5 → E5 (limit 0은 0.1.0의 빈 페이지 → throw 변경 — B30 주의 참조) | B30, B31, E5 |
+| U21. 1페이지(필터 없음)의 nextCursor로 2페이지를 `actorType` 필터와 함께 호출 → 커서 경계보다 오래된 행 중 새 필터 매칭 행만 반환 (필터 변경은 에러 아님) | B11 |
 
 ### E2E (실제 PostgreSQL — test/e2e)
 
@@ -526,6 +539,8 @@ query 단계가 없음) 읽기 경로에서는 **사용하지 않는다**. 삼�
 - AuditQueryResult.total is now optional at the type level (present unless
   `includeTotal: false`). Runtime behavior of existing calls is unchanged.
 - Passing both `cursor` and `offset` to query() throws.
+- query({ limit: 0 }) now throws `[@nestarc/audit-log] limit must be a positive
+  integer.` — previously it executed `LIMIT 0` and returned an empty page.
 ```
 
 ### README
@@ -545,11 +560,14 @@ query 단계가 없음) 읽기 경로에서는 **사용하지 않는다**. 삼�
 
 ### Breaking-change notes
 
-런타임 breaking 없음. 타입 수준 주의 2건을 CHANGELOG에 명시:
+런타임 동작 변경 1건 + 타입 수준 주의 2건을 CHANGELOG에 명시:
 
-1. `AuditQueryResult.total`이 `number` → `number | undefined` (strict TS에서
+1. **런타임**: `query({ limit: 0 })`이 throw한다 (B30 — 0.1.0은 `LIMIT 0`을 실행해
+   빈 페이지를 반환했다). 음수/소수 limit과 음수 offset은 0.1.0에서도 PostgreSQL
+   에러였으므로 영향 범위는 `limit: 0` 단 하나다.
+2. `AuditQueryResult.total`이 `number` → `number | undefined` (strict TS에서
    non-null 단언 또는 `includeTotal` 계약 확인 필요).
-2. `cursor` + `offset` 동시 전달이 throw — 기존에 불가능했던 조합이므로 실질
+3. `cursor` + `offset` 동시 전달이 throw — 기존에 불가능했던 조합이므로 실질
    영향 없음.
 
 ## Decisions

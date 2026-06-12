@@ -256,8 +256,9 @@ export interface AuditInsertParams {
 ```
 
 `null` 반환 = "감사 항목 생성 안 함"(테넌트 게이트로 스킵). 7개 핸들러는 `options`를
-전달하고 `operation`을 채우며, `tryAuditLog`(105-117행)는 `params === null`이면
-no-op이다. 내부 처리 순서(canonical — 스펙 02 §6, 스펙 04 §8과 동일한 순서 계약):
+전달하고 `operation`을 채우며, `params === null`이면 `tryAuditLog`를 호출하지 않고
+정상 진행한다(스펙 02 B-T1 접합점 — `tryAuditLog`의 params 타입은 스펙 02 §7대로
+`NonNullable`). 내부 처리 순서(canonical — 스펙 02 §6, 스펙 04 §8과 동일한 순서 계약):
 
 0. 컨텍스트 부재 1회 경고 (스펙 04 B14 — 테넌트 게이트 이전, 함수 진입부)
 1. 테넌트 해석 + `tenantRequired` 게이트 (스킵이면 즉시 `null` 반환 — 이후 단계 미실행)
@@ -357,8 +358,8 @@ export function redactObject(
 - B10. `onAuditError` 미제공 시 동일 정보를 `(options.logger ?? console).warn`으로 1회
   보고한다. 보고 경로(콜백/로거)는 어떤 경우에도 비즈니스 경로로 예외를 전파하지
   않는다 — 콜백 자체가 throw하면 `(options.logger ?? console).error`로 삼킨다.
-- B11. `tryAuditLog`는 `params === null`이면 INSERT와 추가 보고 없이 즉시 반환한다
-  (이중 보고 금지).
+- B11. 핸들러는 `buildAuditInsertParams`가 `null`을 반환하면 `tryAuditLog`를 호출하지
+  않는다 — INSERT도 추가 보고도 없다(이중 보고 금지, 스펙 02 B-T1과 동일 접합점).
 
 ### Manual path — `AuditService.log()`
 
@@ -366,11 +367,15 @@ export function redactObject(
   테넌트를 해석한다(모듈 옵션 복사본 사용 — 확장 옵션과 런타임 병합 없음).
 - B13. `tenantRequired: true` + 해석 결과 null → 기존과 동일하게 throw(fail-closed,
   `src/services/audit.service.ts:25-29` 유지). 메시지는 tenantResolver 안내를 포함하도록
-  갱신: `'tenant context required but not available. Provide tenantResolver or ensure
-  the ambient tenant context is set.'`. 자동 경로(스킵)와의 비대칭은 의도적이다 —
+  갱신(다른 모든 명세 메시지와 동일하게 `[@nestarc/audit-log] ` 접두사 유지 — 현행
+  `src/services/audit.service.ts:26-28`과 일관): `'[@nestarc/audit-log] tenant context
+  required but not available. Provide tenantResolver or ensure the ambient tenant
+  context is set.'`. 자동 경로(스킵)와의 비대칭은 의도적이다 —
   수동 호출자는 감사 기록 자체가 목적이므로 실패를 즉시 알아야 한다(문서화).
 - B14. `log()`에서 resolver가 throw하면: `tenantRequired: true` → 원본 예외를 cause로
-  감싼 Error를 throw; false → `(logger ?? console).warn` 후 tenant_id NULL로 기록.
+  감싼 Error를 throw(2-인자 `new Error(message, { cause })`는 스펙 02 Migration의
+  tsconfig `lib: ["ES2022"]` 상향에 의존 — 현행 `lib: ["ES2021"]`에서는 TS2554);
+  false → `(logger ?? console).warn` 후 tenant_id NULL로 기록.
 
 ### Query path — `AuditService.query()` 테넌트 시맨틱스
 
@@ -412,10 +417,12 @@ export function redactObject(
 - B22. 자동 경로의 changes diff(`computeCreateChanges`/`computeUpdateChanges`/
   `computeDeleteChanges`)는 핸들러의 `model` 기준 유효 리스트로 레다크션된다. 기존
   `'[REDACTED]'` 치환 방식(`src/prisma/diff.ts:57, 72-73, 87`) 유지.
-- B23. `AuditService.log()`는 `input.metadata`의 **최상위 키**를
+- B23. `AuditService.log()`는 `mergeContextMetadata(input.metadata)` **병합 결과**
+  (스펙 04 B12 — setMetadata/correlationId/reason 분 포함)의 **최상위 키**를
   `getSensitiveFieldsFor(input.targetType ?? null, this.options)` 결과와 정확일치
   비교하여 `'[REDACTED]'`로 치환한 뒤 직렬화한다(`src/services/audit.service.ts:30-32`
-  직전). `targetType`이 맵 키와 일치하지 않는 커스텀 문자열이면 전역 리스트만 적용.
+  직전; 순서는 자동 경로와 동일하게 병합 → 레다크션). `targetType`이 맵 키와
+  일치하지 않는 커스텀 문자열이면 전역 리스트만 적용.
 - B24. 자동 경로 metadata(현재는 `*Many`의 `{ count }`, 스펙 04 이후 컨텍스트 metadata
   포함)도 `buildAuditInsertParams` 내부에서 동일 유효 리스트로 레다크션된다(처리 순서는
   Public API Changes §5 — 병합 후 마지막 단계).
@@ -470,7 +477,7 @@ Q2/Q4의 동등 필터는 이 인덱스를 그대로 탄다. 본 스펙의 SQL �
 | buildAuditInsertParams: required 미설정 + null → NULL tenant 파라미터 반환 | B8 |
 | buildAuditInsertParams: resolver throw → onAuditError 1회(원본 에러), 이중 호출 없음 | B9 |
 | onAuditError 미제공 → logger.warn 폴백; 콜백 throw → logger.error로 삼킴 | B10 |
-| tryAuditLog(null) → $executeRaw 미호출 | B11 |
+| buildAuditInsertParams null 반환 시 핸들러가 tryAuditLog 미호출·$executeRaw 미호출 (스펙 02 T30과 동일 접합점) | B11 |
 | log(): module tenantResolver 사용 확인 | B12 |
 | log(): required+null → throw (메시지 검증) | B13 |
 | log(): resolver throw → required면 throw(cause), 아니면 warn+NULL | B14 |

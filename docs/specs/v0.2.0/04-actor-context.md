@@ -162,7 +162,10 @@ export interface AuditLogModuleOptions extends AuditSharedOptions {
 ```
 
 `tenantRequired`는 `AuditSharedOptions`로 이동하므로 인터페이스 본문에서 제거되지만
-타입 표면은 동일하다(소비자 코드 무영향).
+타입 표면은 동일하다(소비자 코드 무영향). (본 스펙 추가분만 표기 — 최종 모듈
+인터페이스에는 스펙 02의 `prismaModule`(B46 — `AuditService`의 Prisma 네임스페이스
+해소)과 스펙 03의 `sensitiveFields`/`sensitiveFieldsByModel`이 추가로
+합류한다. 스펙 02 §3의 최종 합류 목록과 일치.)
 
 ### 4. `AuditLogModule` — 옵션 주입 + 스코핑 + 와일드카드 현대화
 
@@ -321,6 +324,10 @@ if (store && reason !== undefined) {
     const metadataJson = merged ? JSON.stringify(merged) : null;
 ```
 
+병합 결과는 직렬화 전에 스펙 03 B23의 metadata 레다크션을 통과한다 — 순서는
+자동 경로와 동일하게 병합 → 레다크션이며, correlationId/reason/setMetadata 분도
+레다크션 대상에 포함된다.
+
 ### 10. 배럴 export 추가 (`src/index.ts`)
 
 ```typescript
@@ -366,7 +373,10 @@ export { AuditActorMiddleware } from './middleware/audit-actor.middleware';
 - B14. 컨텍스트 store가 없는 상태(`AuditContext.getStore() === undefined`)에서 추적
   대상 쓰기가 `buildAuditInsertParams`에 도달하면, **프로세스당 1회** 경고를
   `onAuditError(syntheticError, { phase: 'context', model, operation, action })`으로
-  보고한다 (`onAuditError` 미설정 시 `(logger ?? console).warn` 폴백). 두 번째 이후
+  보고한다 (`onAuditError` 미설정 시 `(logger ?? console).warn` 폴백). 합성 Error의
+  메시지는 다음 리터럴로 고정한다(U15/E3가 정확 문자열을 단언):
+  `'[@nestarc/audit-log] audited write executed without an audit context store — actorId will be null. Wrap background work in AuditContext.runAs(actor, fn). (warned once per process)'`.
+  두 번째 이후
   발생은 무경고. 감사 행 자체는 현행대로 `actorId: null / actorType: 'system'`으로
   기록된다 (기록 억제 없음). 내부 테스트 헬퍼 `_resetNoContextWarning()`을
   `src/utils/tenant.ts:32-34`의 `_resetTenancyProbe` 패턴으로 제공한다.
@@ -423,7 +433,7 @@ export { AuditActorMiddleware } from './middleware/audit-actor.middleware';
 |-----------|------|------|
 | `actorExtractor` throw/reject (B3) | 요청 진행, `actor: null`로 컨텍스트 생성 | `onAuditError(error, { phase: 'context' })` → 폴백 `(logger ?? console).error` |
 | `correlationIdGetter` throw | 요청 진행, correlationId 없이 컨텍스트 생성 | `onAuditError(error, { phase: 'context' })` → 폴백 `(logger ?? console).error` |
-| 컨텍스트 store 부재 + 추적 대상 쓰기 (B14) | 감사 행은 현행대로 기록, 프로세스당 1회만 보고 | `onAuditError(new Error('audited write executed without an audit context store...'), { phase: 'context', model, operation, action })` → 폴백 `(logger ?? console).warn` |
+| 컨텍스트 store 부재 + 추적 대상 쓰기 (B14) | 감사 행은 현행대로 기록, 프로세스당 1회만 보고 | `onAuditError(new Error('[@nestarc/audit-log] audited write executed without an audit context store — actorId will be null. Wrap background work in AuditContext.runAs(actor, fn). (warned once per process)'), { phase: 'context', model, operation, action })` → 폴백 `(logger ?? console).warn` (B14의 고정 리터럴) |
 | storeless `setMetadata` / `setReason` (B8) | 침묵 no-op (throw 없음, 문서화) | 없음 — B14 경고가 관측망 역할 |
 | 병합된 metadata의 JSON 직렬화 실패 | 02 신뢰성 스펙의 `tryAuditLog` catch에 포착 (`src/prisma/audit-extension.ts:105-117`), 비즈니스 결과는 정상 반환 | `phase: 'insert'` (02 스펙 소관) |
 | `excludeRoutes`에 잘못된 RouteInfo | Nest `consumer.exclude`가 기동 시 throw — 라이브러리는 검증/swallow하지 않음 | Nest 기동 오류 (fail-fast) |
@@ -451,7 +461,7 @@ export { AuditActorMiddleware } from './middleware/audit-actor.middleware';
 | U12 | setReason이 데코레이터 값을 덮어씀 | B15 |
 | U13 | mergeContextMetadata 우선순위 (input > reason > context), 빈 결과 → undefined | B11, B13 |
 | U14 | AuditService.log()에 correlationId/reason/setMetadata 병합 | B12 |
-| U15 | 컨텍스트 부재 1회 경고: 첫 쓰기만 보고, _resetNoContextWarning 후 재보고, 채널 선택(onAuditError vs logger.warn) | B14 |
+| U15 | 컨텍스트 부재 1회 경고: 첫 쓰기만 보고, _resetNoContextWarning 후 재보고, 채널 선택(onAuditError vs logger.warn), B14 고정 리터럴 정확 문자열 단언 | B14 |
 | U16 | forRoot({registerGlobalInterceptor:false}) — APP_INTERCEPTOR 부재 + AuditInterceptor 주입 가능; forRootAsync 동등 동작 | B5 |
 | U17 | resolveMiddlewareWildcard: 버전 mock별 반환값 (11→'{*splat}', 10→'*', 판별 실패→'*') | B6 |
 | U18 | 기존 AuditContextStore 리터럴 컴파일 (타입 회귀) | B16 |

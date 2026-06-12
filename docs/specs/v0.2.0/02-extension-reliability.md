@@ -2,7 +2,7 @@
 
 Date: 2026-06-11
 Status: Draft
-Roadmap items: #2 (추적 기본값 변경 — BREAKING), #3 (신뢰성 강화), #6 (select 프로젝션 targetId 유실 수정), Smaller fixes (`@updatedAt`-only 노이즈 필터, 커스텀 Prisma client output path)
+Roadmap items: #2 (추적 기본값 변경 — BREAKING), #3 (신뢰성 강화), #6 (select 프로젝션 targetId 유실 수정), Smaller fixes (`@updatedAt`-only 노이즈 필터, 커스텀 Prisma client output path — 확장·AuditService 양쪽, 중첩 관계 쓰기 경계 문서화·감지 경고)
 
 ## Goal
 
@@ -11,7 +11,7 @@ Prisma extension의 자동 추적 경로를 "침묵 실패(fail-silent)"에서 "
 1. **추적 기본값 변경 (#2, BREAKING)**: 설정 없는 `createAuditExtension({})`이 아무것도 추적하지 않는 현재 동작을 폐기하고, 기본을 **전체 모델 추적**으로 바꾼다. 위험한 설정 조합은 팩토리 시점에 경고한다.
 2. **신뢰성 강화 (#3)**: pre-read 실패가 비즈니스 뮤테이션을 중단시키는 버그를 수정하고(격리), 모든 감사 실패를 `onAuditError` 콜백으로 관측 가능하게 만들며, `logFailures` 옵트인으로 `result='failure'` 항목이 도달 가능해진다.
 3. **select 프로젝션 수정 (#6)**: `select`가 PK를 생략해도 `targetId`가 NULL이 되지 않도록 PK를 주입한다.
-4. **Smaller fixes**: `@updatedAt` 전용 변경 노이즈 필터(`ignoreTimestampOnlyUpdates`), 커스텀 generator output 프로젝트를 위한 `prismaModule` 주입 옵션.
+4. **Smaller fixes**: `@updatedAt` 전용 변경 노이즈 필터(`ignoreTimestampOnlyUpdates`), 커스텀 generator output 프로젝트를 위한 `prismaModule` 주입 옵션 — 확장(`createAuditExtension`)과 모듈(`AuditLogModuleOptions`/`AuditService`) 양쪽 모두(B41–B44, B46), 중첩 관계 쓰기 경계 문서화 + 추적 모델 중첩 쓰기 감지 경고(B45).
 
 이 스펙은 v0.2.0 공통 인터페이스 `AuditSharedOptions` / `AuditErrorContext` / `AuditLogger`의 **정의를 소유**한다. 다른 스펙은 이 정의를 참조한다.
 
@@ -25,8 +25,8 @@ Prisma extension의 자동 추적 경로를 "침묵 실패(fail-silent)"에서 "
 - **추적 기본값**: 두 리스트 모두 부재 시 전체 모델 추적. 팩토리 시점 경고는 `options.logger ?? console`로 출력.
 - **`tenantRequired` 자동 경로**: true + 테넌트 해석 null이면 감사 insert를 **스킵**하고 `onAuditError({ phase: 'tenant-resolution', ... })`로 보고. 비즈니스 연산은 항상 진행. (동작 자체는 로드맵 #4 스펙 소유 — 본 스펙은 핸들러 흐름에서의 접합점만 정의.)
 - **select 프로젝션**: create/update/upsert에서 `args.select` 존재 시 쿼리 실행 전 PK 필드를 주입.
-- **`prismaModule`**: 하드코딩된 `require('@prisma/client')` 대신 생성된 client 네임스페이스를 옵션으로 주입.
-- **배치 연산 충실도(#10)와 중첩 쓰기 풀 감사는 0.3.0** — 본 스펙은 경계 문서화 이상을 다루지 않는다.
+- **`prismaModule`**: 하드코딩된 `require('@prisma/client')` 대신 생성된 client 네임스페이스를 옵션으로 주입 — 확장 팩토리와 모듈(`AuditService`의 정적 import, B46) 양쪽에 동일 적용.
+- **배치 연산 충실도(#10)와 중첩 쓰기 풀 감사는 0.3.0** — 0.2.0은 경계 문서화 + 감지 경고(로드맵 smaller fix — 본 스펙 B45 소유)까지만 다룬다.
 
 ## Background
 
@@ -142,7 +142,22 @@ export interface AuditExtensionOptions {
 ```ts
 export interface PrismaModuleLike {
   Prisma: {
-    defineExtension: (extension: unknown) => unknown;
+    /**
+     * 파라미터/반환 타입은 의도적으로 `any`다 (bivariance-safe).
+     * `unknown`을 쓰면 repo의 `strict: true`(strictFunctionTypes) 하에서 실제 생성된
+     * client의 좁은 시그니처(`defineExtension<R>(extension: ...)`,
+     * `sql(strings: readonly string[], ...values: RawValue[])`)가 반공변 파라미터
+     * 검사로 할당 불가가 되어, typed import(`import * as client from './generated/client'`)
+     * 모듈을 `prismaModule`로 전달할 수 없게 된다(B41/T38의 전제 파괴).
+     * T41 컴파일 전용 테스트로 할당 가능성을 고정한다.
+     */
+    defineExtension: (extension: any) => any;
+    /** 스펙 01의 tableName 보간(`INSERT INTO ${Prisma.raw(table)}`)에 사용. @prisma/client 생성물에는 항상 존재. */
+    sql?: (strings: TemplateStringsArray | readonly string[], ...values: any[]) => unknown;
+    raw?: (value: string) => unknown;
+    /** AuditService의 WHERE 절 조립(`Prisma.join`/`Prisma.empty`)에 사용 (B46 — 스펙 05). */
+    join?: (values: readonly any[], separator?: string, prefix?: string, suffix?: string) => unknown;
+    empty?: unknown;
     /** 생성된 client가 노출하는 datamodel. 모델명 검증과 @updatedAt 필드 감지에 사용(없으면 해당 기능 생략). */
     dmmf?: {
       datamodel?: {
@@ -193,10 +208,23 @@ export interface AuditLogModuleOptions {
 export interface AuditLogModuleOptions extends AuditSharedOptions {
   prisma: any;
   actorExtractor: ActorExtractor;
+  /**
+   * 커스텀 output 경로로 생성된 Prisma client 모듈 (확장 옵션의 동명 필드와 동일 형태).
+   * AuditService가 SQL 조립에 쓰는 Prisma 네임스페이스(sql/raw/join/empty)를 이 모듈에서
+   * 해소한다. 미지정 시 require('@prisma/client') 폴백 (B46).
+   */
+  prismaModule?: PrismaModuleLike;
 }
 ```
 
 모듈 측 `tenantRequired`/`tenantResolver`/`tableName` 동작 변경은 각각 로드맵 #4(스펙 03) / #1·#11(스펙 01) 소유. 본 스펙은 인터페이스 정의만 소유한다. (최종 모듈 인터페이스에는 스펙 03의 `sensitiveFields`/`sensitiveFieldsByModel`, 스펙 04의 `excludeRoutes`/`registerGlobalInterceptor`/`correlationIdHeader`/`correlationIdGetter`가 추가로 합류한다.)
+
+`prismaModule`의 모듈 측 도입으로 `src/services/audit.service.ts:2`의 정적
+`import { Prisma } from '@prisma/client'`는 제거되고, `AuditService` 생성자가 §8의
+`resolvePrismaNamespace({ prismaModule: options.prismaModule })`로 네임스페이스를 1회
+해소·보관한다(B46). 서비스 SQL 재작성 시의 적용 지점은 스펙 01 §7(`log()` INSERT의
+`Prisma.sql`/`Prisma.raw`)과 스펙 05(`query()`/`getById()`)가 명시한다 — 커스텀 output
+문제의 "모듈 측 절반"이 이로써 0.2.0 범위에 들어온다(로드맵 smaller fix 완결).
 
 ### 4. `shouldTrackModel` (`src/prisma/diff.ts:36-48`) — 시그니처 유지, 의미 변경
 
@@ -216,7 +244,8 @@ export function shouldTrackModel(
 | `undefined` | `undefined` | **true (전체 추적)** | **변경** (기존 false) |
 | `undefined` | `[]` | **true (전체 추적)** | **변경** (기존 false) |
 | `undefined` | non-empty | `!ignoredModels.includes(model)` | 동일 |
-| `[]` | any | false (명시적 빈 allowlist 존중, W3 경고) | 결과 동일, 경고 신규 |
+| `[]` | `undefined` | false (명시적 빈 allowlist 존중, W3 경고) | 결과 동일, 경고 신규 |
+| `[]` | non-empty | false (allowlist 우선 — B2, W2·W3 경고) | **변경** (0.1.0은 빈 allowlist를 무시하고 denylist를 적용 — `src/prisma/diff.ts:41-47`의 `length > 0` 검사 — 비제외 모델이 추적됐다. 0.2.0은 빈 allowlist를 권위로 취급해 아무것도 감사하지 않는다. CHANGELOG BREAKING 명시) |
 | non-empty | any | `trackedModels.includes(model)` (allowlist 우선, 둘 다 있으면 W2 경고) | 결과 동일, 경고 신규 |
 
 참조 구현:
@@ -341,7 +370,13 @@ async function insertAuditLog(client, params): Promise<void>;
 
 ### 8. `createAuditExtension` (`src/prisma/audit-extension.ts:119`)
 
-시그니처 불변: `export function createAuditExtension(options: AuditExtensionOptions)`.
+시그니처: `export function createAuditExtension(options: AuditExtensionOptions): any` —
+파라미터는 불변이지만 **반환 타입을 명시적 `any`로 선언**한다. 현행은
+`require('@prisma/client')`가 `any`라 추론 반환도 `any`인데, §2의 구조적 타이핑 도입 후
+추론에 맡기면 반환이 `unknown`으로 좁아져 기존 소비자의
+`prisma.$extends(createAuditExtension(...))` 호출이 컴파일되지 않는다(`$extends`는
+`unknown`을 받지 않음 — 하위 호환 침묵 파괴). 명시적 `any`로 회귀를 차단하고 T41
+컴파일 테스트로 고정한다.
 
 `require('@prisma/client')` 해소 로직 변경 (현행 `123-124`):
 
@@ -350,8 +385,8 @@ async function insertAuditLog(client, params): Promise<void>;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Prisma } = require('@prisma/client');
 
-// 제안
-function resolvePrismaNamespace(options: AuditExtensionOptions): PrismaModuleLike['Prisma'] {
+// 제안 — 확장 팩토리와 AuditService(B46)가 공유하는 내부 헬퍼 (배럴 export 안 함)
+function resolvePrismaNamespace(options: { prismaModule?: PrismaModuleLike }): PrismaModuleLike['Prisma'] {
   if (options.prismaModule) {
     if (typeof options.prismaModule.Prisma?.defineExtension !== 'function') {
       throw new Error(
@@ -374,6 +409,12 @@ function resolvePrismaNamespace(options: AuditExtensionOptions): PrismaModuleLik
   }
 }
 ```
+
+주: 위 코드의 2-인자 `new Error(message, { cause })`는 `lib.es2022.error`의
+`ErrorOptions` 선언을 요구한다 — 현행 tsconfig는 `lib: ["ES2021"]`이라 TS2554
+(`Expected 0-1 arguments`)로 컴파일되지 않는다. 본 스펙의 Migration & Docs Impact가
+tsconfig `lib`를 `["ES2022"]`로 상향한다(`target: ES2021` 유지 — 런타임은 패키지
+바닥선인 Node 18+에서 이미 지원). 스펙 03 B14의 cause 래핑도 같은 상향에 의존한다.
 
 ## Behavior Specification
 
@@ -450,6 +491,43 @@ function resolvePrismaNamespace(options: AuditExtensionOptions): PrismaModuleLik
 - **B42.** `prismaModule.Prisma.defineExtension`이 함수가 아니면 `createAuditExtension()`이 즉시 설명적 `Error`를 throw한다 (Public API Changes §8의 메시지).
 - **B43.** `prismaModule` 미제공 + `@prisma/client` require 실패 시, raw `MODULE_NOT_FOUND` 대신 `prismaModule` 옵션을 안내하는 `Error`를 throw한다 (§8의 메시지, `cause` 체인 유지).
 - **B44.** `prismaModule.Prisma.dmmf`가 없으면 B8(모델명 검증)과 B40의 dmmf 기반 감지만 비활성화되고 나머지는 정상 동작한다.
+
+### prismaModule — AuditService 측 (smaller fix, 모듈 절반)
+
+- **B46.** `AuditLogModuleOptions.prismaModule`(§3) 제공 시 `AuditService`는 정적
+  `import { Prisma } from '@prisma/client'`(`src/services/audit.service.ts:2`) 대신
+  생성자에서 §8의 `resolvePrismaNamespace({ prismaModule: options.prismaModule })`로
+  네임스페이스를 1회 해소·보관하고, 모든 SQL 조립 — `log()` INSERT(스펙 01 §7의
+  `Prisma.sql`/`Prisma.raw` 재작성), `query()`/`getById()`(스펙 05의
+  `sql`/`raw`/`join`/`empty`) — 에 그 네임스페이스를 사용한다. 정적 import는 제거된다.
+  미제공 + `@prisma/client` 미해소 시 B43과 동일한 안내 `Error`를 생성자(부트 경로)에서
+  throw 한다. 결과: 커스텀 output 프로젝트에서 `AuditService` 로드/사용이 더 이상
+  실패하지 않는다 — 확장(B41)과 합쳐 로드맵 smaller fix("순수 도입 차단 요인 제거")가
+  완결된다.
+
+### 중첩 관계 쓰기 경계 — 감지 경고 (smaller fix)
+
+- **B45.** 추적 대상 모델의 뮤테이션에서 중첩 관계 쓰기를 감지하면 (모델, relation
+  필드) 조합당 **프로세스당 1회** W5를 `logger*.warn`으로 출력한다(채널은 logger —
+  `onAuditError`가 아니다: 실패가 아닌 경계 고지). 내부 테스트 헬퍼
+  `_resetNestedWriteWarnings()`를 스펙 04 B14의 `_resetNoContextWarning()` 패턴으로
+  제공한다:
+  `[@nestarc/audit-log] nested write on <Model>.<relation> is not audited — only the top-level <Model> mutation is recorded. (full nested-write auditing is planned for 0.3.0)`
+  - 감지 대상: create/update/upsert(create·update 분기 모두)의 `args.data`(upsert는
+    `args.create`/`args.update`) **최상위 키** 중, 값이 중첩 쓰기 연산자 키
+    (`create`/`createMany`/`connectOrCreate`/`update`/`updateMany`/`upsert`/`delete`/
+    `deleteMany`/`set`)를 포함하는 객체인 것. datamodel 확보 가능 시(B8/B40과 동일
+    경로) relation 필드(`kind === 'object'`)로 한정해 Json 스칼라 컬럼 오탐을
+    제거하고, dmmf 부재 시 연산자 키 휴리스틱만 사용한다. `connect`/`disconnect`
+    단독은 관계 연결로서 경고 대상이 아니다(부모 행 변경은 정상 감사됨).
+  - 경고는 기록 억제가 아니다 — 부모 모델 항목은 현행대로 기록된다. 감지는 얕다
+    (`args.data` 최상위 키만 — 더 깊은 중첩은 검사하지 않음). 감지 로직 자체는 **절대
+    throw하지 않는다** — 전체를 try/catch로 감싸 예외 시
+    `reportAuditError(options, error, { phase: 'context', model, operation })`로 보고만
+    하고 뮤테이션·감사 기록 모두 정상 진행한다.
+  - 경계 자체는 README "Nested writes" 섹션으로 문서화한다(Migration & Docs Impact).
+    풀 감사는 0.3.0(로드맵 Out of Scope 승계) — 본 Behavior가 로드맵 smaller fix
+    "경계 문서화 + 감지 경고"의 소유 스펙 배정이다(스펙 06 G6 체크리스트 항목).
 
 ### 핸들러별 try/catch 경계 이동 요약
 
@@ -560,7 +638,8 @@ async update({ model, args, query }: any) {
 | 7 | 감사 INSERT (`tryAuditLog`) | `'insert'` | 정상 | 유실 (관측 가능) | swallow |
 | 8 | `onAuditError` 콜백 자체 throw | — | 정상 | (무관) | swallow + `logger*.error` |
 | 9 | 테넌트 해석 실패/부재 (`tenantRequired:true`) | `'tenant-resolution'` (로드맵 #4 — 스펙 03 소유) | 정상 | 스킵 (`buildAuditInsertParams` → null, B-T1) | swallow |
-| 10 | `createAuditExtension()` 설정 오류: `prismaModule.Prisma.defineExtension` 부재, `@prisma/client` 미해소 | — | (앱 부트 시점) | — | **throw** (B42, B43 — 설정 오류는 fail-fast) |
+| 10 | `createAuditExtension()`/`AuditService` 생성자 설정 오류: `prismaModule.Prisma.defineExtension` 부재, `@prisma/client` 미해소 | — | (앱 부트 시점) | — | **throw** (B42, B43, B46 — 설정 오류는 fail-fast) |
+| 11 | 중첩 쓰기 감지(W5) 로직 자체의 예외 | `'context'` | 정상 | 정상 기록 (경고만 생략) | swallow — `reportAuditError` phase `'context'` 보고 후 진행 (B45) |
 
 원칙: **런타임(요청 경로)에서는 절대 throw하지 않고, 팩토리(부트 경로)의 설정 오류는 즉시 throw한다.** 단 하나의 의도된 런타임 throw는 logFailures의 원본 에러 rethrow(#3)이며 이는 호출자의 에러다.
 
@@ -603,6 +682,13 @@ async update({ model, args, query }: any) {
 - T28. `prismaModule` 제공 시 `@prisma/client` require 미발생(jest 모듈 mock으로 검증) — B41. [U]
 - T29. `prismaModule.Prisma.defineExtension` 부재 → 팩토리 throw(메시지 검증); `@prisma/client` 미설치 시뮬레이션 → prismaModule 안내 메시지 throw — B42, B43. [U]
 - T30. `buildAuditInsertParams`가 null 반환하도록 mock → 핸들러 insert 미시도·무보고 — B-T1. [U]
+- T39. `computeUpdateChanges` mock throw → `onAuditError` phase `'context'` 보고, insert 미시도, 비즈니스 결과 정상 반환 — B15. [U]
+- T40. `logFailures: true` + `tenantRequired: true` + 테넌트 부재 + query reject → failure insert 0회, 원본 에러 동일 참조 rethrow — B27 (B-T1 게이트가 [2] catch의 failure 경로에도 적용됨). [U]
+- T41. 타입 전용(compile-only — tsd 또는 `--noEmit` 컴파일 spec): 커스텀 output으로 생성한 typed client 모듈 형태(`import * as client from './generated/client'`를 모사한 좁은 시그니처의 리터럴 타입)가 `prismaModule: PrismaModuleLike`에 할당 가능하고, `createAuditExtension(...)` 반환값이 `prisma.$extends(...)` 인자로 컴파일됨(`unknown` 회귀 방지) — §2 타이핑, §8 명시적 `any` 반환. [U]
+- T42. `tryInjectPk` 강제 throw → phase `'context'` 보고, 쿼리는 원본(미주입) args로 실행, 결과 정상 — B32. [U]
+- T43. `create({ select: { posts: { select: { title: true } } } })` → 중첩 relation select 불변(주입은 top-level만); `delete({ select: { name: true } })` → select 주입 없음 — B33. [U]
+- T44. update에 `data: { posts: { create: [...] } }` → W5 1회(`User.posts` 명시), 같은 모델·relation 재호출 시 무경고(`_resetNestedWriteWarnings()` 후 재경고); 스칼라 필드만 있는 update는 무경고; dmmf 제공 시 Json 스칼라 컬럼의 연산자형 객체는 미경고; `connect` 단독은 미경고; 감지 로직 강제 throw → phase `'context'` 보고 + 뮤테이션·감사 기록 정상 (감지는 절대 throw하지 않음) — B45. [U]
+- T45. `AuditService`를 `prismaModule` 제공 모듈 옵션으로 생성 → `@prisma/client` require 미발생(jest 모듈 mock), `log()`/`query()` SQL 조립이 주입 네임스페이스의 sql/raw/join 사용 — B46. [U]
 
 ### E2E — `test/e2e` (실제 PostgreSQL)
 
@@ -615,7 +701,7 @@ async update({ model, args, query }: any) {
 - T37. `ignoreTimestampOnlyUpdates: true` + 동일 값 update(@updatedAt만 갱신) → audit_logs 행 증가 0 — B37. [E]
 - T38. 커스텀 output으로 생성한 client를 `prismaModule`로 전달해 전체 추적 스모크 — B41. [E]
 
-Release Gates 매핑: T33·T34가 **RG-3 (upsert/createMany/updateMany E2E)**에 기여한다 — 게이트 사인오프 소유는 스펙 06 G3(`test/e2e/batch-and-upsert.e2e-spec.ts`)이며 T33·T34는 그 파일에 수록한다. RG-1(롤백 회귀)은 스펙 06 G1, RG-2(HTTP 경로 E2E)는 스펙 06 G2(스펙 04 E1–E6 수록), RG-4(append-only)는 스펙 06 G4(스펙 01 E1–E4/E7 연동), RG-5(CI 매트릭스)·RG-6(문서 정합성)은 스펙 06 G5/G6 소유. 단 본 스펙의 모든 신규 유닛 테스트는 RG-5의 피어 매트릭스(Nest 10/11 × Prisma 5/6)에서 통과해야 한다 — 특히 `omit`(B30)은 Prisma 5 구버전에 없으므로 조건부 스킵 처리.
+Release Gates 매핑: T33·T34가 **RG-3 (upsert/createMany/updateMany E2E)**에 기여한다 — 게이트 사인오프 소유는 스펙 06 G3(`test/e2e/batch-and-upsert.e2e-spec.ts`)이며 T33·T34는 그 파일에 수록한다. RG-1(롤백 회귀)은 스펙 06 G1, RG-2(HTTP 경로 E2E)는 스펙 06 G2(스펙 04 E1–E4/E6 수록), RG-4(append-only)는 스펙 06 G4(스펙 01 E1–E4/E7 연동), RG-5(CI 매트릭스)·RG-6(문서 정합성)은 스펙 06 G5/G6 소유. 단 본 스펙의 모든 신규 유닛 테스트는 RG-5의 피어 매트릭스(Nest 10/11 × Prisma 5/6)에서 통과해야 한다 — 특히 `omit`(B30)은 Prisma 5 구버전에 없으므로 조건부 스킵 처리.
 
 ## Migration & Docs Impact
 
@@ -630,6 +716,11 @@ Release Gates 매핑: T33·T34가 **RG-3 (upsert/createMany/updateMany E2E)**에
   silently audited nothing. To keep the old narrow behavior, set
   `trackedModels: ['User', ...]` explicitly. An empty `ignoredModels: []` now
   also means "audit everything".
+- **Empty allowlist now wins over a denylist**: if you passed `trackedModels: []`
+  together with a non-empty `ignoredModels`, 0.1.x ignored the empty allowlist
+  and applied the denylist (non-ignored models WERE audited); 0.2.0 treats the
+  empty allowlist as authoritative and audits **nothing** (the W3 factory
+  warning fires). Remove `trackedModels: []` to keep denylist behavior.
 
 ### Fixed
 - Audit pre-reads (update/delete/upsert/deleteMany) no longer abort the
@@ -647,10 +738,23 @@ Release Gates 매핑: T33·T34가 **RG-3 (upsert/createMany/updateMany E2E)**에
   error is always rethrown).
 - `ignoreTimestampOnlyUpdates` (opt-in): suppresses `@updatedAt`-only update
   entries and removes the timestamp field from update diffs.
-- `prismaModule` option: support for Prisma clients generated to custom output paths.
+- `prismaModule` option (extension factory **and** module options): support for
+  Prisma clients generated to custom output paths — `createAuditExtension` no longer
+  hard-requires `@prisma/client`, and `AuditService`'s static `@prisma/client` import
+  is removed (resolved via the same option).
+- Nested-write boundary warning: a once-per-relation `logger.warn` is emitted when a
+  tracked model mutation contains nested relation writes (nested writes are not
+  audited — see the README "Nested writes" section).
 - Factory-time configuration warnings (default-track-all notice, allowlist/denylist
   conflict, empty allowlist, unknown model names).
 ```
+
+### tsconfig
+
+`lib`를 `["ES2022"]`로 상향한다(`tsconfig.json` — `tsconfig.build.json`은 extends로
+상속). `target: ES2021`은 유지. §8의 `new Error(message, { cause })`와 스펙 03 B14의
+cause 래핑이 `lib.es2022.error`를 요구하기 때문(현행 `lib: ["ES2021"]`에서는 TS2554).
+런타임은 Node 18+에서 기존 지원이므로 산출물 호환성 영향 없음.
 
 (별도 검토: pre-read 격리는 사실상 버그 수정이므로 로드맵 #3의 제안대로 0.1.x 패치 선행 출시 후보 — 릴리스 매니저 결정 사항으로 남긴다.)
 
@@ -668,8 +772,12 @@ AuditLogModule.forRoot({ prisma, actorExtractor, ...auditShared });
 prisma.$extends(createAuditExtension({ ignoredModels: ['Session'], ...auditShared }));
 ```
 
-- 커스텀 output 섹션: `prismaModule: require('./generated/client')` 예시.
+- 커스텀 output 섹션: `prismaModule: require('./generated/client')` 예시 — 확장과
+  `AuditLogModule.forRoot` 양쪽에 전달하는 패턴(B46).
 - `logFailures` 캐비엇: 에러 메시지 metadata에 쿼리 인자가 일부 포함될 수 있음(500자 truncate), 노이즈 특성상 엄격 옵트인.
+- 신규 "Nested writes" 경계 섹션 (B45): `user.update({ data: { posts: { create } } })`는
+  부모(User)만 감사되고 중첩된 Post 쓰기는 기록되지 않음을 명시, W5 경고의 의미와
+  모델·relation당 1회 정책, 풀 감사는 0.3.0 로드맵임을 안내.
 
 ### Design doc (`docs/2026-04-04-audit-log-design.md`)
 
@@ -699,11 +807,11 @@ prisma.$extends(createAuditExtension({ ignoredModels: ['Session'], ...auditShare
 ## Out of Scope
 
 - **배치 연산 충실도 (#10)**: createMany/updateMany의 레코드별 diff, `*AndReturn` 후킹, deleteMany multi-row INSERT — 0.3.0. 본 스펙은 count-only 동작과 그 한계 문서를 유지한다.
-- **중첩 관계 쓰기 감사**: 경계 문서화·감지 경고(로드맵 smaller fix)는 별도 작업. PK 주입도 top-level만(B33).
+- **중첩 관계 쓰기 풀 감사**: 0.3.0. 경계 문서화·감지 경고(로드맵 smaller fix)는 본 스펙 B45가 소유한다 — 0.2.0 범위. PK 주입도 top-level만(B33).
 - **테넌트 해석 동작** (`tenantRequired` 자동 경로, `tenantResolver`, `query()` 격리): 로드맵 #4 — 스펙 03. 본 스펙은 `AuditSharedOptions` 정의와 B-T1 접합점만 제공.
 - **`tableName` 검증·보간과 DDL/트리거/파티셔닝**: 로드맵 #1/#11 — 스펙 01. 본 스펙은 인터페이스 필드 선언만.
 - **컨텍스트 metadata enricher / correlation ID / `@AuditReason`** (`buildAuditInsertParams` 내 병합): 로드맵 #9 — 스펙 04.
 - **레다크션 강화** (`sensitiveFieldsByModel`, manual log metadata 레다크션): 스펙 03.
 - **트랜잭션 정합성** (캡처된 base client, 롤백 고아 행): 로드맵 #5 — 스펙 06.
-- **`AuditService`의 정적 `import { Prisma } from '@prisma/client'`** (`src/services/audit.service.ts:2`): 커스텀 output 문제의 모듈 측 절반 — **0.2.0 미배정 (open)**. 6개 스펙 어디에도 배정되지 않았다. 모듈 옵션에 `prismaModule`을 미러링할지(인터페이스 소유는 본 스펙, 서비스 SQL 재작성은 스펙 05) 0.3.0으로 미룰지 릴리스 매니저 결정 필요.
+- ~~`AuditService`의 정적 `import { Prisma } from '@prisma/client'`~~ — 더 이상 Out of Scope가 아니다. 커스텀 output 문제의 모듈 측 절반은 **본 스펙 B46이 소유**한다(§3 `AuditLogModuleOptions.prismaModule`, T45). 네임스페이스 적용 지점은 스펙 01 §7(`log()` INSERT)과 스펙 05(`query()`/`getById()`)가 명시한다.
 - logFailures 제외 목록 커스터마이즈 옵션, `ignoreTimestampOnlyUpdates`의 기본 true 전환, 추가 타임스탬프 필드 지정 옵션(`timestampFields`) — 수요 확인 후 0.3.0 재평가.

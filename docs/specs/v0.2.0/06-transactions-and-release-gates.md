@@ -138,6 +138,10 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
 }
 ```
 
+(본 스펙 추가분만 표기 — 최종 인터페이스에는 스펙 02의
+`logFailures`/`ignoreTimestampOnlyUpdates`/`prismaModule`, 스펙 03의
+`sensitiveFieldsByModel`이 추가로 합류한다. 스펙 02 §2의 최종 합류 목록과 일치.)
+
 추가 devDependencies(런타임 API 아님): `supertest`, `@types/supertest` (G2 전용).
 
 CI 워크플로 변경(G5): `.github/workflows/ci.yml`에 `peer-matrix` job 추가 — 아래
@@ -258,7 +262,11 @@ Behavior Specification / Test Plan 참조.
   실행한다(아래 YAML). Nest 10 조합은 express 4 / `@types/express` 4와 짝지어 설치한다.
 - G6. **문서 정합성** — B1–B4가 전부 머지되어야 한다. 추가로 README의 Transaction
   Model/Multi-Tenancy/옵션 표가 형제 스펙들의 최종 API와 일치하는지 출시 직전 1회
-  교차 점검(하모나이저 체크리스트 항목).
+  교차 점검(하모나이저 체크리스트 항목). 체크리스트에는 로드맵 smaller fix 2건의
+  소유 스펙 배정·머지 확인을 포함한다: (a) 중첩 관계 쓰기 경계 문서화(README
+  "Nested writes" 섹션) + 감지 경고 W5 — **스펙 02 B45 소유**, (b) 커스텀 Prisma
+  client output의 모듈 측(`AuditService`) 절반 — **스펙 02 B46 소유**(확장 측
+  B41–B44와 합쳐 로드맵 항목 완결).
 
 G5의 ci.yml 변경(발췌 — 기존 `test` job은 유지):
 
@@ -420,7 +428,8 @@ CI:
   수요와 업스트림 진행에 따라 0.3.0+ 재평가.
 - 배치 연산 레코드별 충실도(#10), `*AndReturn` 후킹 — 0.3.0 (이 스펙은 G3에서 현행
   count-only 동작을 고정하는 것까지만).
-- 중첩 관계 쓰기 감사 — 0.2.0은 타 스펙의 경계 문서화/경고까지.
+- 중첩 관계 쓰기 **풀 감사** — 0.3.0. 0.2.0 범위인 경계 문서화 + 감지 경고(로드맵
+  smaller fix)는 **스펙 02 B45가 소유**한다(배정 확정 — G6 체크리스트에서 머지 확인).
 - 인-라이브러리 스케줄러, SIEM export, 해시 체인 — 로드맵 Out of Scope 승계.
 - `experimentalTxAudit`의 안정화(semver 보장) — probe가 두 Prisma major에서 1개
   마이너 사이클 이상 안정 동작함이 매트릭스로 입증된 후 별도 결정.

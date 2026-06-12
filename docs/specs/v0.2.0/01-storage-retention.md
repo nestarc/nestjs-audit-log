@@ -78,9 +78,10 @@ v0.2.0 항목으로 명시), 테이블명 변경 모두 불가능하다.
 - `getAuditTableSQL(options?)`은 동적 생성으로 전환하며 zero-arg 호출은 형태상 하위
   호환(반환 타입 `string` 유지), 단 새 출력은 트리거 강제가 기본.
 - 커스텀 Prisma client 주입(`prismaModule`)은 스펙 02(smaller fixes) 소유 —
-  본 스펙의 확장 내 `Prisma.sql`/`Prisma.raw` 사용처는 스펙 02의
-  `resolvePrismaNamespace()`(prismaModule → `require('@prisma/client')` 순)로 해소된
-  네임스페이스를 사용해야 한다.
+  본 스펙의 확장 내 **및 `AuditService` 내**(§7) `Prisma.sql`/`Prisma.raw` 사용처는
+  스펙 02의 `resolvePrismaNamespace()`(prismaModule → `require('@prisma/client')` 순)로
+  해소된 네임스페이스를 사용해야 한다(서비스 측은 스펙 02 B46 — 정적
+  `import { Prisma } from '@prisma/client'` 제거).
 
 ### 1. 공유 옵션 (신설 — `src/interfaces/audit-shared-options.interface.ts`, 정의 소유: 스펙 02)
 
@@ -110,7 +111,6 @@ export interface AuditErrorContext {
 }
 
 export interface AuditSharedOptions {
-  /** audit 테이블 식별자. 기본 'audit_logs'. 스키마 한정자 1회 허용 (예: 'audit.audit_logs') */
   tableName?: string;
   tenantRequired?: boolean;
   tenantResolver?: () => string | null;
@@ -148,9 +148,15 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
 }
 ```
 
+(본 스펙 관련 변경만 표기 — 최종 인터페이스에는 스펙 02의
+`logFailures`/`ignoreTimestampOnlyUpdates`/`prismaModule`, 스펙 03의
+`sensitiveFieldsByModel`, 스펙 06의 `experimentalTxAudit`이 추가로 합류한다.)
+
 `createAuditExtension(options)` (`src/prisma/audit-extension.ts:119`)은 진입 시
 `options.tableName`을 검증하고, 검증된 식별자를 `insertAuditLog`
 (`src/prisma/audit-extension.ts:65-92`)의 `INSERT INTO` 대상으로 보간한다.
+보간에 쓰는 `Prisma.sql`/`Prisma.raw`는 스펙 02의 `resolvePrismaNamespace()`가
+해소한 네임스페이스(`PrismaModuleLike['Prisma']`의 `sql`/`raw`)에서 가져온다.
 
 ### 3. `AuditLogModuleOptions` — `src/interfaces/audit-log-options.interface.ts:4-9`
 
@@ -174,7 +180,11 @@ export interface AuditLogModuleOptions extends AuditSharedOptions {
 }
 ```
 
-(`tenantRequired`는 `AuditSharedOptions`로 이동 — 의미 동일.)
+(`tenantRequired`는 `AuditSharedOptions`로 이동 — 의미 동일. 본 스펙 관련 변경만
+표기 — 최종 모듈 인터페이스에는 스펙 02의 `prismaModule`(B46 — `AuditService`의
+Prisma 네임스페이스 해소), 스펙 03의 `sensitiveFields`/`sensitiveFieldsByModel`,
+스펙 04의 `excludeRoutes`/`registerGlobalInterceptor`/`correlationIdHeader`/
+`correlationIdGetter`가 추가로 합류한다.)
 
 문서화 사용 패턴 (런타임 병합 없음):
 
@@ -231,6 +241,12 @@ export async function applyAuditTableSchema(
 `getAuditTableStatements`는 더 이상 텍스트 파싱이 아니라 생성 단계에서 문 배열을
 직접 만들고, `getAuditTableSQL`은 `statements.join('\n\n')`이다.
 
+같은 PR에서 `package.json`의 build 스크립트도 함께 변경한다:
+`"build": "tsc -p tsconfig.build.json && cp src/sql/*.sql dist/sql/"` →
+`"build": "tsc -p tsconfig.build.json"` (cp 단계 제거). 파일만 삭제하면 glob이
+아무것도 매칭하지 못해 `cp`가 비-0으로 종료, 모든 빌드(스펙 06 G5 피어 매트릭스의
+`npm run build` 포함)가 실패한다.
+
 ### 5. `ensurePartitions` (신설 — `src/sql/partitions.ts`)
 
 ```typescript
@@ -263,6 +279,14 @@ export interface AuditPruneOptions {
   dryRun?: boolean;
   /** 권한 있는 별도 PrismaClient (REVOKE 하드닝 적용 시 필수). 기본 module options.prisma */
   client?: any;
+  /**
+   * Flat 경로 인터랙티브 트랜잭션의 timeout(ms). `$transaction(fn, { timeout })`으로
+   * 전달된다. 기본 60_000 — Prisma 기본값 5_000은 대형 테이블의 DELETE에서 거의
+   * 항상 초과되어 prune이 P2028로 중단된다(B23).
+   */
+  timeoutMs?: number;
+  /** Flat 경로 인터랙티브 트랜잭션의 maxWait(ms). 기본 10_000 (Prisma 기본 2_000) */
+  maxWaitMs?: number;
 }
 
 export interface AuditPruneResult {
@@ -306,6 +330,10 @@ await client.$executeRaw(Prisma.sql`
 
 `src/services/audit.service.ts:35, 104, 109`도 동일하게 `${Prisma.raw(table)}`로 교체.
 `table`은 생성자/팩토리에서 1회 검증·고정된 문자열이다(매 쿼리 재검증 불필요).
+서비스 측이 사용하는 `Prisma.sql`/`Prisma.raw` 네임스페이스는 정적
+`import { Prisma } from '@prisma/client'`(`src/services/audit.service.ts:2` — 제거됨)가
+아니라 스펙 02 B46의 `resolvePrismaNamespace({ prismaModule: options.prismaModule })`로
+생성자에서 1회 해소·보관한 것이다(조회 경로의 적용은 스펙 05가 명시).
 
 ### 8. 배럴 export — `src/index.ts:36`
 
@@ -325,6 +353,7 @@ export {
   ensurePartitions,
 } from './sql';
 export type { AuditTableSQLOptions, EnsurePartitionsOptions } from './sql';
+// (아래 공유 타입 4종의 export 추가는 스펙 02 소유 변경 — 최종 상태 참고용 전재)
 export type {
   AuditSharedOptions,
   AuditErrorContext,
@@ -403,8 +432,20 @@ export type {
   `applyAuditTableSchema(prisma, options?)`는 그 배열을 순서대로
   `$executeRawUnsafe`로 실행한다(현행 `src/sql/index.ts:50-54` 패턴 유지).
   `getAuditTableSQL(options) === getAuditTableStatements(options).join('\n\n')`.
+- B13a. `applyAuditTableSchema(prisma, { partitioned: true })`는 첫 DDL 실행 전
+  `SELECT relkind FROM pg_class WHERE oid = to_regclass($1)`로 대상 테이블을
+  프리체크한다(B17/B19와 동일 패턴). 테이블이 존재하고 `relkind = 'r'`(기존 0.1.0
+  flat 테이블)이면 §SQL/DDL 8의 마이그레이션 절차를 안내하는 설명적 `Error`를
+  throw하고 **어떤 문도 실행하지 않는다**. 프리체크가 없으면 `CREATE TABLE IF NOT
+  EXISTS ... PARTITION BY`가 기존 flat 테이블 위에서 침묵 no-op된 뒤 후속
+  `CREATE TABLE ... PARTITION OF`가 42809("is not partitioned")로 중도 실패해 헬퍼가
+  half-applied 상태로 남는다. flat 출력(`partitioned` 미지정)의 재적용 멱등성(B8)은
+  영향받지 않는다.
 - B14. 모든 DDL 헬퍼는 진입 시 B1/B2 검증을 수행한다. 월 경계는 **UTC** 기준이다
-  (파티션 범위 리터럴은 `TIMESTAMPTZ '... +00'`).
+  (파티션 범위 리터럴은 `TIMESTAMPTZ '... +00'`). §SQL/DDL 8의 수동 마이그레이션
+  레시피도 같은 UTC 그리드를 전제하므로 **UTC 세션을 요구**한다 — 트랜잭션 첫 문이
+  `SET LOCAL TIME ZONE 'UTC'`다(`date_trunc`/`format %L`이 세션 TimeZone에
+  의존하기 때문 — D2).
 
 ### ensurePartitions
 
@@ -432,6 +473,11 @@ export type {
   한다. `mode: 'drop'`(기본)은 `DROP TABLE`, `mode: 'detach'`는 `ALTER TABLE ...
   DETACH PARTITION`을 파티션별로 실행한다. 부분 파티션 삭제는 하지 않는다 —
   정리 입도는 월 단위이며, `olderThan`이 속한 파티션은 절대 건드리지 않는다.
+- B20a. partitioned 경로에서 개별 파티션의 DROP/DETACH가 실패하면: 직전까지 성공한
+  파티션은 유지되고(파티션별 자율 커밋) 즉시 throw한다. throw되는 `Error` 메시지는
+  실패한 파티션 이름·원인과 함께 **이번 호출에서 이미 성공(드롭/디태치)한 파티션
+  이름 목록**을 반드시 포함한다 — 운영자가 부분 진행 상태를 파악하고 재시도할 수
+  있어야 한다(테스트 가능한 계약 — E6c).
 - B21. detach 된 파티션은 독립 일반 테이블로 남는다(이름 유지). 아카이브(pg_dump 등)
   후 운영자가 직접 DROP 하는 워크플로를 문서화한다. DML 차단 트리거 잔존 여부는
   PostgreSQL 버전에 따라 다를 수 있으므로 아카이브 절차에 확인 단계를 포함한다.
@@ -446,9 +492,13 @@ export type {
   - 둘 다 없으면: 강제 부재를 `logger.warn`으로 알리고 plain `DELETE`만 실행.
 - B23. Flat 경로의 DDL+DML은 **하나의 인터랙티브 트랜잭션**으로 묶는다. PostgreSQL
   DDL은 트랜잭션이므로 중간 실패 시 전체 롤백되어 강제가 꺼진 채 방치되는 상태가
-  불가능하다. 트랜잭션 동안 `ALTER TABLE`/`DROP RULE`의 ACCESS EXCLUSIVE 락이
-  테이블 쓰기를 차단함을 문서에 명시한다(대형 flat 테이블이면 파티셔닝 마이그레이션
-  권장).
+  불가능하다. 트랜잭션은 `client.$transaction(fn, { timeout: timeoutMs ?? 60_000,
+  maxWait: maxWaitMs ?? 10_000 })`으로 연다 — Prisma 인터랙티브 트랜잭션의 기본
+  timeout 5_000ms는 대형 flat 테이블의 수개월치 DELETE에서 거의 항상 초과되어
+  prune이 P2028로 중단되므로, 기본값을 60초로 올리고 `AuditPruneOptions.timeoutMs`/
+  `maxWaitMs`(§6)로 조정 가능하게 한다(README Retention 섹션에 명시). 트랜잭션 동안
+  `ALTER TABLE`/`DROP RULE`의 ACCESS EXCLUSIVE 락이 테이블 쓰기를 차단함을 문서에
+  명시한다(대형 flat 테이블이면 파티셔닝 마이그레이션 권장).
 - B24. `dryRun: true`: partitioned 경로는 대상 파티션 이름만 반환하고 DDL을 실행하지
   않는다. flat 경로는 `SELECT COUNT(*) ... WHERE created_at < $1` 결과를
   `deletedRows`로 반환하고 DELETE를 실행하지 않는다.
@@ -682,6 +732,13 @@ async auditMaintenance() {
 ```sql
 BEGIN;
 
+-- 0) UTC 세션 강제 (B14/D2) — 아래 date_trunc와 format %L의 timestamptz 렌더링은
+--    세션 TimeZone을 따른다. 비UTC 서버에서 이 문을 생략하면 파티션 경계가 로컬
+--    월 경계로 생성되어, 2)의 UTC 그리드 파티션과 겹치거나(서경: "would overlap"
+--    에러로 중단) 커버리지 갭이 생겨 4)의 INSERT가 "no partition of relation found
+--    for row"로 실패한다. ensurePartitions의 UTC 그리드(B15)와의 정합에도 필수.
+SET LOCAL TIME ZONE 'UTC';
+
 -- 1) 기존 테이블/인덱스 이름 비우기 (인덱스 이름은 스키마 전역 유일 — 충돌 방지)
 ALTER TABLE audit_logs RENAME TO audit_logs_old;
 ALTER INDEX idx_audit_tenant_created RENAME TO idx_audit_tenant_created_old;
@@ -721,21 +778,25 @@ COMMIT;
 
 주의사항(문서 명시): 단일 트랜잭션 절차는 복사 동안 ACCESS EXCLUSIVE 락으로 감사
 쓰기를 차단한다. 대용량 테이블은 점검 창에서 실행하거나 배치 복사 + 짧은 스왑
-트랜잭션으로 변형하라(절차 변형은 docs cookbook 범위).
+트랜잭션으로 변형하라(절차 변형은 docs cookbook 범위). 절차를 변형하더라도 0)의
+`SET LOCAL TIME ZONE 'UTC'`(또는 경계를 `to_char(m AT TIME ZONE 'UTC', ...)`로
+명시 `+00` 렌더링)는 유지해야 한다 — 파티션 경계가 UTC 그리드(B14/B15)에서
+어긋나면 이후 `ensurePartitions`가 overlap 에러를 낸다.
 
 ## Error Handling
 
 | 실패 경로 | 동작 | onAuditError phase |
 |-----------|------|--------------------|
 | `tableName` 정규식/길이 위반 (B1, B2) | `createAuditExtension()` / `AuditService` 생성자 / DDL·파티션 헬퍼 진입 시 `Error` throw — 침묵 fallback 없음 | 사용 안 함 (구성 오류는 즉사) |
-| 자동 감사 INSERT 실패 (커스텀 테이블 미존재, 월 파티션 누락 포함) | 기존 `tryAuditLog` catch (`src/prisma/audit-extension.ts:111-116`) — 비즈니스 결과 반환은 유지. 신뢰성 스펙 적용 후 `options.onAuditError` 호출 + `logger.warn` | `'insert'` (신뢰성 스펙 소유) |
+| `applyAuditTableSchema({ partitioned: true })`를 기존 flat 테이블 위에 호출 (B13a) | relkind 프리체크가 §SQL/DDL 8 절차를 안내하는 설명적 `Error` throw — DDL 미실행, 스키마 무변경 | 사용 안 함 (관리 API는 throw) |
+| 자동 감사 INSERT 실패 (커스텀 테이블 미존재, 월 파티션 누락 포함) | 기존 `tryAuditLog` catch (`src/prisma/audit-extension.ts:111-116`) — 비즈니스 결과 반환은 유지. 신뢰성 스펙 적용 후 `options.onAuditError` 호출, 미제공 시 `logger.warn` 폴백 (이중 출력 없음 — 스펙 02 B17) | `'insert'` (신뢰성 스펙 소유) |
 | `AuditService.log()` INSERT 실패 | 0.1.0과 동일하게 호출자에게 throw (수동 API는 명시적 호출 — fail-loud) | 사용 안 함 |
 | `ensurePartitions`: 테이블 없음 / 비파티션 테이블 / `ahead` 음수 (B17) | throw | 사용 안 함 (B26) |
 | `ensurePartitions`: 동시 실행 42P07 경합 (B16) | 무시 (멱등 처리) | — |
 | `prune`: 테이블 없음 / relkind 판별 불가 (B19) | throw | 사용 안 함 (B26) |
 | `prune` flat: DELETE 또는 강제 복원 실패 (B23) | 단일 트랜잭션 롤백 → 강제 원상 보존, 에러는 호출자에게 throw | 사용 안 함 |
 | `prune` flat: 강제 객체 미발견 (B22) | `logger.warn` 후 plain DELETE 진행 | — |
-| `prune` partitioned: 개별 DROP/DETACH 실패 | 직전까지 성공분은 유지(파티션별 자율 커밋), 에러 throw 시 `AuditPruneResult` 대신 예외 — 메시지에 성공한 파티션 목록 포함 | 사용 안 함 |
+| `prune` partitioned: 개별 DROP/DETACH 실패 (B20a) | 직전까지 성공분은 유지(파티션별 자율 커밋), 에러 throw 시 `AuditPruneResult` 대신 예외 — 메시지에 성공한 파티션 목록 포함 (계약은 B20a, 검증은 E6c) | 사용 안 함 |
 | 트리거 강제 하의 UPDATE/DELETE 시도 (B28) | PostgreSQL `P0001` 예외가 해당 SQL 호출자에게 전파 | — (라이브러리 외부) |
 | RULE 강제(레거시) 하의 UPDATE/DELETE (B29) | 침묵 0행 — 문서화된 레거시 한계 | — |
 
@@ -748,7 +809,7 @@ DI 밖에서 생성되므로 — 공통 결정 1/5와 동일한 패턴).
 
 | 케이스 | 검증 대상 |
 |--------|----------|
-| U1. `tableName` 검증: 유효(`audit_logs`, `Audit_Logs2`, `audit.audit_logs`), 무효(`audit-logs`, `1abc`, `a.b.c`, `a;DROP`, 45자 초과, 빈 문자열) | B1, B2 |
+| U1. `tableName` 검증: 유효(`audit_logs`, `Audit_Logs2`, `audit.audit_logs`, 44자 테이블 부분), 무효(`audit-logs`, `1abc`, `a.b.c`, `a;DROP`, 45자 테이블 부분(44자 초과), 빈 문자열) | B1, B2 |
 | U2. `createAuditExtension({ tableName: 'bad name' })` / `AuditService` 생성자 throw | B1 |
 | U3. zero-arg `getAuditTableSQL()` 스냅샷: flat + 트리거 + DROP RULE 포함, GIN 없음 | B7, B8 |
 | U4. `enforcement: 'rule'` 출력이 0.1.0 RULE 블록과 동일 | B9 |
@@ -760,6 +821,7 @@ DI 밖에서 생성되므로 — 공통 결정 1/5와 동일한 패턴).
 | U10. `pg_get_expr` 경계 파싱: 상한 ≤ olderThan 판별, olderThan이 속한 파티션 제외 | B20 |
 | U11. `prune` mock: flat에서 mode 지정 무시 → `mode: 'delete'` 보고, partitioned 기본 `'drop'` | B27 |
 | U12. 확장 INSERT SQL이 `${Prisma.raw(table)}`를 사용하고 값은 전부 placeholder인지 (생성된 SQL 텍스트 검사) | B3, B5 |
+| U13. `prune` mock: 테이블 없음(to_regclass NULL) / relkind가 'r'·'p' 외 값 → throw (메시지에 테이블명 포함) | B19 |
 
 ### E2E (실제 PostgreSQL — `test/e2e` 스택)
 
@@ -771,12 +833,17 @@ DI 밖에서 생성되므로 — 공통 결정 1/5와 동일한 패턴).
 | E4. partitioned 스키마 적용 → 과거/현재 월 행 INSERT(명시 `created_at`) 라우팅 확인, 파티션 직접 DELETE도 트리거가 차단 | B10, B11, B28 | Gate 4 |
 | E5. `ensurePartitions` 신규 생성 → 이름 배열 반환, 재호출 시 `[]`, 비파티션 테이블에 호출 시 throw | B15–B17 | — |
 | E6. partitioned `prune({ olderThan })`: 상한 경과 파티션만 DROP, 경계 파티션 보존, `dryRun` 무변경, `mode: 'detach'` 후 독립 테이블 존재 | B20, B21, B24 | — |
+| E6b. flat `prune({ dryRun: true })`: `deletedRows`가 COUNT 결과와 일치, 행 수 무변경, 강제 객체(트리거/RULE) 무변경 — DISABLE/DROP 미실행 | B24 | — |
+| E6c. partitioned `prune` 실패 주입(2번째 파티션 DROP을 락/권한으로 강제 실패) → 1번째 파티션은 드롭된 채 유지, throw된 에러 메시지에 성공한 파티션 이름 목록 포함 | B20a | — |
 | E7. flat `prune`: 트리거 설치본에서 DISABLE/DELETE/ENABLE 후 강제 재활성 확인(직후 DELETE 시도 throw), RULE 설치본에서 drop/recreate 경로 동일 검증 | B22, B23 | Gate 4 |
+| E7b. 강제 객체(트리거·RULE) 모두 부재한 flat 테이블에서 `prune` → `logger.warn` 기록 + plain DELETE로 행 삭제됨 | B22 (셋째 분기) | — |
 | E8. flat `prune` 실패 주입(존재하지 않는 컬럼 강제 등) → 트랜잭션 롤백으로 행·강제 모두 원상 | B23 | — |
+| E9b. `prune({ client })`: 별도 롤/스파이 클라이언트 주입 → 모든 prune SQL이 주입 클라이언트에서 실행, `options.prisma`에는 SQL 0건 | B25 | — |
 | E9. 커스텀 `tableName`(스키마 한정 포함) end-to-end: DDL 적용 → 확장 자동 추적 INSERT → `AuditService.log()`/`query()` 모두 같은 테이블 사용 | B3–B6 | — |
 | E10. 월 파티션 누락 상태에서 자동 추적 쓰기 → 비즈니스 쿼리 성공 + 감사 실패 경고 관측 (신뢰성 스펙 머지 후 `onAuditError('insert')` 검증으로 강화) | B18 | — |
-| E11. §8 마이그레이션 절차 스크립트 실행 → 행 수 일치, 신규 쓰기 파티션 라우팅 | Migration | Gate 6 (문서 정합성 — 절차 검증) |
+| E11. §8 마이그레이션 절차 스크립트 실행 → 행 수 일치, 신규 쓰기 파티션 라우팅. **비UTC 세션 TimeZone(예: `SET TIME ZONE 'America/New_York'` 후 실행) 1회 반복** — `SET LOCAL TIME ZONE 'UTC'`가 경계 어긋남(overlap/갭)을 막는지 고정 | Migration, B14 | Gate 6 (문서 정합성 — 절차 검증) |
 | E12. `ginIndex: true` 적용 후 `changes @> ...` 질의가 GIN 인덱스 사용 (EXPLAIN 확인은 smoke 수준) | B12 | — |
+| E13. 기존 0.1.0 flat 설치 위에 `applyAuditTableSchema({ partitioned: true })` 호출 → §8 절차를 안내하는 설명적 throw, 스키마·데이터 무변경 (half-applied 방지) | B13a | — |
 
 Gate 4의 최종 사인오프 소유는 스펙 06(G4 — `test/e2e/append-only.e2e-spec.ts`)이다.
 위 표의 "Gate 4" 표기는 기여(coverage) 표시이며, E1–E4/E7은 스펙 06 G4의 모드별
@@ -795,21 +862,25 @@ CHANGELOG에 명시한다:
   재적용하면 UPDATE/DELETE가 침묵 no-op에서 **예외 발생**으로 바뀐다(의도된
   fail-loud 업그레이드). 0.1.0 동작이 필요하면 `enforcement: 'rule'` 옵트아웃.
 - 번들 정적 파일 `dist/sql/audit-log-schema.sql`이 제거된다. 파일을 직접 읽던
-  (비문서화) 소비자는 `getAuditTableSQL()` 호출로 전환.
+  (비문서화) 소비자는 `getAuditTableSQL()` 호출로 전환. 같은 PR에서 build 스크립트의
+  `cp src/sql/*.sql dist/sql/` 단계를 제거한다(§Public API Changes 4 — 미제거 시
+  glob 매칭 실패로 전체 빌드가 깨진다).
 
 **CHANGELOG (0.2.0) 항목 초안**:
 
 - Added: `tableName` option (`AuditSharedOptions`) — 자동/수동/조회 전 경로 적용
 - Added: `getAuditTableSQL(options)` — `partitioned` / `enforcement` / `ginIndex` 변형
 - Added: `ensurePartitions(prisma, { tableName, ahead })`
-- Added: `AuditService.prune({ olderThan, mode, dryRun, client })` — 양 레이아웃 지원
+- Added: `AuditService.prune({ olderThan, mode, dryRun, client, timeoutMs, maxWaitMs })` — 양 레이아웃 지원
 - Changed: append-only 기본 강제가 침묵 RULE → `RAISE EXCEPTION` 트리거 (재적용 시 업그레이드)
 - Removed: 번들 `audit-log-schema.sql` 정적 파일 (동적 생성으로 대체)
 
 **README**:
 
 - 신규 "Retention & Partitioning" 섹션: 파티셔닝 quick start, `ensurePartitions`/`prune`
-  사용법, cron + pg_partman 레시피(§SQL/DDL 7), 권한 요구 사항(B25).
+  사용법, cron + pg_partman 레시피(§SQL/DDL 7), 권한 요구 사항(B25), flat prune의
+  Prisma 인터랙티브 트랜잭션 timeout(기본 5초 → 라이브러리 기본 60초,
+  `timeoutMs`/`maxWaitMs`로 조정 — B23).
 - 신규 "Hardening" 섹션: REVOKE/TRUNCATE 가이드(§SQL/DDL 6), 트리거 vs RULE 비교,
   소유자/superuser 우회 한계.
 - Schema Setup 섹션을 `applyAuditTableSchema(prisma, options)` 기준으로 갱신,
@@ -839,7 +910,9 @@ CHANGELOG에 명시한다:
   필요)을 일으켜 0.2.0 범위를 초과하는 복구 로직을 요구한다. pg_partman 사용자는
   partman의 default 관리 기능을 쓰면 된다.
 - **D2. 월 경계는 UTC 고정.** 서버 로컬 타임존 의존은 파티션 이름·범위의 재현성을
-  깨뜨린다. 파티션 범위 리터럴에 `+00` 오프셋 명시.
+  깨뜨린다. 파티션 범위 리터럴에 `+00` 오프셋 명시. §SQL/DDL 8의 수동 마이그레이션
+  레시피는 SQL의 `date_trunc`/`format %L`이 세션 TimeZone을 따르므로 **UTC 세션을
+  요구**한다(`SET LOCAL TIME ZONE 'UTC'` — B14, E11이 비UTC 세션으로 고정 검증).
 - **D3. 기본 테이블의 인덱스 이름은 0.1.0 레거시(`idx_audit_*`)를 유지한다.**
   파생 이름(`idx_audit_logs_*`)으로 통일하면 기존 설치 재적용 시 동일 정의의 중복
   인덱스가 생긴다(쓰기 비용 2배). 커스텀 테이블명은 0.2.0 신규이므로 파생 규칙만
