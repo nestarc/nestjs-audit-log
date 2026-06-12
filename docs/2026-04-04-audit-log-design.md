@@ -23,10 +23,10 @@ NestJS 생태계에 audit-log 패키지는 여럿 있지만, 모두 한 가지 �
 | 결정 | 선택 | 이유 |
 |------|------|------|
 | ORM | Prisma 전용 | tenancy와 동일 전략. 생태계 일관성 |
-| 저장소 | 같은 PostgreSQL DB | 추가 인프라 불필요. append-only rule로 불변성 |
+| 저장소 | 같은 PostgreSQL DB | 추가 인프라 불필요. append-only trigger enforcement로 불변성 |
 | 자동 추적 | Prisma `$extends` | tenancy와 동일 패턴. 모든 모델 커버 |
 | Actor 전파 | AsyncLocalStorage | tenancy와 동일 패턴. REQUEST scope 회피 |
-| tenancy 연동 | optional peer dep | 미설치 시 tenantId=null. graceful degradation |
+| tenancy 연동 | optional peer dep + `tenantResolver` | 명시 resolver 우선, `@nestarc/tenancy` fallback, 쿼리는 `tenantId`/`allTenants`로 명시 스코프 |
 
 ## Module API
 
@@ -79,18 +79,33 @@ class PaymentService {
 
 ```typescript
 const result = await auditService.query({
+  tenantId: 'tenant-1',
   actorId: 'user-123',
   action: 'invoice.*',     // 와일드카드 지원
   targetType: 'Invoice',
+  source: 'auto',
+  result: 'success',
   from: new Date('2026-01-01'),
   to: new Date('2026-04-01'),
   limit: 50,
-  offset: 0,
+  includeTotal: false,
 });
-// → { entries: AuditEntry[], total: number }
+// → { entries: AuditEntry[], nextCursor: string | null, hasMore: boolean }
+
+if (result.hasMore) {
+  await auditService.query({
+    tenantId: 'tenant-1',
+    cursor: result.nextCursor!,
+    limit: 50,
+    includeTotal: false,
+  });
+}
 ```
 
-tenantId는 자동 주입 — 테넌트 간 로그 격리.
+기본 정렬은 `(created_at DESC, id DESC)`이며 cursor는 같은 timestamp 경계에서도
+중복/누락을 막는다. `includeTotal: false`는 피드형 조회에서 `COUNT(*)`를 생략한다.
+교차 테넌트 조회는 `allTenants: true`를 명시한 경우에만 허용하며, `tenantId`와
+`allTenants`는 동시에 사용할 수 없다.
 
 ### Decorators
 
@@ -125,9 +140,26 @@ CREATE TABLE audit_logs (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Append-only enforcement (SOC2)
-CREATE RULE audit_logs_no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING;
-CREATE RULE audit_logs_no_delete AS ON DELETE TO audit_logs DO INSTEAD NOTHING;
+-- Append-only trigger enforcement (SOC2, default)
+CREATE OR REPLACE FUNCTION audit_logs_block_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '@nestarc/audit-log: % blocked on append-only table %',
+    TG_OP, TG_TABLE_NAME
+    USING ERRCODE = 'P0001',
+          HINT = 'Use AuditService.prune() for retention maintenance.';
+END;
+$$;
+
+CREATE TRIGGER audit_logs_no_update_trg
+  BEFORE UPDATE ON audit_logs
+  FOR EACH ROW EXECUTE FUNCTION audit_logs_block_mutation();
+
+CREATE TRIGGER audit_logs_no_delete_trg
+  BEFORE DELETE ON audit_logs
+  FOR EACH ROW EXECUTE FUNCTION audit_logs_block_mutation();
+
+-- Legacy RULE mode remains available through getAuditTableSQL({ enforcement: 'rule' }).
 
 -- Query performance indexes
 CREATE INDEX idx_audit_tenant_created ON audit_logs (tenant_id, created_at DESC);
@@ -141,7 +173,7 @@ CREATE INDEX idx_audit_action ON audit_logs (action);
 | Field | Type | Source | Description |
 |-------|------|--------|-------------|
 | `id` | UUID | auto | PK |
-| `tenant_id` | TEXT | TenancyService | `@nestarc/tenancy` 자동 주입. 미설치 시 null |
+| `tenant_id` | TEXT | resolveTenantId | `tenantResolver` 우선, `@nestarc/tenancy` fallback. 자동 경로에서 `tenantRequired` + null이면 audit entry skipped |
 | `actor_id` | TEXT | AuditActorMiddleware | actorExtractor에서 추출 |
 | `actor_type` | TEXT | AuditActorMiddleware | 'user' \| 'system' \| 'api_key' |
 | `actor_ip` | TEXT | AuditActorMiddleware | req.ip |
@@ -203,7 +235,8 @@ HTTP Request
     → TenantMiddleware (tenant 추출 — @nestarc/tenancy)
       → Controller → Service
         → Prisma Extension (CUD 감지)
-          → trackedModels 확인 (미포함이면 skip)
+          → shouldTrackModel 확인 (기본은 모든 모델 추적, trackedModels allowlist/ignoredModels denylist)
+          → resolveTenantId (tenantResolver → @nestarc/tenancy → null)
           → [update/delete] before 상태 findFirst
           → 원본 쿼리 실행
           → diff 계산 + sensitiveFields 마스킹
@@ -224,40 +257,42 @@ HTTP Request
 
 `*Many` 작업의 제약: Prisma가 개별 레코드를 반환하지 않으므로, `createMany`/`updateMany`는 변경 수만 기록. `deleteMany`는 삭제 전 조회가 가능하므로 개별 기록.
 
-### @nestarc/tenancy Integration
+### Tenant Resolution
 
 ```typescript
-// audit-context.ts 또는 audit.service.ts 내부
-private getTenantId(): string | null {
-  try {
-    // optional peer — dynamic require
-    const { TenancyContext } = require('@nestarc/tenancy');
-    return new TenancyContext().getTenantId();
-  } catch {
-    return null; // @nestarc/tenancy 미설치
-  }
+function resolveTenantId(options?: {
+  tenantResolver?: () => string | null;
+}): string | null {
+  if (options?.tenantResolver) return options.tenantResolver();
+  // optional peer probe, cached process-wide
+  // @nestarc/tenancy unavailable -> null
+  return new TenancyContext().getTenantId();
 }
 ```
 
-tenancy가 설치되어 있으면 tenantId 자동 주입. 미설치 시 null. 별도 설정 불필요.
+자동 추적 경로에서 `tenantRequired: true`이고 tenant가 없으면 audit row를 쓰지 않고
+`onAuditError(..., { phase: 'tenant-resolution' })` 또는 logger로 `audit entry skipped`를
+보고한다. 이 경우에도 business mutation still returns. `AuditService.log()`와 ambient
+`query()`/`getById()`는 `tenantRequired: true`일 때 tenant가 없으면 throw한다. 관리자 조회는
+`allTenants: true`를 명시해야 하며 `tenantId`와 `allTenants`는 상호 배타적이다.
 
 ## Performance Considerations
 
-- `trackedModels` 화이트리스트로 추적 대상 제한 → 미추적 모델 오버헤드 0
+- 기본 설정은 모든 모델을 추적한다. `trackedModels` allowlist 또는 `ignoredModels` denylist로 추적 대상 제한 → 미추적 모델 오버헤드 0
 - before 조회는 update/delete에서만 발생 → create/read 오버헤드 0
 - automatic audit INSERT는 caller transaction에 참여하지 않는다. 비즈니스 쓰기는 caller `$transaction`에 남지만, 자동 감사 INSERT는 base client best-effort 경로이므로 rollback 시 orphan row가 남을 수 있다.
-- JSONB 인덱스는 v0.2.0에서 GIN 인덱스 추가 고려
+- Query API v2는 `(tenant_id, created_at DESC)`와 `(actor_id, created_at DESC)` 인덱스, partitioned table의 BRIN 인덱스를 활용한다.
+- `AuditService.prune()`는 flat table에서 trigger/RULE을 일시적으로 우회하고, partitioned table에서는 만료된 월 partition만 drop/detach한다.
 
 ## Security
 
-- **Append-only**: PostgreSQL RULE로 UPDATE/DELETE 차단. DB 레벨 불변성.
+- **Append-only**: PostgreSQL trigger enforcement로 UPDATE/DELETE를 예외 처리한다. RULE enforcement는 legacy compatibility mode.
 - **필드 마스킹**: `sensitiveFields`에 지정된 필드는 diff에서 `[REDACTED]`로 대체.
-- **테넌트 격리**: tenancy RLS 적용 시 audit_logs도 테넌트 간 격리 가능.
+- **테넌트 격리**: query/getById는 ambient tenant, explicit `tenantId`, explicit `allTenants` 매트릭스로 스코프를 결정한다.
 - **SQL injection**: Prisma `$executeRaw` tagged template 사용 (tenancy와 동일 패턴).
 
-## Out of Scope (v0.1.0)
+## Out of Scope (v0.2.0)
 
-- Retention/archival policy (v0.2.0)
 - SIEM export (Datadog, S3) (v0.3.0)
 - CSV/JSON bulk export endpoint
 - Webhook on specific actions
@@ -295,3 +330,4 @@ tenancy가 설치되어 있으면 tenantId 자동 주입. 미설치 시 null. �
 ## Change History
 
 - 2026-06-12: Corrected transaction model language. Automatic audit INSERT는 caller transaction에 참여하지 않는다; use manual `AuditService.log(input, tx)` when audit rows must roll back atomically with business work.
+- 2026-06-12: Aligned Query API, trigger enforcement, tenantRequired path behavior, tracking defaults, and retention notes with v0.2.0 specs.

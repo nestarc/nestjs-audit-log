@@ -24,7 +24,7 @@ Audit logging module for NestJS with automatic Prisma change tracking and append
 - **Query API v2** — `AuditService.query()` with keyset cursors, wildcard filters, and optional totals
 - **Decorators** — `@NoAudit()` / `@AuditAction()` on handlers or controllers
 - **Custom primary keys** — configurable per-model PK field (defaults to `id`)
-- **Multi-tenant** — optional `@nestarc/tenancy` integration with fail-closed mode
+- **Multi-tenant** — optional `@nestarc/tenancy` integration with explicit tenant scoping
 - **Append-only** — trigger enforcement blocks UPDATE/DELETE on audit records by default
 
 ## Quick Start
@@ -113,7 +113,7 @@ import { PrismaService } from './prisma.service';
           type: req.user ? 'user' : 'system',
           ip: req.ip,
         }),
-        // tenantRequired: true, // fail-closed for multi-tenant deployments
+        // tenantRequired: true, // fail-closed for manual log/query APIs
       }),
     }),
   ],
@@ -142,7 +142,7 @@ export class UserService {
 |--------|------|---------|-------------|
 | `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
 | `actorExtractor` | `(req) => AuditActor \| Promise<AuditActor>` | *required* | Extracts actor from HTTP request |
-| `tenantRequired` | `boolean` | `false` | When `true`, throws if tenant context is unavailable |
+| `tenantRequired` | `boolean` | `false` | When `true`, module-side `log()` and ambient `query()`/`getById()` require tenant context unless `tenantId` or `allTenants` is explicit |
 | `excludeRoutes` | `RouteInfo[]` | `[]` | Routes excluded from `AuditActorMiddleware` |
 | `registerGlobalInterceptor` | `boolean` | `true` | Set `false` to bind `AuditInterceptor` manually |
 | `correlationIdHeader` | `string` | `x-request-id` | Header copied into `metadata.correlationId` |
@@ -203,19 +203,21 @@ Apply to individual handlers or entire controllers:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `trackedModels` | `string[]` | — | Whitelist of Prisma model names to track |
-| `ignoredModels` | `string[]` | — | Blacklist (used when `trackedModels` is not set) |
+| `trackedModels` | `string[]` | all models when omitted | Allowlist of Prisma model names to track. `trackedModels: []` means no models are audited |
+| `ignoredModels` | `string[]` | `[]` | Denylist used only when `trackedModels` is not set |
 | `sensitiveFields` | `string[]` | `[]` | Fields to mask as `[REDACTED]` in diffs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Per-model fields unioned with `sensitiveFields` |
 | `primaryKey` | `Record<string, string>` | `{ *: 'id' }` | Map of model name to primary key field name |
 | `tableName` | `string` | `audit_logs` | Audit table used by automatic inserts |
-| `tenantRequired` | `boolean` | `false` | Skip automatic audit rows when tenant context is missing |
+| `tenantRequired` | `boolean` | `false` | Skip automatic audit rows when tenant context is missing and report `audit entry skipped` through `onAuditError` or `logger.warn`; the business mutation still returns |
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup |
 | `onAuditError` | `(error, ctx) => void` | — | Structured audit failure callback |
 | `logFailures` | `boolean` | `false` | Record best-effort failure audit rows for business write errors |
 | `ignoreTimestampOnlyUpdates` | `boolean` | `false` | Suppress `@updatedAt`-only update entries |
 | `prismaModule` | generated Prisma module | `@prisma/client` | Namespace for custom Prisma client output paths |
-| `experimentalTxAudit` | `boolean` | `false` | Experimental, no semver guarantee. Reserved for transaction-aware audit routing when supported by Prisma internals |
+| `experimentalTxAudit` | `boolean` | `false` | Experimental opt-in, no semver guarantee. Routes audit reads/inserts through an interactive transaction client when Prisma internals expose one; logs `tx-aware audit unavailable` and falls back otherwise |
+
+When neither `trackedModels` nor `ignoredModels` is configured, `createAuditExtension()` audits all Prisma models and emits a one-time `No trackedModels/ignoredModels configured` warning. Set `trackedModels` as an allowlist or `ignoredModels` as a denylist to narrow scope.
 
 ### Schema Utilities
 
@@ -283,18 +285,22 @@ Nested relation writes are not fully audited in v0.2.0. When a tracked model mut
 
 The key contract is explicit: automatic audit inserts do not join the caller transaction. If the caller transaction rolls back, the business row rolls back but the automatic audit row can remain as an orphan row. For updates inside an open transaction, automatic before/after diffs are based on committed state visible to the base client, so the diff can be empty or stale.
 
-When transaction consistency matters, use `AuditService.log(input, tx)` for the audit row you need to roll back with the business work. `experimentalTxAudit` is reserved for future transaction-aware routing through Prisma internals; it is off by default, has no semver guarantee, and can make audit statement failures abort the surrounding PostgreSQL transaction.
+When transaction consistency matters, use `AuditService.log(input, tx)` for the audit row you need to roll back with the business work. `experimentalTxAudit` is an opt-in experimental path that attempts transaction-aware routing through Prisma internals. It is off by default, has no semver guarantee, falls back with a `tx-aware audit unavailable` warning when unsupported, and can make audit statement failures abort the surrounding PostgreSQL transaction.
 
 ## Multi-Tenancy
 
-If `@nestarc/tenancy` is installed, `tenant_id` is automatically included in all audit records and query filters.
+Tenant resolution uses this order: explicit `tenantResolver`, optional `@nestarc/tenancy`, then `null`. A throwing `tenantResolver` is treated differently by path so automatic auditing never breaks the business mutation.
 
-| Scenario | Behavior |
-|----------|----------|
-| Not installed | `tenant_id` is `null`, library works normally |
-| Installed, context available | `tenant_id` auto-injected |
-| Installed, context fails | Warning logged, `tenant_id` falls back to `null` |
-| `tenantRequired: true` + context fails | `log()` and `query()` throw an error |
+| Path | Missing tenant behavior |
+|------|-------------------------|
+| Automatic tracking, `tenantRequired: false` | Writes an audit row with `tenant_id = null` |
+| Automatic tracking, `tenantRequired: true` | Skips the audit row, reports `audit entry skipped` with phase `tenant-resolution`, and the business mutation still returns |
+| `AuditService.log()` with `tenantRequired: true` | Throws unless tenant context is available |
+| `query()` / `getById()` with explicit `tenantId` | Scopes to that tenant |
+| `query()` / `getById()` with `allTenants: true` | Omits tenant filtering for authorized cross-tenant reads |
+| `query()` / `getById()` with `tenantRequired: true` and no tenant | Throws unless `tenantId` or `allTenants` is explicit |
+
+`tenantId` and `allTenants` are mutually exclusive; the thrown error includes `tenantId and allTenants are mutually exclusive`. Without `tenantRequired`, an ambient query with no tenant context is allowed but logs a one-time warning because it is unscoped.
 
 ## Performance
 

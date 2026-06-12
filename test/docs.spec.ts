@@ -74,4 +74,32 @@ describe('v0.2.0 documentation gates', () => {
     expect(readme).toContain('Nested writes');
     expect(readme).toContain('trigger enforcement');
   });
+
+  it('documents tenantRequired path differences and current transaction opt-in behavior', () => {
+    const readme = read('README.md');
+
+    expect(readme).toContain('audit entry skipped');
+    expect(readme).toContain('business mutation still returns');
+    expect(readme).toContain('tenantId and allTenants are mutually exclusive');
+    expect(readme).toContain('No trackedModels/ignoredModels configured');
+    expect(readme).toContain('tx-aware audit unavailable');
+    expect(readme).not.toContain('reserved for future transaction-aware routing');
+  });
+
+  it('keeps the design document aligned with v0.2.0 query, storage, and tenancy contracts', () => {
+    const design = read('docs/2026-04-04-audit-log-design.md');
+
+    expect(design).toContain('nextCursor');
+    expect(design).toContain('includeTotal: false');
+    expect(design).toContain('trigger enforcement');
+    expect(design).toContain('resolveTenantId');
+    expect(design).toContain('tenantResolver');
+    expect(design).toContain('audit entry skipped');
+    expect(design).not.toContain('offset: 0');
+    expect(design).not.toContain('{ entries: AuditEntry[], total: number }');
+    expect(design).not.toContain(
+      'CREATE RULE audit_logs_no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING',
+    );
+    expect(design).not.toContain('Retention/archival policy (v0.2.0)');
+  });
 });
