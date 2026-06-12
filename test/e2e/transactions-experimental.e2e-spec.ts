@@ -92,6 +92,58 @@ describe('experimental transaction-aware audit E2E', () => {
       after: 'After',
     });
   });
+
+  it('reports tx-routed audit insert failures and leaves the caller transaction aborted', async () => {
+    const onAuditError = jest.fn();
+    const brokenAuditPrisma = basePrisma.$extends(
+      createAuditExtension({
+        trackedModels: ['User'],
+        experimentalTxAudit: true,
+        tableName: 'missing_audit_logs',
+        onAuditError,
+        logger: silentLogger,
+      }),
+    );
+    let followUpStatementFailed = false;
+
+    await expect(
+      AuditContext.run(
+        { actor: { id: 'tx-user', type: 'user' }, noAudit: false },
+        async () =>
+          await brokenAuditPrisma.$transaction(async (tx: any) => {
+            await tx.user.create({
+              data: {
+                name: 'Abort User',
+                email: 'abort-experimental@test.com',
+                password: 'pw',
+              },
+            });
+
+            try {
+              await tx.user.count();
+            } catch (error) {
+              followUpStatementFailed = true;
+              throw error;
+            }
+          }),
+      ),
+    ).rejects.toThrow();
+
+    expect(followUpStatementFailed).toBe(true);
+    expect(onAuditError).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        phase: 'insert',
+        model: 'User',
+        operation: 'create',
+      }),
+    );
+
+    const users = await basePrisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) AS count FROM users WHERE email = 'abort-experimental@test.com'
+    `;
+    expect(Number(users[0].count)).toBe(0);
+  });
 });
 
 const silentLogger = {

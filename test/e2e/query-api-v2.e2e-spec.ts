@@ -491,4 +491,33 @@ describe('Query API v2 E2E', () => {
     expect(plan).toContain(currentPartition);
     expect(plan).not.toContain(nextPartition);
   });
+
+  it('prunes schema-qualified partitioned audit tables', async () => {
+    const schemaName = 'audit_schema_e2e';
+    const tableName = `${schemaName}.audit_logs`;
+
+    await prisma.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+    await dropAuditTable(tableName);
+
+    try {
+      await applyAuditTableSchema(prisma, {
+        tableName,
+        partitioned: true,
+      });
+
+      const result = await serviceFor(tableName).prune({
+        olderThan: new Date('2030-01-01T00:00:00.000Z'),
+      });
+
+      expect(result.layout).toBe('partitioned');
+      expect(result.mode).toBe('drop');
+      expect(result.prunedPartitions.every((partition) =>
+        partition.startsWith(`${schemaName}.`),
+      )).toBe(true);
+      expect(result.prunedPartitions.length).toBeGreaterThan(0);
+    } finally {
+      await dropAuditTable(tableName);
+      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE`);
+    }
+  });
 });

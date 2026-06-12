@@ -385,15 +385,18 @@ export class AuditService {
     const Prisma = this.Prisma;
     const rows = await client.$queryRaw(
       Prisma.sql!`
-        SELECT child.relname AS "partitionName",
+        SELECT child_ns.nspname AS "partitionSchema",
+               child.relname AS "partitionName",
                pg_get_expr(child.relpartbound, child.oid) AS "partitionBound",
                NULL::text AS "upperBound"
         FROM pg_inherits
         JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
         JOIN pg_class child ON pg_inherits.inhrelid = child.oid
+        JOIN pg_namespace child_ns ON child.relnamespace = child_ns.oid
         WHERE parent.oid = to_regclass(${this.tableName})
       `,
     ) as Array<{
+      partitionSchema: string;
       partitionName: string;
       upperBound?: string | Date | null;
       partitionBound?: string | null;
@@ -407,7 +410,7 @@ export class AuditService {
           ? new Date(upperBound).getTime() <= options.olderThan.getTime()
           : false;
       })
-      .map((row) => validateAuditTableName(row.partitionName));
+      .map((row) => this.qualifyPartitionName(row));
     const mode = options.mode ?? 'drop';
 
     if (options.dryRun) {
@@ -452,6 +455,17 @@ export class AuditService {
     if (!bound) return null;
     const match = bound.match(/TO \('([^']+)'\)/);
     return match?.[1] ?? null;
+  }
+
+  private qualifyPartitionName(row: {
+    partitionSchema: string;
+    partitionName: string;
+  }): string {
+    const partitionName = validateAuditTableName(row.partitionName);
+    if (!this.tableName.includes('.')) {
+      return partitionName;
+    }
+    return validateAuditTableName(`${row.partitionSchema}.${partitionName}`);
   }
 
   private async pruneFlat(
