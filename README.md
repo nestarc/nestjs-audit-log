@@ -186,7 +186,18 @@ const result = await auditService.query({
 // -> { entries: AuditEntry[], nextCursor: string | null, hasMore: boolean }
 
 if (result.nextCursor) {
-  await auditService.query({ cursor: result.nextCursor, limit: 50 });
+  await auditService.query({
+    actorId: 'user-123',
+    action: 'invoice.*',
+    targetType: 'Invoice',
+    source: 'auto',
+    result: 'success',
+    from: new Date('2026-01-01'),
+    to: new Date('2026-04-01'),
+    cursor: result.nextCursor,
+    limit: 50,
+    includeTotal: false,
+  });
 }
 ```
 
@@ -265,11 +276,20 @@ const page = await auditService.query({
 });
 
 if (page.hasMore) {
-  await auditService.query({ tenantId: 'tenant-1', cursor: page.nextCursor! });
+  await auditService.query({
+    tenantId: 'tenant-1',
+    action: 'invoice.*',
+    actorType: 'user',
+    source: 'auto',
+    result: 'success',
+    cursor: page.nextCursor!,
+    limit: 50,
+    includeTotal: false,
+  });
 }
 ```
 
-`includeTotal: false` skips the `COUNT(*)` query and omits `total` from the result. `getById(id, { tenantId })` returns one audit row within the same tenant scoping rules; use `allTenants: true` only for deliberately authorized cross-tenant admin reads.
+`includeTotal: false` skips the `COUNT(*)` query and omits `total` from the result. Cursors do not encode filters; keep the same filter set on each page unless you intentionally want a new filtered scan below the cursor boundary. `getById(id, { tenantId })` returns one audit row within the same tenant scoping rules; use `allTenants: true` only for deliberately authorized cross-tenant admin reads.
 
 ### Nested writes
 

@@ -383,6 +383,7 @@ export class AuditService {
     options: AuditPruneOptions,
   ): Promise<AuditPruneResult> {
     const Prisma = this.Prisma;
+    const mode = this.resolvePartitionPruneMode(options.mode);
     const rows = await client.$queryRaw(
       Prisma.sql!`
         SELECT child_ns.nspname AS "partitionSchema",
@@ -411,7 +412,6 @@ export class AuditService {
           : false;
       })
       .map((row) => this.qualifyPartitionName(row));
-    const mode = options.mode ?? 'drop';
 
     if (options.dryRun) {
       return {
@@ -449,6 +449,20 @@ export class AuditService {
       deletedRows: null,
       dryRun: false,
     };
+  }
+
+  private resolvePartitionPruneMode(
+    mode?: AuditPruneOptions['mode'],
+  ): 'drop' | 'detach' {
+    if (mode === undefined) {
+      return 'drop';
+    }
+    if (mode === 'drop' || mode === 'detach') {
+      return mode;
+    }
+    throw new TypeError(
+      '[@nestarc/audit-log] prune mode must be either drop or detach.',
+    );
   }
 
   private parsePartitionUpperBound(bound?: string | null): string | null {
@@ -562,6 +576,11 @@ export class AuditService {
     }
 
     if (hasExplicitTenantId) {
+      if (typeof explicitTenantId !== 'string') {
+        throw new TypeError(
+          '[@nestarc/audit-log] tenantId must be a string when provided.',
+        );
+      }
       return explicitTenantId;
     }
 

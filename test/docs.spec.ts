@@ -75,6 +75,23 @@ describe('v0.2.0 documentation gates', () => {
     expect(readme).toContain('trigger enforcement');
   });
 
+  it('keeps README cursor pagination examples on a fixed filter set', () => {
+    const readme = read('README.md');
+
+    expect(readme).toContain(
+      `await auditService.query({
+    tenantId: 'tenant-1',
+    action: 'invoice.*',
+    actorType: 'user',
+    source: 'auto',
+    result: 'success',
+    cursor: page.nextCursor!,
+    limit: 50,
+    includeTotal: false,
+  });`,
+    );
+  });
+
   it('documents tenantRequired path differences and current transaction opt-in behavior', () => {
     const readme = read('README.md');
 

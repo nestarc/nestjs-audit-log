@@ -600,6 +600,15 @@ describe('AuditService', () => {
       });
     });
 
+    it('rejects runtime null tenantId before SQL execution', async () => {
+      mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+
+      await expect(
+        service.query({ tenantId: null, includeTotal: false } as any),
+      ).rejects.toThrow('tenantId must be a string when provided');
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('warns only once per service instance for unscoped queries', async () => {
       mockPrisma.$queryRaw
         .mockResolvedValueOnce([])
@@ -649,6 +658,15 @@ describe('AuditService', () => {
       await expect(
         service.getById(uuid1, { tenantId: '', allTenants: true }),
       ).rejects.toThrow('tenantId and allTenants are mutually exclusive');
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('rejects runtime null tenantId before SQL execution', async () => {
+      mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+
+      await expect(
+        service.getById(uuid1, { tenantId: null } as any),
+      ).rejects.toThrow('tenantId must be a string when provided');
       expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
     });
 
@@ -771,6 +789,26 @@ describe('AuditService', () => {
         deletedRows: null,
         dryRun: true,
       });
+      expect(mockPrisma.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid partition prune modes instead of defaulting to drop', async () => {
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([{ relkind: 'p' }])
+        .mockResolvedValueOnce([
+          {
+            partitionName: 'audit_logs_y2025m12',
+            upperBound: '2026-01-01 00:00:00+00',
+          },
+        ]);
+      mockPrisma.$executeRawUnsafe = jest.fn();
+
+      await expect(
+        service.prune({
+          olderThan: new Date('2026-02-01T00:00:00.000Z'),
+          mode: 'detatch' as any,
+        }),
+      ).rejects.toThrow('prune mode must be either drop or detach');
       expect(mockPrisma.$executeRawUnsafe).not.toHaveBeenCalled();
     });
 
