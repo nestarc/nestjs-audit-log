@@ -17,7 +17,7 @@ Audit logging module for NestJS with automatic Prisma change tracking and append
 ## Features
 
 - **Automatic CUD tracking** via Prisma `$extends` — create, update, delete, upsert, and batch operations
-- **Caller transaction aware** — automatic tracking participates in caller's `$transaction`; audit insert is best-effort
+- **Transaction contract is explicit** — business writes keep the caller `$transaction`, but automatic audit inserts do not join the caller transaction (orphan rows on rollback — see Transaction Model)
 - **Before/after diffs** with deep comparison for JSON fields
 - **Sensitive field masking** — configurable `[REDACTED]` replacement
 - **Manual logging API** — `AuditService.log()` for business events (with optional transaction support)
@@ -141,8 +141,12 @@ export class UserService {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
-| `actorExtractor` | `(req) => AuditActor` | *required* | Extracts actor from HTTP request |
+| `actorExtractor` | `(req) => AuditActor \| Promise<AuditActor>` | *required* | Extracts actor from HTTP request |
 | `tenantRequired` | `boolean` | `false` | When `true`, throws if tenant context is unavailable |
+| `excludeRoutes` | `RouteInfo[]` | `[]` | Routes excluded from `AuditActorMiddleware` |
+| `registerGlobalInterceptor` | `boolean` | `true` | Set `false` to bind `AuditInterceptor` manually |
+| `correlationIdHeader` | `string` | `x-request-id` | Header copied into `metadata.correlationId` |
+| `correlationIdGetter` | `(req) => string \| undefined` | — | Custom correlation ID source |
 
 ### AuditService
 
@@ -192,6 +196,7 @@ Apply to individual handlers or entire controllers:
 | `ignoredModels` | `string[]` | — | Blacklist (used when `trackedModels` is not set) |
 | `sensitiveFields` | `string[]` | `[]` | Fields to mask as `[REDACTED]` in diffs |
 | `primaryKey` | `Record<string, string>` | `{ *: 'id' }` | Map of model name to primary key field name |
+| `experimentalTxAudit` | `boolean` | `false` | Experimental, no semver guarantee. Reserved for transaction-aware audit routing when supported by Prisma internals |
 
 ### Schema Utilities
 
@@ -203,13 +208,15 @@ Apply to individual handlers or entire controllers:
 
 ### Transaction Model
 
-| Path | Caller tx participation | Audit insert |
-|------|------------------------|--------------|
-| Automatic tracking (extension) | Yes — `query(args)` joins caller's `$transaction` | Best-effort — runs after business write, warns on failure |
-| Manual logging (`log(input, tx)`) | Yes — when `tx` provided | Participates in provided transaction |
-| Manual logging (`log(input)`) | No | Independent write via base client |
+| Path | Business write | Audit insert |
+|------|----------------|--------------|
+| Automatic tracking (extension) | Uses Prisma's `query(args)`, so the business write remains in the caller `$transaction` | Best-effort via the base client; automatic audit inserts do not join the caller transaction |
+| Manual logging with `AuditService.log(input, tx)` | Caller-controlled | Participates in the provided transaction |
+| Manual logging with `AuditService.log(input)` | Caller-controlled | Independent write via the base client |
 
-The automatic extension uses Prisma's `query(args)` callback, which preserves the caller's transaction context. The audit insert runs separately via the base client and does not block or fail the business operation. If audit insert fails, a warning is logged.
+The key contract is explicit: automatic audit inserts do not join the caller transaction. If the caller transaction rolls back, the business row rolls back but the automatic audit row can remain as an orphan row. For updates inside an open transaction, automatic before/after diffs are based on committed state visible to the base client, so the diff can be empty or stale.
+
+When transaction consistency matters, use `AuditService.log(input, tx)` for the audit row you need to roll back with the business work. `experimentalTxAudit` is reserved for future transaction-aware routing through Prisma internals; it is off by default, has no semver guarantee, and can make audit statement failures abort the surrounding PostgreSQL transaction.
 
 ## Multi-Tenancy
 

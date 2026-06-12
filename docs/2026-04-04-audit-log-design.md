@@ -207,7 +207,7 @@ HTTP Request
           → [update/delete] before 상태 findFirst
           → 원본 쿼리 실행
           → diff 계산 + sensitiveFields 마스킹
-          → audit_logs INSERT (같은 트랜잭션)
+          → audit_logs INSERT (base client best-effort; caller transaction 밖)
 ```
 
 ### Prisma Extension Behavior
@@ -245,7 +245,7 @@ tenancy가 설치되어 있으면 tenantId 자동 주입. 미설치 시 null. �
 
 - `trackedModels` 화이트리스트로 추적 대상 제한 → 미추적 모델 오버헤드 0
 - before 조회는 update/delete에서만 발생 → create/read 오버헤드 0
-- audit_logs INSERT는 원본 쿼리와 같은 batch transaction으로 실행 → 원자성 보장
+- automatic audit INSERT는 caller transaction에 참여하지 않는다. 비즈니스 쓰기는 caller `$transaction`에 남지만, 자동 감사 INSERT는 base client best-effort 경로이므로 rollback 시 orphan row가 남을 수 있다.
 - JSONB 인덱스는 v0.2.0에서 GIN 인덱스 추가 고려
 
 ## Security
@@ -291,3 +291,7 @@ tenancy가 설치되어 있으면 tenantId 자동 주입. 미설치 시 null. �
 - E2E 테스트: 실제 PostgreSQL에서 자동 추적 + 쿼리 검증
 - `@nestarc/tenancy` 미설치 상태에서도 정상 동작
 - README: Quick Start 5분 이내 완료 가능
+
+## Change History
+
+- 2026-06-12: Corrected transaction model language. Automatic audit INSERT는 caller transaction에 참여하지 않는다; use manual `AuditService.log(input, tx)` when audit rows must roll back atomically with business work.

@@ -1,10 +1,12 @@
 import {
   DynamicModule,
+  Inject,
   MiddlewareConsumer,
   Module,
   NestModule,
 } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import nestCorePackage from '@nestjs/core/package.json';
 import { AUDIT_LOG_OPTIONS } from './audit-log.constants';
 import {
   AuditLogModuleOptions,
@@ -16,21 +18,34 @@ import { AuditInterceptor } from './interceptors/audit.interceptor';
 
 @Module({})
 export class AuditLogModule implements NestModule {
+  constructor(
+    @Inject(AUDIT_LOG_OPTIONS)
+    private readonly options: AuditLogModuleOptions,
+  ) {}
+
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(AuditActorMiddleware).forRoutes('*');
+    const proxy = consumer.apply(AuditActorMiddleware);
+    const excluded = this.options.excludeRoutes ?? [];
+    const target = excluded.length > 0 ? proxy.exclude(...excluded) : proxy;
+    target.forRoutes(resolveMiddlewareWildcard());
   }
 
   static forRoot(options: AuditLogModuleOptions): DynamicModule {
+    const providers = [
+      { provide: AUDIT_LOG_OPTIONS, useValue: options },
+      AuditActorMiddleware,
+      AuditService,
+      AuditInterceptor,
+      ...(options.registerGlobalInterceptor !== false
+        ? [{ provide: APP_INTERCEPTOR, useExisting: AuditInterceptor }]
+        : []),
+    ];
+
     return {
       module: AuditLogModule,
       global: true,
-      providers: [
-        { provide: AUDIT_LOG_OPTIONS, useValue: options },
-        AuditActorMiddleware,
-        AuditService,
-        { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
-      ],
-      exports: [AuditService],
+      providers,
+      exports: [AuditService, AuditInterceptor],
     };
   }
 
@@ -47,9 +62,34 @@ export class AuditLogModule implements NestModule {
         },
         AuditActorMiddleware,
         AuditService,
-        { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+        AuditInterceptor,
+        {
+          provide: APP_INTERCEPTOR,
+          useFactory: (
+            moduleOptions: AuditLogModuleOptions,
+            interceptor: AuditInterceptor,
+          ) =>
+            moduleOptions.registerGlobalInterceptor === false
+              ? passThroughInterceptor
+              : interceptor,
+          inject: [AUDIT_LOG_OPTIONS, AuditInterceptor],
+        },
       ],
-      exports: [AuditService],
+      exports: [AuditService, AuditInterceptor],
     };
   }
+}
+
+const passThroughInterceptor = {
+  intercept: (_context: unknown, next: { handle: () => unknown }) =>
+    next.handle(),
+};
+
+export function resolveMiddlewareWildcard(nestCoreVersion?: string): string {
+  const version =
+    arguments.length === 0 ? nestCorePackage.version : nestCoreVersion;
+  const major =
+    typeof version === 'string' ? Number(version.split('.')[0]) : Number.NaN;
+
+  return Number.isFinite(major) && major >= 11 ? '{*splat}' : '*';
 }

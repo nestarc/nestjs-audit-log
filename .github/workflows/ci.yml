@@ -58,3 +58,73 @@ jobs:
 
       - name: E2E tests
         run: npm run test:e2e
+
+  peer-matrix:
+    runs-on: ubuntu-latest
+    needs: test
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { nest: 10, prisma: 5, express: 4 }
+          - { nest: 10, prisma: 6, express: 4 }
+          - { nest: 11, prisma: 5, express: 5 }
+          - { nest: 11, prisma: 6, express: 5 }
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: audit_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d audit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/audit_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install peer combination
+        run: |
+          npm install --no-save \
+            @nestjs/common@^${{ matrix.nest }} \
+            @nestjs/core@^${{ matrix.nest }} \
+            @nestjs/platform-express@^${{ matrix.nest }} \
+            @nestjs/testing@^${{ matrix.nest }} \
+            express@^${{ matrix.express }} \
+            @types/express@^${{ matrix.express }} \
+            @prisma/client@^${{ matrix.prisma }} \
+            prisma@^${{ matrix.prisma }}
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema=test/e2e/prisma/schema.prisma
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Push test schema
+        run: npx prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate
+
+      - name: E2E tests
+        run: npm run test:e2e

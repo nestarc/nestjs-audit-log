@@ -3,15 +3,46 @@ import { AUDIT_LOG_OPTIONS } from '../audit-log.constants';
 import { AuditLogModuleOptions } from '../interfaces/audit-log-options.interface';
 import {
   AuditEntry,
+  AuditGetByIdOptions,
   AuditQueryOptions,
   AuditQueryResult,
   ManualAuditLogInput,
 } from '../interfaces/audit-entry.interface';
-import { AuditContext } from './audit-context';
+import { AuditContext, mergeContextMetadata } from './audit-context';
 import { resolveTenantId } from '../utils/tenant';
 import { resolvePrismaNamespace } from '../prisma/prisma-namespace';
 import { getSensitiveFieldsFor, redactObject } from '../prisma/diff';
 import { validateAuditTableName } from '../sql/table-name';
+import { deriveAuditObjectNames } from '../sql';
+import {
+  decodeAuditCursor,
+  encodeAuditCursor,
+  escapeLikePattern,
+} from './audit-cursor';
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
+export interface AuditPruneOptions {
+  olderThan: Date;
+  mode?: 'drop' | 'detach';
+  dryRun?: boolean;
+  client?: any;
+  timeoutMs?: number;
+  maxWaitMs?: number;
+}
+
+export interface AuditPruneResult {
+  layout: 'flat' | 'partitioned';
+  mode: 'drop' | 'detach' | 'delete';
+  prunedPartitions: string[];
+  deletedRows: number | null;
+  dryRun: boolean;
+}
 
 @Injectable()
 export class AuditService {
@@ -61,9 +92,10 @@ export class AuditService {
           'Provide tenantResolver or ensure the ambient tenant context is set.',
       );
     }
-    const metadata = input.metadata
+    const mergedMetadata = mergeContextMetadata(input.metadata);
+    const metadata = mergedMetadata
       ? redactObject(
-          input.metadata,
+          mergedMetadata,
           getSensitiveFieldsFor(input.targetType ?? null, this.options),
         )
       : undefined;
@@ -111,53 +143,151 @@ export class AuditService {
   }
 
   async query(options: AuditQueryOptions): Promise<AuditQueryResult> {
+    this.validateQueryPagination(options);
     const Prisma = this.Prisma;
-    const conditions: unknown[] = [];
+    const baseConditions: unknown[] = [];
     const tenantId = this.resolveQueryTenantId(options);
+    const limit = options.limit ?? 50;
+    const offset = options.offset ?? 0;
 
     if (tenantId) {
-      conditions.push(Prisma.sql!`tenant_id = ${tenantId}`);
+      baseConditions.push(Prisma.sql!`tenant_id = ${tenantId}`);
     }
     if (options.actorId) {
-      conditions.push(Prisma.sql!`actor_id = ${options.actorId}`);
+      baseConditions.push(Prisma.sql!`actor_id = ${options.actorId}`);
+    }
+    if (options.actorType) {
+      baseConditions.push(Prisma.sql!`actor_type = ${options.actorType}`);
     }
     if (options.action) {
       if (options.action.includes('*')) {
-        const pattern = options.action.replace(/\*/g, '%');
-        conditions.push(Prisma.sql!`action LIKE ${pattern}`);
+        const pattern = escapeLikePattern(options.action).replace(/\*/g, '%');
+        baseConditions.push(Prisma.sql!`action LIKE ${pattern} ESCAPE '\\'`);
       } else {
-        conditions.push(Prisma.sql!`action = ${options.action}`);
+        baseConditions.push(Prisma.sql!`action = ${options.action}`);
       }
     }
     if (options.targetType) {
-      conditions.push(Prisma.sql!`target_type = ${options.targetType}`);
+      baseConditions.push(Prisma.sql!`target_type = ${options.targetType}`);
     }
     if (options.targetId) {
-      conditions.push(Prisma.sql!`target_id = ${options.targetId}`);
+      baseConditions.push(Prisma.sql!`target_id = ${options.targetId}`);
+    }
+    if (options.source) {
+      baseConditions.push(Prisma.sql!`source = ${options.source}`);
+    }
+    if (options.result) {
+      baseConditions.push(Prisma.sql!`result = ${options.result}`);
     }
     if (options.from) {
-      conditions.push(Prisma.sql!`created_at >= ${options.from}`);
+      baseConditions.push(Prisma.sql!`created_at >= ${options.from}`);
     }
     if (options.to) {
-      conditions.push(Prisma.sql!`created_at <= ${options.to}`);
+      baseConditions.push(Prisma.sql!`created_at <= ${options.to}`);
     }
 
-    const where =
-      conditions.length > 0
-        ? Prisma.sql!`WHERE ${Prisma.join!(conditions, ' AND ')}`
-        : Prisma.empty;
+    const entryConditions = [...baseConditions];
+    if (options.cursor) {
+      const cursor = decodeAuditCursor(options.cursor);
+      entryConditions.push(
+        Prisma.sql!`created_at <= ${cursor.ts}::timestamptz`,
+      );
+      entryConditions.push(
+        Prisma.sql!`(created_at, id) < (${cursor.ts}::timestamptz, ${cursor.id}::uuid)`,
+      );
+    }
 
-    const limit = options.limit ?? 50;
-    const offset = options.offset ?? 0;
+    const where = this.buildWhere(entryConditions);
+    const countWhere = this.buildWhere(baseConditions);
+    const pageLimit = limit + 1;
     const entriesSql = this.tableRef
+      ? Prisma.sql!`
+        SELECT id, tenant_id AS "tenantId", actor_id AS "actorId",
+               actor_type AS "actorType", actor_ip AS "actorIp",
+               action, target_type AS "targetType", target_id AS "targetId",
+               source, changes, metadata, result, created_at AS "createdAt",
+               to_char(created_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorTs"
+        FROM ${this.tableRef} ${where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${pageLimit} ${options.cursor ? Prisma.empty : Prisma.sql!`OFFSET ${offset}`}
+      `
+      : Prisma.sql!`
+        SELECT id, tenant_id AS "tenantId", actor_id AS "actorId",
+               actor_type AS "actorType", actor_ip AS "actorIp",
+               action, target_type AS "targetType", target_id AS "targetId",
+               source, changes, metadata, result, created_at AS "createdAt",
+               to_char(created_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorTs"
+        FROM audit_logs ${where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${pageLimit} ${options.cursor ? Prisma.empty : Prisma.sql!`OFFSET ${offset}`}
+      `;
+    const countSql = this.tableRef
+      ? Prisma.sql!`
+        SELECT COUNT(*) AS count FROM ${this.tableRef} ${countWhere}
+      `
+      : Prisma.sql!`
+        SELECT COUNT(*) AS count FROM audit_logs ${countWhere}
+      `;
+
+    const includeTotal = options.includeTotal !== false;
+    const [rawEntries, countResult] = includeTotal
+      ? await Promise.all([
+          this.options.prisma.$queryRaw(entriesSql) as Promise<
+            Array<AuditEntry & { cursorTs?: string }>
+          >,
+          this.options.prisma.$queryRaw(countSql) as Promise<[{ count: bigint }]>,
+        ])
+      : [
+          (await this.options.prisma.$queryRaw(entriesSql)) as Array<
+            AuditEntry & { cursorTs?: string }
+          >,
+          undefined,
+        ];
+
+    const { entries, hasMore, nextCursor } = this.pageEntries(
+      rawEntries,
+      limit,
+    );
+    const result: AuditQueryResult = {
+      entries,
+      hasMore,
+      nextCursor,
+    };
+
+    if (includeTotal) {
+      result.total = Number(countResult![0].count);
+    }
+
+    return result;
+  }
+
+  async getById(
+    id: string,
+    options: AuditGetByIdOptions = {},
+  ): Promise<AuditEntry | null> {
+    const normalizedId = id.toLowerCase();
+    if (!isUuid(normalizedId)) {
+      return null;
+    }
+
+    const Prisma = this.Prisma;
+    const conditions: unknown[] = [Prisma.sql!`id = ${normalizedId}::uuid`];
+    const tenantId = this.resolveQueryTenantId(options);
+    if (tenantId) {
+      conditions.push(Prisma.sql!`tenant_id = ${tenantId}`);
+    }
+
+    const where = this.buildWhere(conditions);
+    const sql = this.tableRef
       ? Prisma.sql!`
         SELECT id, tenant_id AS "tenantId", actor_id AS "actorId",
                actor_type AS "actorType", actor_ip AS "actorIp",
                action, target_type AS "targetType", target_id AS "targetId",
                source, changes, metadata, result, created_at AS "createdAt"
         FROM ${this.tableRef} ${where}
-        ORDER BY created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
+        LIMIT 1
       `
       : Prisma.sql!`
         SELECT id, tenant_id AS "tenantId", actor_id AS "actorId",
@@ -165,29 +295,219 @@ export class AuditService {
                action, target_type AS "targetType", target_id AS "targetId",
                source, changes, metadata, result, created_at AS "createdAt"
         FROM audit_logs ${where}
-        ORDER BY created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-    const countSql = this.tableRef
-      ? Prisma.sql!`
-        SELECT COUNT(*) AS count FROM ${this.tableRef} ${where}
-      `
-      : Prisma.sql!`
-        SELECT COUNT(*) AS count FROM audit_logs ${where}
+        LIMIT 1
       `;
 
-    const [entries, countResult] = await Promise.all([
-      this.options.prisma.$queryRaw(entriesSql) as Promise<AuditEntry[]>,
-      this.options.prisma.$queryRaw(countSql) as Promise<[{ count: bigint }]>,
-    ]);
+    const rows = (await this.options.prisma.$queryRaw(sql)) as AuditEntry[];
+    return rows[0] ?? null;
+  }
+
+  private buildWhere(conditions: unknown[]): unknown {
+    const Prisma = this.Prisma;
+    return conditions.length > 0
+      ? Prisma.sql!`WHERE ${Prisma.join!(conditions, ' AND ')}`
+      : Prisma.empty;
+  }
+
+  private validateQueryPagination(options: AuditQueryOptions): void {
+    if (options.cursor !== undefined && options.offset !== undefined) {
+      throw new Error(
+        '[@nestarc/audit-log] cursor and offset are mutually exclusive. Pass only one.',
+      );
+    }
+
+    if (
+      options.limit !== undefined &&
+      (!Number.isInteger(options.limit) || options.limit < 1)
+    ) {
+      throw new Error('[@nestarc/audit-log] limit must be a positive integer.');
+    }
+
+    if (
+      options.offset !== undefined &&
+      (!Number.isInteger(options.offset) || options.offset < 0)
+    ) {
+      throw new Error(
+        '[@nestarc/audit-log] offset must be a non-negative integer.',
+      );
+    }
+  }
+
+  private pageEntries(
+    rawEntries: Array<AuditEntry & { cursorTs?: string }>,
+    limit: number,
+  ): {
+    entries: AuditEntry[];
+    hasMore: boolean;
+    nextCursor: string | null;
+  } {
+    const hasMore = rawEntries.length > limit;
+    const pageRows = rawEntries.slice(0, limit);
+    const lastRow = hasMore ? pageRows[pageRows.length - 1] : undefined;
+    const nextCursor =
+      lastRow?.cursorTs && lastRow.id
+        ? encodeAuditCursor(lastRow.cursorTs, lastRow.id)
+        : null;
+    const entries = pageRows.map(({ cursorTs: _cursorTs, ...entry }) => entry);
 
     return {
       entries,
-      total: Number(countResult[0].count),
+      hasMore,
+      nextCursor,
     };
   }
 
-  private resolveQueryTenantId(options: AuditQueryOptions): string | null {
+  async prune(options: AuditPruneOptions): Promise<AuditPruneResult> {
+    const client = options.client ?? this.options.prisma;
+    const Prisma = this.Prisma;
+    const relkindRows = await client.$queryRaw(
+      Prisma.sql!`SELECT relkind FROM pg_class WHERE oid = to_regclass(${this.tableName})`,
+    ) as Array<{ relkind: string }>;
+    const relkind = relkindRows[0]?.relkind;
+
+    if (relkind !== 'r' && relkind !== 'p') {
+      throw new Error(
+        `[@nestarc/audit-log] audit table '${this.tableName}' does not exist or is not a supported table.`,
+      );
+    }
+
+    if (relkind === 'p') {
+      return this.prunePartitioned(client, options);
+    }
+
+    return this.pruneFlat(client, options);
+  }
+
+  private async prunePartitioned(
+    client: any,
+    options: AuditPruneOptions,
+  ): Promise<AuditPruneResult> {
+    const Prisma = this.Prisma;
+    const rows = await client.$queryRaw(
+      Prisma.sql!`
+        SELECT child.relname AS "partitionName",
+               pg_get_expr(child.relpartbound, child.oid) AS "partitionBound",
+               NULL::text AS "upperBound"
+        FROM pg_inherits
+        JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
+        JOIN pg_class child ON pg_inherits.inhrelid = child.oid
+        WHERE parent.oid = to_regclass(${this.tableName})
+      `,
+    ) as Array<{
+      partitionName: string;
+      upperBound?: string | Date | null;
+      partitionBound?: string | null;
+    }>;
+    const targets = rows
+      .filter((row) => {
+        const upperBound = row.upperBound ?? this.parsePartitionUpperBound(
+          row.partitionBound,
+        );
+        return upperBound
+          ? new Date(upperBound).getTime() <= options.olderThan.getTime()
+          : false;
+      })
+      .map((row) => validateAuditTableName(row.partitionName));
+    const mode = options.mode ?? 'drop';
+
+    if (options.dryRun) {
+      return {
+        layout: 'partitioned',
+        mode,
+        prunedPartitions: targets,
+        deletedRows: null,
+        dryRun: true,
+      };
+    }
+
+    for (const partition of targets) {
+      if (mode === 'detach') {
+        await client.$executeRawUnsafe(
+          `ALTER TABLE ${this.tableName} DETACH PARTITION ${partition}`,
+        );
+      } else {
+        await client.$executeRawUnsafe(`DROP TABLE ${partition}`);
+      }
+    }
+
+    return {
+      layout: 'partitioned',
+      mode,
+      prunedPartitions: targets,
+      deletedRows: null,
+      dryRun: false,
+    };
+  }
+
+  private parsePartitionUpperBound(bound?: string | null): string | null {
+    if (!bound) return null;
+    const match = bound.match(/TO \('([^']+)'\)/);
+    return match?.[1] ?? null;
+  }
+
+  private async pruneFlat(
+    client: any,
+    options: AuditPruneOptions,
+  ): Promise<AuditPruneResult> {
+    const Prisma = this.Prisma;
+    if (options.dryRun) {
+      const rows = await client.$queryRaw(
+        Prisma.sql!`SELECT COUNT(*) AS count FROM ${this.tableRef ?? Prisma.raw!('audit_logs')} WHERE created_at < ${options.olderThan}`,
+      ) as Array<{ count: bigint | number }>;
+      return {
+        layout: 'flat',
+        mode: 'delete',
+        prunedPartitions: [],
+        deletedRows: Number(rows[0]?.count ?? 0),
+        dryRun: true,
+      };
+    }
+
+    const names = deriveAuditObjectNames(this.tableName);
+    const triggerRows = await client.$queryRaw(
+      Prisma.sql!`SELECT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = ${names.deleteTrigger}
+      ) AS "exists"`,
+    ) as Array<{ exists: boolean }>;
+    const hasTrigger = triggerRows[0]?.exists === true;
+    const tableRef = this.tableRef ?? Prisma.raw!('audit_logs');
+    const deleteTriggerRef = Prisma.raw!(names.deleteTrigger);
+
+    const deletedRows = await client.$transaction(
+      async (tx: any) => {
+        if (hasTrigger) {
+          await tx.$executeRaw(
+            Prisma.sql!`ALTER TABLE ${tableRef} DISABLE TRIGGER ${deleteTriggerRef}`,
+          );
+        }
+        const deleted = await tx.$executeRaw(
+          Prisma.sql!`DELETE FROM ${tableRef} WHERE created_at < ${options.olderThan}`,
+        );
+        if (hasTrigger) {
+          await tx.$executeRaw(
+            Prisma.sql!`ALTER TABLE ${tableRef} ENABLE TRIGGER ${deleteTriggerRef}`,
+          );
+        }
+        return Number(deleted ?? 0);
+      },
+      {
+        timeout: options.timeoutMs ?? 60000,
+        maxWait: options.maxWaitMs ?? 10000,
+      },
+    );
+
+    return {
+      layout: 'flat',
+      mode: 'delete',
+      prunedPartitions: [],
+      deletedRows,
+      dryRun: false,
+    };
+  }
+
+  private resolveQueryTenantId(
+    options: AuditQueryOptions | AuditGetByIdOptions,
+  ): string | null {
     if (options.tenantId && options.allTenants) {
       throw new TypeError(
         '[@nestarc/audit-log] tenantId and allTenants are mutually exclusive.',

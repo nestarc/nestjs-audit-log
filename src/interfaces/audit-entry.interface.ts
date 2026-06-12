@@ -16,20 +16,32 @@ export interface AuditEntry {
 
 export interface AuditQueryOptions {
   actorId?: string;
+  actorType?: string;
   action?: string;
   targetType?: string;
   targetId?: string;
+  source?: 'auto' | 'manual';
+  result?: 'success' | 'failure';
   from?: Date;
   to?: Date;
   limit?: number;
   offset?: number;
   tenantId?: string;
   allTenants?: boolean;
+  cursor?: string;
+  includeTotal?: boolean;
 }
 
 export interface AuditQueryResult {
   entries: AuditEntry[];
-  total: number;
+  total?: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface AuditGetByIdOptions {
+  tenantId?: string;
+  allTenants?: boolean;
 }
 
 export interface ManualAuditLogInput {

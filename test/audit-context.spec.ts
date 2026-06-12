@@ -1,4 +1,5 @@
 import { AuditContext } from '../src/services/audit-context';
+import { mergeContextMetadata } from '../src/services/audit-context';
 import { AuditActor } from '../src/interfaces/actor.interface';
 
 describe('AuditContext', () => {
@@ -62,5 +63,56 @@ describe('AuditContext', () => {
         resolve();
       });
     });
+  });
+
+  it('runAs starts a context with noAudit=false', () => {
+    const result = AuditContext.runAs(actor, () => {
+      expect(AuditContext.getActor()).toEqual(actor);
+      expect(AuditContext.isNoAudit()).toBe(false);
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+  });
+
+  it('merges metadata shallowly with last write winning', () => {
+    AuditContext.run({ actor, noAudit: false }, () => {
+      AuditContext.setMetadata({ correlationId: 'req-1', feature: 'old' });
+      AuditContext.setMetadata({ feature: 'new' });
+
+      expect(AuditContext.getMetadata()).toEqual({
+        correlationId: 'req-1',
+        feature: 'new',
+      });
+    });
+  });
+
+  it('stores reason and merges context metadata with input priority', () => {
+    AuditContext.run({ actor, noAudit: false }, () => {
+      AuditContext.setMetadata({ correlationId: 'req-1', reason: 'metadata reason' });
+      AuditContext.setReason('context reason');
+
+      expect(AuditContext.getReason()).toBe('context reason');
+      expect(
+        mergeContextMetadata({
+          reason: 'input reason',
+          operation: 'manual',
+        }),
+      ).toEqual({
+        correlationId: 'req-1',
+        reason: 'input reason',
+        operation: 'manual',
+      });
+    });
+  });
+
+  it('metadata and reason setters are no-ops outside a context', () => {
+    expect(() => {
+      AuditContext.setMetadata({ correlationId: 'req-1' });
+      AuditContext.setReason('reason');
+    }).not.toThrow();
+    expect(AuditContext.getMetadata()).toBeUndefined();
+    expect(AuditContext.getReason()).toBeUndefined();
+    expect(mergeContextMetadata()).toBeUndefined();
   });
 });

@@ -1,145 +1,156 @@
-import { readFileSync } from 'fs';
 import {
   getAuditTableSQL,
   getAuditTableStatements,
   applyAuditTableSchema,
+  ensurePartitions,
 } from '../src/sql';
-
-jest.mock('fs', () => ({
-  readFileSync: jest.fn(),
-}));
-
-const mockReadFileSync = readFileSync as jest.MockedFunction<typeof readFileSync>;
+import { validateAuditTableName } from '../src/sql/table-name';
 
 describe('SQL utilities', () => {
-  afterEach(() => {
-    jest.clearAllMocks();
+  describe('validateAuditTableName()', () => {
+    it.each([
+      'audit_logs',
+      'Audit_Logs2',
+      'audit.audit_logs',
+      'a'.repeat(44),
+    ])('accepts valid tableName %s', (tableName) => {
+      expect(validateAuditTableName(tableName)).toBe(tableName);
+    });
+
+    it.each([
+      'audit-logs',
+      '1abc',
+      'a.b.c',
+      'a;DROP',
+      'a'.repeat(45),
+      '',
+    ])('rejects invalid tableName %s', (tableName) => {
+      expect(() => validateAuditTableName(tableName)).toThrow(
+        'Invalid audit tableName',
+      );
+    });
   });
 
   describe('getAuditTableSQL()', () => {
-    it('reads the SQL file from the correct path', () => {
-      mockReadFileSync.mockReturnValue('CREATE TABLE audit_logs (...);');
-      const result = getAuditTableSQL();
-      expect(result).toBe('CREATE TABLE audit_logs (...);');
-      expect(mockReadFileSync).toHaveBeenCalledWith(
-        expect.stringContaining('audit-log-schema.sql'),
-        'utf-8',
-      );
+    it('generates flat trigger-enforced DDL by default', () => {
+      const sql = getAuditTableSQL();
+
+      expect(sql).toContain('CREATE TABLE IF NOT EXISTS audit_logs');
+      expect(sql).toContain('DROP RULE IF EXISTS audit_logs_no_update');
+      expect(sql).toContain('CREATE OR REPLACE FUNCTION audit_logs_block_mutation() RETURNS trigger');
+      expect(sql).toContain('CREATE TRIGGER audit_logs_no_update_trg');
+      expect(sql).toContain("ERRCODE = 'P0001'");
+      expect(sql).not.toContain('CREATE RULE audit_logs_no_update');
+      expect(sql).not.toContain('USING GIN');
+    });
+
+    it('generates legacy rule enforcement when requested', () => {
+      const sql = getAuditTableSQL({ enforcement: 'rule' });
+
+      expect(sql).toContain('CREATE RULE audit_logs_no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING');
+      expect(sql).toContain('CREATE RULE audit_logs_no_delete AS ON DELETE TO audit_logs DO INSTEAD NOTHING');
+      expect(sql).not.toContain('CREATE TRIGGER audit_logs_no_update_trg');
+    });
+
+    it('generates partitioned DDL with BRIN and initial partitions', () => {
+      const sql = getAuditTableSQL({ partitioned: true });
+
+      expect(sql).toContain('PRIMARY KEY (id, created_at)');
+      expect(sql).toContain('PARTITION BY RANGE (created_at)');
+      expect(sql).toContain('USING BRIN (created_at)');
+      expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS audit_logs_y\d{4}m\d{2} PARTITION OF audit_logs/);
+      expect(sql).not.toContain('DEFAULT PARTITION');
+    });
+
+    it('adds GIN indexes when requested', () => {
+      const sql = getAuditTableSQL({ ginIndex: true });
+
+      expect(sql).toContain('idx_audit_changes_gin');
+      expect(sql).toContain('idx_audit_metadata_gin');
+      expect(sql).toContain('USING GIN (changes jsonb_path_ops)');
+      expect(sql).toContain('USING GIN (metadata jsonb_path_ops)');
+    });
+
+    it('uses derived object names for custom tableName', () => {
+      const sql = getAuditTableSQL({ tableName: 'audit.events' });
+
+      expect(sql).toContain('CREATE TABLE IF NOT EXISTS audit.events');
+      expect(sql).toContain('CREATE OR REPLACE FUNCTION audit.events_block_mutation() RETURNS trigger');
+      expect(sql).toContain('CREATE TRIGGER events_no_update_trg');
+      expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_events_tenant_created');
     });
   });
 
   describe('getAuditTableStatements()', () => {
-    it('splits simple statements by semicolon', () => {
-      mockReadFileSync.mockReturnValue(
-        'CREATE TABLE a (id INT);\nCREATE TABLE b (id INT);',
+    it('matches getAuditTableSQL joined with blank lines', () => {
+      const options = { tableName: 'audit.events', ginIndex: true };
+
+      expect(getAuditTableStatements(options).join('\n\n')).toBe(
+        getAuditTableSQL(options),
       );
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(2);
-      expect(stmts[0]).toContain('CREATE TABLE a');
-      expect(stmts[1]).toContain('CREATE TABLE b');
-    });
-
-    it('skips empty lines and comments', () => {
-      mockReadFileSync.mockReturnValue(
-        '-- This is a comment\n\nCREATE TABLE a (id INT);\n-- Another comment\n',
-      );
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(1);
-      expect(stmts[0]).toContain('CREATE TABLE a');
-    });
-
-    it('handles PL/pgSQL $$ blocks with inner semicolons', () => {
-      mockReadFileSync.mockReturnValue(
-        [
-          'DO $$ BEGIN',
-          "  CREATE RULE no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING;",
-          'EXCEPTION WHEN duplicate_object THEN NULL;',
-          'END $$;',
-        ].join('\n'),
-      );
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(1);
-      expect(stmts[0]).toContain('DO $$ BEGIN');
-      expect(stmts[0]).toContain('END $$;');
-    });
-
-    it('handles multiple statements with $$ blocks interspersed', () => {
-      mockReadFileSync.mockReturnValue(
-        [
-          'CREATE TABLE audit_logs (id UUID);',
-          '',
-          'DO $$ BEGIN',
-          '  CREATE RULE r1 AS ON UPDATE TO audit_logs DO INSTEAD NOTHING;',
-          'EXCEPTION WHEN duplicate_object THEN NULL;',
-          'END $$;',
-          '',
-          'CREATE INDEX idx_audit ON audit_logs (id);',
-        ].join('\n'),
-      );
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(3);
-      expect(stmts[0]).toContain('CREATE TABLE');
-      expect(stmts[1]).toContain('DO $$');
-      expect(stmts[2]).toContain('CREATE INDEX');
-    });
-
-    it('handles statement without trailing semicolon', () => {
-      mockReadFileSync.mockReturnValue('CREATE TABLE a (id INT)');
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(1);
-      expect(stmts[0]).toContain('CREATE TABLE a');
-    });
-
-    it('returns empty array for empty SQL', () => {
-      mockReadFileSync.mockReturnValue('');
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(0);
-    });
-
-    it('returns empty array for comments-only SQL', () => {
-      mockReadFileSync.mockReturnValue('-- just a comment\n-- another one\n');
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(0);
-    });
-
-    it('preserves comments inside $$ blocks', () => {
-      mockReadFileSync.mockReturnValue(
-        [
-          'DO $$ BEGIN',
-          '  -- inner comment',
-          '  NULL;',
-          'END $$;',
-        ].join('\n'),
-      );
-      const stmts = getAuditTableStatements();
-      expect(stmts).toHaveLength(1);
-      expect(stmts[0]).toContain('-- inner comment');
     });
   });
 
   describe('applyAuditTableSchema()', () => {
-    it('executes each statement via prisma.$executeRawUnsafe', async () => {
-      mockReadFileSync.mockReturnValue(
-        'CREATE TABLE a (id INT);\nCREATE TABLE b (id INT);',
-      );
+    it('executes each generated statement via prisma.$executeRawUnsafe', async () => {
       const mockPrisma = {
         $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
       };
 
-      await applyAuditTableSchema(mockPrisma);
+      await applyAuditTableSchema(mockPrisma, { enforcement: 'rule' });
 
-      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
-      expect(mockPrisma.$executeRawUnsafe.mock.calls[0][0]).toContain('CREATE TABLE a');
-      expect(mockPrisma.$executeRawUnsafe.mock.calls[1][0]).toContain('CREATE TABLE b');
+      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(
+        getAuditTableStatements({ enforcement: 'rule' }).length,
+      );
+      expect(mockPrisma.$executeRawUnsafe.mock.calls[0][0]).toContain(
+        'CREATE TABLE IF NOT EXISTS audit_logs',
+      );
     });
 
     it('propagates errors from prisma', async () => {
-      mockReadFileSync.mockReturnValue('INVALID SQL;');
       const mockPrisma = {
         $executeRawUnsafe: jest.fn().mockRejectedValue(new Error('syntax error')),
       };
 
-      await expect(applyAuditTableSchema(mockPrisma)).rejects.toThrow('syntax error');
+      await expect(applyAuditTableSchema(mockPrisma)).rejects.toThrow(
+        'syntax error',
+      );
+    });
+  });
+
+  describe('ensurePartitions()', () => {
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-12T00:00:00.000Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('creates current and ahead monthly partitions and returns their names', async () => {
+      const mockPrisma = {
+        $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const created = await ensurePartitions(mockPrisma, {
+        tableName: 'audit.events',
+        ahead: 1,
+      });
+
+      expect(created).toEqual(['audit.events_y2026m06', 'audit.events_y2026m07']);
+      expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.$executeRawUnsafe.mock.calls[0][0]).toContain(
+        'CREATE TABLE IF NOT EXISTS audit.events_y2026m06 PARTITION OF audit.events',
+      );
+      expect(mockPrisma.$executeRawUnsafe.mock.calls[0][0]).toContain(
+        "FOR VALUES FROM ('2026-06-01 00:00:00+00') TO ('2026-07-01 00:00:00+00')",
+      );
+    });
+
+    it('rejects invalid tableName', async () => {
+      await expect(
+        ensurePartitions({ $executeRawUnsafe: jest.fn() }, { tableName: 'bad-name' }),
+      ).rejects.toThrow('Invalid audit tableName');
     });
   });
 });

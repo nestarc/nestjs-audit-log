@@ -4,4 +4,4 @@ export interface AuditActor {
   ip?: string;
 }
 
-export type ActorExtractor = (req: any) => AuditActor;
+export type ActorExtractor = (req: any) => AuditActor | Promise<AuditActor>;

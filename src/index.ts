@@ -3,9 +3,13 @@ export { AuditLogModule } from './audit-log.module';
 
 // Service
 export { AuditService } from './services/audit.service';
+export type {
+  AuditPruneOptions,
+  AuditPruneResult,
+} from './services/audit.service';
 
 // Context
-export { AuditContext } from './services/audit-context';
+export { AuditContext, mergeContextMetadata } from './services/audit-context';
 export type { AuditContextStore } from './services/audit-context';
 
 // Prisma Extension
@@ -16,11 +20,15 @@ export type { PrismaModuleLike } from './prisma/prisma-namespace';
 // Decorators
 export { NoAudit, NO_AUDIT_KEY } from './decorators/no-audit.decorator';
 export { AuditAction, AUDIT_ACTION_KEY } from './decorators/audit-action.decorator';
+export { AuditReason, AUDIT_REASON_KEY } from './decorators/audit-reason.decorator';
+export { AuditActorMiddleware } from './middleware/audit-actor.middleware';
+export { AuditInterceptor } from './interceptors/audit.interceptor';
 
 // Interfaces
 export type { AuditActor, ActorExtractor } from './interfaces/actor.interface';
 export type {
   AuditEntry,
+  AuditGetByIdOptions,
   AuditQueryOptions,
   AuditQueryResult,
   ManualAuditLogInput,
@@ -40,4 +48,13 @@ export type {
 export { AUDIT_LOG_OPTIONS } from './audit-log.constants';
 
 // SQL
-export { getAuditTableSQL, getAuditTableStatements, applyAuditTableSchema } from './sql';
+export {
+  getAuditTableSQL,
+  getAuditTableStatements,
+  applyAuditTableSchema,
+  ensurePartitions,
+} from './sql';
+export type {
+  AuditTableSQLOptions,
+  EnsurePartitionsOptions,
+} from './sql';

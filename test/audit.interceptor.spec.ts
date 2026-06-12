@@ -4,6 +4,7 @@ import { AuditContext } from '../src/services/audit-context';
 import { Reflector } from '@nestjs/core';
 import { of } from 'rxjs';
 import { ExecutionContext, CallHandler } from '@nestjs/common';
+import { AUDIT_REASON_KEY } from '../src/decorators/audit-reason.decorator';
 
 describe('AuditInterceptor', () => {
   let interceptor: AuditInterceptor;
@@ -96,6 +97,37 @@ describe('AuditInterceptor', () => {
     AuditContext.run({ actor: null, noAudit: false }, () => {
       interceptor.intercept(context, mockNext).subscribe(() => {
         expect(AuditContext.getActionOverride()).toBe('handler.action');
+        done();
+      });
+    });
+  });
+
+  it('sets reason from @AuditReason metadata with handler override', (done) => {
+    const context = createMockContext(
+      { [AUDIT_REASON_KEY]: 'handler reason' },
+      { [AUDIT_REASON_KEY]: 'class reason' },
+    );
+
+    AuditContext.run({ actor: null, noAudit: false }, () => {
+      interceptor.intercept(context, mockNext).subscribe(() => {
+        expect(AuditContext.getReason()).toBe('handler reason');
+        done();
+      });
+    });
+  });
+
+  it('allows handler code to override @AuditReason with setReason', (done) => {
+    const context = createMockContext({ [AUDIT_REASON_KEY]: 'decorator reason' });
+    const next: CallHandler = {
+      handle: () => {
+        AuditContext.setReason('handler reason');
+        return of('result');
+      },
+    };
+
+    AuditContext.run({ actor: null, noAudit: false }, () => {
+      interceptor.intercept(context, next).subscribe(() => {
+        expect(AuditContext.getReason()).toBe('handler reason');
         done();
       });
     });

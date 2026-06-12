@@ -1,4 +1,4 @@
-import { AuditContext } from '../services/audit-context';
+import { AuditContext, mergeContextMetadata } from '../services/audit-context';
 import {
   shouldTrackModel,
   computeCreateChanges,
@@ -19,6 +19,15 @@ import {
 } from './prisma-namespace';
 import { validateAuditTableName } from '../sql/table-name';
 
+const NO_CONTEXT_WARNING_MESSAGE =
+  '[@nestarc/audit-log] audited write executed without an audit context store — actorId will be null. Wrap background work in AuditContext.runAs(actor, fn). (warned once per process)';
+
+let noContextWarningReported = false;
+
+export function _resetNoContextWarning(): void {
+  noContextWarningReported = false;
+}
+
 export interface AuditExtensionOptions extends AuditSharedOptions {
   trackedModels?: string[];
   ignoredModels?: string[];
@@ -29,6 +38,12 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
   logFailures?: boolean;
   ignoreTimestampOnlyUpdates?: boolean;
   prismaModule?: PrismaModuleLike;
+  /**
+   * EXPERIMENTAL — no semver guarantee. Reserved for transaction-aware audit
+   * routing when Prisma exposes a compatible internal transaction capability.
+   * Default behavior remains best-effort outside the caller transaction.
+   */
+  experimentalTxAudit?: boolean;
 }
 
 export function modelDelegateName(model: string): string {
@@ -77,9 +92,11 @@ export function buildAuditInsertParams(
   input: AuditInsertInput,
   options: AuditExtensionOptions = {},
 ): AuditInsertParams | null {
-  const actor = AuditContext.getActor();
-  const actionOverride = AuditContext.getActionOverride();
+  const store = AuditContext.getStore();
+  const actor = store?.actor ?? null;
+  const actionOverride = store?.actionOverride;
   const action = actionOverride ?? input.action;
+  warnForMissingContextStore(input, options, action, store);
   let tenantId: string | null = null;
 
   try {
@@ -118,9 +135,10 @@ export function buildAuditInsertParams(
     return null;
   }
 
-  const metadata = input.metadata
+  const mergedMetadata = mergeContextMetadata(input.metadata);
+  const metadata = mergedMetadata
     ? redactObject(
-        input.metadata,
+        mergedMetadata,
         getSensitiveFieldsFor(input.targetType, options),
       )
     : undefined;
@@ -138,6 +156,52 @@ export function buildAuditInsertParams(
     metadata,
     result: input.result ?? 'success',
   };
+}
+
+function warnForMissingContextStore(
+  input: AuditInsertInput,
+  options: AuditExtensionOptions,
+  action: string,
+  store: ReturnType<typeof AuditContext.getStore>,
+): void {
+  if (store || noContextWarningReported) {
+    return;
+  }
+  noContextWarningReported = true;
+
+  const error = new Error(NO_CONTEXT_WARNING_MESSAGE);
+  const ctx: AuditErrorContext = {
+    phase: 'context',
+    model: input.targetType,
+    operation: input.operation,
+    action,
+    targetId: input.targetId,
+  };
+  const logger = options.logger ?? console;
+
+  if (options.onAuditError) {
+    try {
+      options.onAuditError(error, ctx);
+      return;
+    } catch (callbackError) {
+      try {
+        logger.error(
+          `[@nestarc/audit-log] onAuditError callback threw: ${errorMessage(
+            callbackError,
+          )}`,
+        );
+      } catch {
+        // Reporting must never affect the caller's mutation.
+      }
+      return;
+    }
+  }
+
+  try {
+    logger.warn(NO_CONTEXT_WARNING_MESSAGE);
+  } catch {
+    // Reporting must never affect the caller's mutation.
+  }
 }
 
 async function insertAuditLog(

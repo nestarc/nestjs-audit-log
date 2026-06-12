@@ -29,9 +29,9 @@ describe('AuditLog E2E', () => {
       datasources: { db: { url: DATABASE_URL } },
     });
 
-    // Provision audit_logs table + append-only rules + indexes
+    // Provision audit_logs table + legacy append-only rules + indexes
     // Self-contained: works even if prisma db push was not run
-    await applyAuditTableSchema(basePrisma);
+    await applyAuditTableSchema(basePrisma, { enforcement: 'rule' });
 
     prisma = basePrisma.$extends(createAuditExtension(extensionOptions));
 
@@ -138,8 +138,8 @@ describe('AuditLog E2E', () => {
       // Create user (will generate audit log)
       const user = await AuditContext.run(
         { actor: { id: 'admin-1', type: 'user' }, noAudit: false },
-        () =>
-          prisma.user.create({
+        async () =>
+          await prisma.user.create({
             data: { name: 'Bob', email: 'bob@test.com', password: 'pw' },
           }),
       );
@@ -175,8 +175,8 @@ describe('AuditLog E2E', () => {
     it('tracks user deletion with before-only changes', async () => {
       const user = await AuditContext.run(
         { actor: { id: 'admin-1', type: 'user' }, noAudit: false },
-        () =>
-          prisma.user.create({
+        async () =>
+          await prisma.user.create({
             data: {
               name: 'Charlie',
               email: 'charlie@test.com',
@@ -239,8 +239,8 @@ describe('AuditLog E2E', () => {
           actor: { id: 'user-1', type: 'user', ip: '10.0.0.1' },
           noAudit: false,
         },
-        () =>
-          auditService.log({
+        async () =>
+          await auditService.log({
             action: 'invoice.approved',
             targetId: 'inv-123',
             targetType: 'Invoice',
@@ -273,7 +273,10 @@ describe('AuditLog E2E', () => {
         },
       );
 
-      const result = await auditService.query({ action: 'user.*' });
+      const result = await auditService.query({
+        action: 'user.*',
+        allTenants: true,
+      });
 
       expect(result.total).toBe(2);
       expect(result.entries).toHaveLength(2);
@@ -292,8 +295,16 @@ describe('AuditLog E2E', () => {
         },
       );
 
-      const page1 = await auditService.query({ limit: 2, offset: 0 });
-      const page2 = await auditService.query({ limit: 2, offset: 2 });
+      const page1 = await auditService.query({
+        limit: 2,
+        offset: 0,
+        allTenants: true,
+      });
+      const page2 = await auditService.query({
+        limit: 2,
+        offset: 2,
+        allTenants: true,
+      });
 
       expect(page1.total).toBe(5);
       expect(page1.entries).toHaveLength(2);
