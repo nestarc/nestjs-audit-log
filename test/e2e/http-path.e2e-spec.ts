@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
-import { AddressInfo } from 'net';
+import request from 'supertest';
 import { AuditLogModule } from '../../src/audit-log.module';
 import { createAuditExtension } from '../../src/prisma/audit-extension';
 import { NoAudit } from '../../src/decorators/no-audit.decorator';
@@ -22,7 +22,7 @@ describe('HTTP path E2E', () => {
   let app: INestApplication;
   let basePrisma: PrismaClient;
   let prisma: any;
-  let baseUrl: string;
+  let httpServer: any;
 
   beforeAll(async () => {
     basePrisma = new PrismaClient({
@@ -78,6 +78,22 @@ describe('HTTP path E2E', () => {
       }
     }
 
+    @Controller('http-audit-class-no-audit')
+    @NoAudit()
+    class ClassNoAuditController {
+      @Post('users')
+      async createUser() {
+        await prisma.user.create({
+          data: {
+            name: 'Class No Audit',
+            email: 'class-no-audit@test.com',
+            password: 'pw',
+          },
+        });
+        return { ok: true };
+      }
+    }
+
     @Module({
       imports: [
         AuditLogModule.forRoot({
@@ -90,7 +106,7 @@ describe('HTTP path E2E', () => {
           logger: silentLogger,
         }),
       ],
-      controllers: [HttpAuditController],
+      controllers: [HttpAuditController, ClassNoAuditController],
     })
     class TestModule {}
 
@@ -100,9 +116,7 @@ describe('HTTP path E2E', () => {
 
     app = moduleFixture.createNestApplication();
     await app.init();
-    await app.listen(0);
-    const address = app.getHttpServer().address() as AddressInfo;
-    baseUrl = `http://127.0.0.1:${address.port}`;
+    httpServer = app.getHttpServer();
   });
 
   beforeEach(async () => {
@@ -116,15 +130,12 @@ describe('HTTP path E2E', () => {
   });
 
   it('records actor and correlationId from a real HTTP request', async () => {
-    const response = await fetch(`${baseUrl}/http-audit/users`, {
-      method: 'POST',
-      headers: {
-        'x-user-id': 'http-actor',
-        'x-request-id': 'req-http-1',
-      },
-    });
+    await request(httpServer)
+      .post('/http-audit/users')
+      .set('x-user-id', 'http-actor')
+      .set('x-request-id', 'req-http-1')
+      .expect(201);
 
-    expect(response.status).toBe(201);
     const logs = await basePrisma.$queryRaw<any[]>`
       SELECT actor_id, metadata FROM audit_logs WHERE action = 'User.created'
     `;
@@ -134,12 +145,23 @@ describe('HTTP path E2E', () => {
   });
 
   it('honors @NoAudit on a real HTTP handler', async () => {
-    const response = await fetch(`${baseUrl}/http-audit/no-audit`, {
-      method: 'POST',
-      headers: { 'x-user-id': 'http-actor' },
-    });
+    await request(httpServer)
+      .post('/http-audit/no-audit')
+      .set('x-user-id', 'http-actor')
+      .expect(201);
 
-    expect(response.status).toBe(201);
+    const rows = await basePrisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) AS count FROM audit_logs
+    `;
+    expect(Number(rows[0].count)).toBe(0);
+  });
+
+  it('honors @NoAudit on a real HTTP controller class', async () => {
+    await request(httpServer)
+      .post('/http-audit-class-no-audit/users')
+      .set('x-user-id', 'http-actor')
+      .expect(201);
+
     const rows = await basePrisma.$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(*) AS count FROM audit_logs
     `;
@@ -147,12 +169,11 @@ describe('HTTP path E2E', () => {
   });
 
   it('applies @AuditAction and @AuditReason through the global interceptor', async () => {
-    const response = await fetch(`${baseUrl}/http-audit/action`, {
-      method: 'POST',
-      headers: { 'x-user-id': 'http-actor' },
-    });
+    await request(httpServer)
+      .post('/http-audit/action')
+      .set('x-user-id', 'http-actor')
+      .expect(201);
 
-    expect(response.status).toBe(201);
     const logs = await basePrisma.$queryRaw<any[]>`
       SELECT action, metadata FROM audit_logs
     `;

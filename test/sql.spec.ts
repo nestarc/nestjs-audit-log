@@ -62,6 +62,17 @@ describe('SQL utilities', () => {
       expect(sql).not.toContain('DEFAULT PARTITION');
     });
 
+    it('warns in generated SQL when legacy rules are requested for partitioned tables', () => {
+      const sql = getAuditTableSQL({
+        partitioned: true,
+        enforcement: 'rule',
+      });
+
+      expect(sql).toContain(
+        'WARNING: legacy RULE enforcement is applied only to the partitioned parent table',
+      );
+    });
+
     it('adds GIN indexes when requested', () => {
       const sql = getAuditTableSQL({ ginIndex: true });
 

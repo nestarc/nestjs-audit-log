@@ -553,6 +553,13 @@ describe('AuditService', () => {
       expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
     });
 
+    it('treats an empty explicit tenantId as mutually exclusive with allTenants', async () => {
+      await expect(
+        service.query({ tenantId: '', allTenants: true }),
+      ).rejects.toThrow('tenantId and allTenants are mutually exclusive');
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('allows explicit tenantId when tenantRequired is true and ambient tenant is missing', async () => {
       const strictService = new AuditService({
         prisma: mockPrisma,
@@ -634,6 +641,13 @@ describe('AuditService', () => {
     it('throws when tenantId and allTenants are both provided', async () => {
       await expect(
         service.getById(uuid1, { tenantId: 'tenant-1', allTenants: true }),
+      ).rejects.toThrow('tenantId and allTenants are mutually exclusive');
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('treats an empty explicit tenantId as mutually exclusive with allTenants', async () => {
+      await expect(
+        service.getById(uuid1, { tenantId: '', allTenants: true }),
       ).rejects.toThrow('tenantId and allTenants are mutually exclusive');
       expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
     });

@@ -7,7 +7,8 @@ Roadmap items: #5 (트랜잭션 정합성 최소 대응), Release Gates 1–6
 ## Goal
 
 1. 자동 감사 경로가 호출자 소유 `$transaction`과 어떻게 상호작용하는지에 대한 **정직한 계약**을
-   확립한다: 현재의 고아 행(orphan-row) 동작을 문서·테스트로 고정하고(Tier 1·2),
+   확립한다: interactive transaction의 고아 행(orphan-row) 동작과 batch rollback의
+   no-success-row 동작을 문서·테스트로 고정하고(Tier 1·2),
    Prisma가 내부적으로 노출하는 범위 안에서 트랜잭션 경유 라우팅을 **실험적 옵트인**으로
    제공한다(Tier 3).
 2. 검증 보고서가 "0.2.0 전 추가"로 명시한 6개 Release Gate를 구체적인 테스트 파일과
@@ -190,8 +191,10 @@ Behavior Specification / Test Plan 참조.
   `result[pkField]`에서 채워진다.
 - B10. `AuditService.log(input, tx)`로 기록한 수동 감사 행은 호출자 tx 롤백 시 함께
   사라진다(`src/services/audit.service.ts:21-22` 계약의 회귀 고정).
-- B11. 배열형 `$transaction([...])`(batch)에서도 자동 경로의 감사 INSERT는 배치에
-  참여하지 않는다 — 배치 롤백 시 감사 행 잔존(현행 동작 고정).
+- B11. 배열형 `$transaction([...])`(batch)에서 배치 전체가 실패하면, 개별 mutation
+  extension 핸들러의 `await query(args)`는 성공 result로 resolve되지 않는다. 따라서 기본
+  `logFailures: false` 자동 성공 감사 INSERT는 실행되지 않고, 배치 롤백 후 비즈니스 행과
+  해당 성공 감사 행은 모두 0건이다(Prisma 6.19.3 관측 동작 고정).
 
 주: B5–B9는 #3(스펙 02 — pre-read를 try 안으로 이동)과 동일 코드 경로를 공유한다.
 테스트는 "감사 행 내용"이 아닌 위에 명시한 관측 가능 결과만 단언하여 스펙 02 구현
@@ -359,7 +362,7 @@ E2E 테스트 (`test/e2e/`, 실제 PostgreSQL):
 
 | 파일 | 케이스 → Behavior | Release Gate |
 |------|-------------------|--------------|
-| `transactions.e2e-spec.ts` | create 롤백 고아 행(B5), 다중 연산 롤백 N건(B6), 커밋 전 가시성(B7), tx 내 update 빈 diff(B8), 동일 tx create→update(B9), 수동 log(tx) 롤백 동반(B10), batch 형 고아 행(B11) | **G1** |
+| `transactions.e2e-spec.ts` | create 롤백 고아 행(B5), 다중 연산 롤백 N건(B6), 커밋 전 가시성(B7), tx 내 update 빈 diff(B8), 동일 tx create→update(B9), 수동 log(tx) 롤백 동반(B10), batch rollback 성공 감사 행 0건(B11) | **G1** |
 | `transactions-experimental.e2e-spec.ts` | probe 지원 시: 롤백 시 감사 행 0건 + 올바른 in-tx diff + 커밋 전 비가시성(B13), statement 에러 시 25P02 + onAuditError(B15); probe 미지원 시: 경고 후 폴백만 단언(B14), 나머지 skip | **G1** (experimental 분) |
 | `http-path.e2e-spec.ts` (supertest) | actor 추출(a), @NoAudit 핸들러/클래스(b), @AuditAction(c), correlationId(d → 스펙 04 B10/B11), async extractor(e → 스펙 04 B1) | **G2** |
 | `batch-and-upsert.e2e-spec.ts` | upsert create/update 분기, upsert+select 프로젝션(→ 스펙 02 B28/B31), createMany/updateMany count-only 고정(→ #10 경계) | **G3** |

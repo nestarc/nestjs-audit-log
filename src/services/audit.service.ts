@@ -150,7 +150,7 @@ export class AuditService {
     const limit = options.limit ?? 50;
     const offset = options.offset ?? 0;
 
-    if (tenantId) {
+    if (tenantId !== null) {
       baseConditions.push(Prisma.sql!`tenant_id = ${tenantId}`);
     }
     if (options.actorId) {
@@ -275,7 +275,7 @@ export class AuditService {
     const Prisma = this.Prisma;
     const conditions: unknown[] = [Prisma.sql!`id = ${normalizedId}::uuid`];
     const tenantId = this.resolveQueryTenantId(options);
-    if (tenantId) {
+    if (tenantId !== null) {
       conditions.push(Prisma.sql!`tenant_id = ${tenantId}`);
     }
 
@@ -538,14 +538,17 @@ export class AuditService {
   private resolveQueryTenantId(
     options: AuditQueryOptions | AuditGetByIdOptions,
   ): string | null {
-    if (options.tenantId && options.allTenants) {
+    const explicitTenantId = options.tenantId;
+    const hasExplicitTenantId = explicitTenantId !== undefined;
+
+    if (hasExplicitTenantId && options.allTenants) {
       throw new TypeError(
         '[@nestarc/audit-log] tenantId and allTenants are mutually exclusive.',
       );
     }
 
-    if (options.tenantId) {
-      return options.tenantId;
+    if (hasExplicitTenantId) {
+      return explicitTenantId;
     }
 
     if (options.allTenants) {
@@ -570,7 +573,7 @@ export class AuditService {
       return null;
     }
 
-    if (tenantId) {
+    if (tenantId !== null) {
       return tenantId;
     }
 

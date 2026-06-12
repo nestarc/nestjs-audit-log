@@ -100,6 +100,51 @@ describe('transaction consistency E2E', () => {
     expect(visibleInsideTransaction).toBe(1);
   });
 
+  it('keeps orphan rows for create, update, and delete in a rolled-back interactive transaction', async () => {
+    await expect(
+      AuditContext.run(
+        { actor: { id: 'tx-user', type: 'user' }, noAudit: false },
+        async () =>
+          await prisma.$transaction(async (tx: any) => {
+            const user = await tx.user.create({
+              data: {
+                name: 'Multi Rollback',
+                email: 'multi-rollback@test.com',
+                password: 'pw',
+              },
+            });
+            await tx.user.update({
+              where: { id: user.id },
+              data: { name: 'Multi Rollback Updated' },
+            });
+            await tx.user.delete({ where: { id: user.id } });
+            throw new Error('force rollback');
+          }),
+      ),
+    ).rejects.toThrow('force rollback');
+
+    const users = await basePrisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) AS count FROM users WHERE email = 'multi-rollback@test.com'
+    `;
+    const logs = await basePrisma.$queryRaw<Array<{ action: string; count: bigint }>>`
+      SELECT action, COUNT(*) AS count
+      FROM audit_logs
+      WHERE action IN ('User.created', 'User.updated', 'User.deleted')
+      GROUP BY action
+    `;
+
+    expect(Number(users[0].count)).toBe(0);
+    expect(
+      Object.fromEntries(
+        logs.map((row) => [row.action, Number(row.count)]),
+      ),
+    ).toEqual({
+      'User.created': 1,
+      'User.updated': 1,
+      'User.deleted': 1,
+    });
+  });
+
   it('records an empty update diff for a committed row updated inside an interactive transaction', async () => {
     const user = await AuditContext.run(
       { actor: { id: 'tx-user', type: 'user' }, noAudit: false },
@@ -132,6 +177,36 @@ describe('transaction consistency E2E', () => {
     expect(logs[0].changes).toEqual({});
   });
 
+  it('records an empty update diff when a row is created and updated in the same interactive transaction', async () => {
+    let userId: string | null = null;
+
+    await AuditContext.run(
+      { actor: { id: 'tx-user', type: 'user' }, noAudit: false },
+      async () =>
+        await prisma.$transaction(async (tx: any) => {
+          const user = await tx.user.create({
+            data: {
+              name: 'Same Tx Before',
+              email: 'same-tx@test.com',
+              password: 'pw',
+            },
+          });
+          userId = user.id;
+          await tx.user.update({
+            where: { id: user.id },
+            data: { name: 'Same Tx After' },
+          });
+        }),
+    );
+
+    const logs = await basePrisma.$queryRaw<any[]>`
+      SELECT target_id, changes FROM audit_logs WHERE action = 'User.updated'
+    `;
+    expect(logs).toHaveLength(1);
+    expect(logs[0].target_id).toBe(userId);
+    expect(logs[0].changes).toEqual({});
+  });
+
   it('rolls back manual AuditService.log(input, tx) entries with the caller transaction', async () => {
     await expect(
       AuditContext.run(
@@ -155,6 +230,41 @@ describe('transaction consistency E2E', () => {
       SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'manual.rollback'
     `;
     expect(Number(logs[0].count)).toBe(0);
+  });
+
+  it('does not leave a success audit row when an array transaction rolls back', async () => {
+    await expect(
+      AuditContext.run(
+        { actor: { id: 'tx-user', type: 'user' }, noAudit: false },
+        async () =>
+          await prisma.$transaction([
+            prisma.user.create({
+              data: {
+                name: 'Batch Rollback',
+                email: 'batch-rollback@test.com',
+                password: 'pw',
+              },
+            }),
+            prisma.user.create({
+              data: {
+                name: 'Batch Rollback Duplicate',
+                email: 'batch-rollback@test.com',
+                password: 'pw',
+              },
+            }),
+          ]),
+      ),
+    ).rejects.toMatchObject({ code: 'P2002' });
+
+    const users = await basePrisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) AS count FROM users WHERE email = 'batch-rollback@test.com'
+    `;
+    const logs = await basePrisma.$queryRaw<any[]>`
+      SELECT * FROM audit_logs WHERE action = 'User.created'
+    `;
+
+    expect(Number(users[0].count)).toBe(0);
+    expect(logs).toHaveLength(0);
   });
 });
 

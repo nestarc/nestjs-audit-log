@@ -128,8 +128,11 @@ $$;`,
   ];
 }
 
-function ruleStatements(names: AuditObjectNames): string[] {
-  return [
+function ruleStatements(
+  names: AuditObjectNames,
+  partitioned: boolean,
+): string[] {
+  const statements = [
     `DO $$ BEGIN
   CREATE RULE ${names.updateRule} AS ON UPDATE TO ${names.tableName} DO INSTEAD NOTHING;
 EXCEPTION WHEN duplicate_object THEN NULL;
@@ -138,6 +141,15 @@ END $$;`,
   CREATE RULE ${names.deleteRule} AS ON DELETE TO ${names.tableName} DO INSTEAD NOTHING;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;`,
+  ];
+
+  if (!partitioned) {
+    return statements;
+  }
+
+  return [
+    `-- WARNING: legacy RULE enforcement is applied only to the partitioned parent table; direct DML against child partitions is not blocked. Prefer trigger enforcement for partitioned audit tables.`,
+    ...statements,
   ];
 }
 
@@ -209,7 +221,7 @@ export function getAuditTableStatements(
   const statements = [
     createTableStatement(names, options.partitioned ?? false),
     ...(enforcement === 'rule'
-      ? ruleStatements(names)
+      ? ruleStatements(names, options.partitioned ?? false)
       : triggerStatements(names)),
     ...indexStatements(names, options),
   ];

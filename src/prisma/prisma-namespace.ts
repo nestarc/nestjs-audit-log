@@ -43,10 +43,12 @@ export function resolvePrismaNamespace(
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('@prisma/client').Prisma;
   } catch (cause) {
-    throw new Error(
+    const error = new Error(
       '[@nestarc/audit-log] Could not load @prisma/client. If your Prisma client is ' +
         'generated to a custom output path, pass it via the prismaModule option: ' +
         'createAuditExtension({ prismaModule: require("./generated/client") }).',
     );
+    (error as Error & { cause?: unknown }).cause = cause;
+    throw error;
   }
 }
