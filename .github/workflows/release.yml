@@ -46,7 +46,7 @@ jobs:
         run: npm ci
 
       - name: Generate Prisma client
-        run: npx prisma generate --schema=test/e2e/prisma/schema.prisma
+        run: npx prisma generate
 
       - name: Build
         run: npm run build
@@ -55,7 +55,7 @@ jobs:
         run: npm test
 
       - name: Push test schema
-        run: npx prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate
+        run: npx prisma db push
 
       - name: E2E tests
         run: npm run test:e2e

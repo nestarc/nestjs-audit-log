@@ -1,25 +1,24 @@
-import { PrismaClient } from '@prisma/client';
+import {
+  createTestPrismaClient,
+  PrismaClient,
+  prismaModule,
+} from './prisma-client';
 import { AuditContext } from '../../src/services/audit-context';
 import { createAuditExtension } from '../../src/prisma/audit-extension';
 import { applyAuditTableSchema } from '../../src/sql';
-
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  'postgresql://test:test@localhost:5433/audit_test';
 
 describe('batch and upsert E2E', () => {
   let basePrisma: PrismaClient;
   let prisma: any;
 
   beforeAll(async () => {
-    basePrisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
-    });
+    basePrisma = createTestPrismaClient();
     await resetAuditStorage(basePrisma);
     prisma = basePrisma.$extends(
       createAuditExtension({
         trackedModels: ['User'],
         logger: silentLogger,
+        prismaModule,
       }),
     );
   });

@@ -191,10 +191,12 @@ Behavior Specification / Test Plan 참조.
   `result[pkField]`에서 채워진다.
 - B10. `AuditService.log(input, tx)`로 기록한 수동 감사 행은 호출자 tx 롤백 시 함께
   사라진다(`src/services/audit.service.ts:21-22` 계약의 회귀 고정).
-- B11. 배열형 `$transaction([...])`(batch)에서 배치 전체가 실패하면, 개별 mutation
-  extension 핸들러의 `await query(args)`는 성공 result로 resolve되지 않는다. 따라서 기본
-  `logFailures: false` 자동 성공 감사 INSERT는 실행되지 않고, 배치 롤백 후 비즈니스 행과
-  해당 성공 감사 행은 모두 0건이다(Prisma 6.19.3 관측 동작 고정).
+- B11. 배열형 `$transaction([...])`(batch)에서 배치 전체가 실패하면 비즈니스 행은 모두
+  롤백된다. 자동 감사 INSERT는 caller transaction 밖의 best-effort 경로이므로 성공 감사
+  행은 0건 또는 이미 기록된 고아 행 1건일 수 있다. Prisma 6.19.3에서는 주로 0건이었지만
+  Prisma 7.9.1에서는 extension callback 완료 시점에 따라 두 결과가 모두 관측된다. 강한
+  정합성이 필요한 batch는 자동 감사를 사용하지 말고 interactive transaction과
+  `AuditService.log(input, tx)`를 사용한다.
 
 주: B5–B9는 #3(스펙 02 — pre-read를 try 안으로 이동)과 동일 코드 경로를 공유한다.
 테스트는 "감사 행 내용"이 아닌 위에 명시한 관측 가능 결과만 단언하여 스펙 02 구현
@@ -203,7 +205,7 @@ Behavior Specification / Test Plan 참조.
 ### Tier 3 — `experimentalTxAudit` (experimental, capability probe 성공 시에만 활성)
 
 - B12. `experimentalTxAudit`이 미설정/false면 어떤 Prisma 내부 API에도 접근하지 않으며
-  B5–B11의 동작이 그대로 유지된다.
+  B5–B11의 best-effort 계약이 그대로 유지된다.
 - B13. `experimentalTxAudit: true`이고 런타임 probe가 성공하면(콜백 인자의
   `__internalParams.transaction`이 `kind: 'itx'`로 존재하고 tx 바운드 실행 수단 확보):
   pre-read, post-read, 감사 INSERT가 모두 호출자 tx 경유로 실행된다. 결과: (a) B5/B6

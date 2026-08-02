@@ -11,8 +11,9 @@ Audit logging module for NestJS with automatic Prisma change tracking and append
 ## Requirements
 
 - NestJS 10 or 11
-- Prisma 5 or 6
+- Prisma 7 (primary), with Prisma 5/6 legacy peer compatibility
 - PostgreSQL
+- Node.js 20.19+, 22.12+, or 24.x
 
 ## Features
 
@@ -32,21 +33,50 @@ Audit logging module for NestJS with automatic Prisma change tracking and append
 ### 1. Install
 
 ```bash
-npm install @nestarc/audit-log
+npm install @nestarc/audit-log @prisma/client @prisma/adapter-pg pg
+npm install --save-dev prisma dotenv
 ```
 
-### 2. Create the audit_logs table
+### 2. Configure Prisma 7
+
+Prisma 7 uses the `prisma-client` generator with an explicit output path and reads the
+CLI datasource URL from `prisma.config.ts`:
+
+```prisma
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+```
+
+```typescript
+// prisma.config.ts
+import 'dotenv/config';
+import { defineConfig, env } from 'prisma/config';
+
+export default defineConfig({
+  schema: 'prisma/schema.prisma',
+  datasource: { url: env('DATABASE_URL') },
+});
+```
+
+### 3. Create the audit_logs table
 
 ```typescript
 import { applyAuditTableSchema } from '@nestarc/audit-log';
 
-// In a migration or setup script:
+// In a migration or setup script, after creating the Prisma client:
 await applyAuditTableSchema(prisma);
 ```
 
 Or use `getAuditTableSQL()` to get the raw SQL string for your migration tool.
 
-### 3. Complete NestJS Integration
+### 4. Complete NestJS Integration
 
 The library requires two Prisma clients with distinct roles:
 
@@ -56,19 +86,27 @@ The library requires two Prisma clients with distinct roles:
 ```typescript
 // prisma.service.ts
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from './generated/prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { createAuditExtension } from '@nestarc/audit-log';
+
+export const prismaModule = { Prisma };
 
 const auditExtensionOptions = {
   trackedModels: ['User', 'Invoice', 'Document'],
   sensitiveFields: ['password', 'ssn'],
+  prismaModule,
   // primaryKey: { Order: 'orderNumber' }, // for non-id PKs
 };
 
 @Injectable()
 export class PrismaService implements OnModuleInit {
   /** Base client — for audit storage (log/query) */
-  readonly base = new PrismaClient();
+  readonly base = new PrismaClient({
+    adapter: new PrismaPg({
+      connectionString: process.env.DATABASE_URL!,
+    }),
+  });
 
   /** Extended client — use this for all application queries */
   readonly client = this.base.$extends(
@@ -99,7 +137,7 @@ export class PrismaModule {}
 import { Module } from '@nestjs/common';
 import { AuditLogModule } from '@nestarc/audit-log';
 import { PrismaModule } from './prisma.module';
-import { PrismaService } from './prisma.service';
+import { PrismaService, prismaModule } from './prisma.service';
 
 @Module({
   imports: [
@@ -108,6 +146,7 @@ import { PrismaService } from './prisma.service';
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) => ({
         prisma: prisma.base,
+        prismaModule,
         actorExtractor: (req) => ({
           id: req.user?.id ?? null,
           type: req.user ? 'user' : 'system',
@@ -151,7 +190,7 @@ export class UserService {
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup before the optional `@nestarc/tenancy` fallback |
 | `sensitiveFields` | `string[]` | `[]` | Metadata redaction keys for manual logs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Model-specific metadata redaction keys |
-| `prismaModule` | generated Prisma module | `@prisma/client` | Namespace for custom Prisma client output paths |
+| `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
 
 ### AuditService
 
@@ -225,7 +264,7 @@ Apply to individual handlers or entire controllers:
 | `onAuditError` | `(error, ctx) => void` | — | Structured audit failure callback |
 | `logFailures` | `boolean` | `false` | Record best-effort failure audit rows for business write errors |
 | `ignoreTimestampOnlyUpdates` | `boolean` | `false` | Suppress `@updatedAt`-only update entries |
-| `prismaModule` | generated Prisma module | `@prisma/client` | Namespace for custom Prisma client output paths |
+| `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
 | `experimentalTxAudit` | `boolean` | `false` | Experimental opt-in, no semver guarantee. Routes audit reads/inserts through an interactive transaction client when Prisma internals expose one; logs `tx-aware audit unavailable` and falls back otherwise |
 
 When neither `trackedModels` nor `ignoredModels` is configured, `createAuditExtension()` audits all Prisma models and emits a one-time `No trackedModels/ignoredModels configured` warning. Set `trackedModels` as an allowlist or `ignoredModels` as a denylist to narrow scope.
@@ -293,7 +332,7 @@ if (page.hasMore) {
 
 ### Nested writes
 
-Nested relation writes are not fully audited in v0.2.0. When a tracked model mutation contains a nested write such as `posts.create`, the extension records the top-level model mutation and emits one logger warning per model/relation. Full nested-write auditing is planned for a later release.
+Nested relation writes are not fully audited in v0.3.0. When a tracked model mutation contains a nested write such as `posts.create`, the extension records the top-level model mutation and emits one logger warning per model/relation. Full nested-write auditing is planned for a later release.
 
 ### Transaction Model
 
@@ -304,6 +343,8 @@ Nested relation writes are not fully audited in v0.2.0. When a tracked model mut
 | Manual logging with `AuditService.log(input)` | Caller-controlled | Independent write via the base client |
 
 The key contract is explicit: automatic audit inserts do not join the caller transaction. If the caller transaction rolls back, the business row rolls back but the automatic audit row can remain as an orphan row. For updates inside an open transaction, automatic before/after diffs are based on committed state visible to the base client, so the diff can be empty or stale.
+
+The same best-effort rule applies to array transactions (`$transaction([...])`). When a later operation rolls back the batch, Prisma 7 may have already allowed an earlier operation's extension callback to write an orphan success audit row. Do not rely on automatic auditing for atomic batch audit semantics.
 
 When transaction consistency matters, use `AuditService.log(input, tx)` for the audit row you need to roll back with the business work. `experimentalTxAudit` is an opt-in experimental path that attempts transaction-aware routing through Prisma internals. It is off by default, has no semver guarantee, falls back with a `tx-aware audit unavailable` warning when unsupported, and can make audit statement failures abort the surrounding PostgreSQL transaction.
 
@@ -324,16 +365,16 @@ Tenant resolution uses this order: explicit `tenantResolver`, optional `@nestarc
 
 ## Performance
 
-Measured with PostgreSQL 16, Prisma 6, 300 iterations on Apple Silicon:
+Measured with PostgreSQL 16, Prisma 7.9.1, 300 iterations on Apple Silicon:
 
 | Scenario | Avg | P50 | P95 | P99 |
 |----------|-----|-----|-----|-----|
-| create — no audit (baseline) | 0.40ms | 0.40ms | 0.52ms | 0.57ms |
-| **create — with audit** | **1.44ms** | **1.37ms** | **1.84ms** | **3.11ms** |
-| **update — with audit + diff** | **2.06ms** | **2.01ms** | **2.54ms** | **2.85ms** |
-| **delete — with audit** | **1.71ms** | **1.57ms** | **2.09ms** | **3.91ms** |
+| create — no audit (baseline) | 0.70ms | 0.62ms | 0.98ms | 1.57ms |
+| **create — with audit** | **1.80ms** | **1.73ms** | **2.48ms** | **3.43ms** |
+| **update — with audit + diff** | **2.11ms** | **2.05ms** | **2.82ms** | **3.28ms** |
+| **delete — with audit** | **1.52ms** | **1.49ms** | **1.98ms** | **2.57ms** |
 
-Create overhead: **+1.04ms** per write. Update is slowest due to before/after diff calculation.
+Create overhead: **+1.10ms** per write. Update is slowest due to before/after diff calculation.
 
 > Reproduce: `docker compose -f test/e2e/docker-compose.yml up -d && npx ts-node benchmarks/audit-overhead.ts`
 
@@ -341,7 +382,7 @@ Create overhead: **+1.04ms** per write. Update is slowest due to before/after di
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20.19+, 22.12+, or 24.x
 - Docker (for E2E tests)
 
 ### Setup

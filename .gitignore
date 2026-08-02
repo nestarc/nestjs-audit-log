@@ -26,6 +26,7 @@ lerna-debug.log*
 
 # Coverage
 /coverage
+/test/e2e/generated
 
 # OS files
 .DS_Store

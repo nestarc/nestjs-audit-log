@@ -1,26 +1,25 @@
-import { PrismaClient } from '@prisma/client';
+import {
+  createTestPrismaClient,
+  PrismaClient,
+  prismaModule,
+} from './prisma-client';
 import { AuditContext } from '../../src/services/audit-context';
 import { createAuditExtension } from '../../src/prisma/audit-extension';
 import { applyAuditTableSchema } from '../../src/sql';
-
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  'postgresql://test:test@localhost:5433/audit_test';
 
 describe('experimental transaction-aware audit E2E', () => {
   let basePrisma: PrismaClient;
   let prisma: any;
 
   beforeAll(async () => {
-    basePrisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
-    });
+    basePrisma = createTestPrismaClient();
     await resetAuditStorage(basePrisma);
     prisma = basePrisma.$extends(
       createAuditExtension({
         trackedModels: ['User'],
         experimentalTxAudit: true,
         logger: silentLogger,
+        prismaModule,
       }),
     );
   });
@@ -102,6 +101,7 @@ describe('experimental transaction-aware audit E2E', () => {
         tableName: 'missing_audit_logs',
         onAuditError,
         logger: silentLogger,
+        prismaModule,
       }),
     );
     let followUpStatementFailed = false;

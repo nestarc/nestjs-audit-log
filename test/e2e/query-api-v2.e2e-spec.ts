@@ -1,12 +1,13 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  createTestPrismaClient,
+  Prisma,
+  PrismaClient,
+  prismaModule,
+} from './prisma-client';
 import { AuditService } from '../../src/services/audit.service';
 import { applyAuditTableSchema } from '../../src/sql';
 import { AuditContext } from '../../src/services/audit-context';
 import { createAuditExtension } from '../../src/prisma/audit-extension';
-
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  'postgresql://test:test@localhost:5433/audit_test';
 
 const TABLE = 'audit_logs_query_v2';
 const PARTITIONED_TABLE = 'audit_logs_query_v2_part';
@@ -49,9 +50,7 @@ describe('Query API v2 E2E', () => {
   };
 
   beforeAll(async () => {
-    prisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
-    });
+    prisma = createTestPrismaClient();
   });
 
   beforeEach(async () => {
@@ -77,6 +76,7 @@ describe('Query API v2 E2E', () => {
       actorExtractor: () => ({ id: null, type: 'system' }),
       tableName,
       logger,
+      prismaModule,
     });
   }
 
@@ -231,11 +231,12 @@ describe('Query API v2 E2E', () => {
   it('does not execute COUNT when includeTotal is false', async () => {
     await seedAuditRows(descendingRows(3));
     const queries: string[] = [];
-    const loggingPrisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
+    const loggingPrisma = createTestPrismaClient({
       log: [{ level: 'query', emit: 'event' }],
     });
-    loggingPrisma.$on('query', (event) => queries.push(event.query));
+    (loggingPrisma as any).$on('query', (event: { query: string }) =>
+      queries.push(event.query),
+    );
     await loggingPrisma.$connect();
 
     try {
@@ -367,6 +368,7 @@ describe('Query API v2 E2E', () => {
         tableName: TABLE,
         trackedModels: ['User'],
         logger,
+        prismaModule,
       }),
     );
 

@@ -33,7 +33,7 @@ export function resolvePrismaNamespace(
     if (typeof options.prismaModule.Prisma?.defineExtension !== 'function') {
       throw new Error(
         '[@nestarc/audit-log] prismaModule.Prisma.defineExtension is not a function. ' +
-          'Pass the generated client module, e.g. prismaModule: require("./generated/client").',
+          'Pass the generated Prisma namespace, e.g. prismaModule: { Prisma }.',
       );
     }
     return options.prismaModule.Prisma;
@@ -46,7 +46,7 @@ export function resolvePrismaNamespace(
     const error = new Error(
       '[@nestarc/audit-log] Could not load @prisma/client. If your Prisma client is ' +
         'generated to a custom output path, pass it via the prismaModule option: ' +
-        'createAuditExtension({ prismaModule: require("./generated/client") }).',
+        'createAuditExtension({ prismaModule: { Prisma } }).',
     );
     (error as Error & { cause?: unknown }).cause = cause;
     throw error;

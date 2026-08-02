@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.3.0] - 2026-08-02
+
+### Added
+
+- Prisma 7.9 primary development and CI coverage using the `prisma-client` generator,
+  an explicit generated output, `prisma.config.ts`, and the PostgreSQL driver adapter.
+- Prisma 7 setup guidance while retaining declared Prisma 5/6 peer compatibility.
+
+### Changed
+
+- The minimum supported Node.js version is now 20.19.
+- Array `$transaction([...])` automatic auditing is explicitly best-effort: a rolled-back
+  batch may leave an orphan success audit row from an earlier operation.
+
+### Fixed
+
+- PostgreSQL catalog `relkind` queries cast the internal `char` value to `text`, avoiding
+  Prisma 7 driver-adapter deserialization failures in partition setup and pruning.
+- Reapplying legacy RULE enforcement now removes existing append-only triggers first.
+
 ## [0.2.0] - 2026-06-12
 
 ### BREAKING CHANGES

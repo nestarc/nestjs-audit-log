@@ -11,14 +11,14 @@
  *     npx ts-node benchmarks/audit-overhead.ts
  */
 
-import { PrismaClient } from '@prisma/client';
+import {
+  createTestPrismaClient,
+  PrismaClient,
+  prismaModule,
+} from '../test/e2e/prisma-client';
 import { createAuditExtension } from '../src/prisma/audit-extension';
 import { AuditContext } from '../src/services/audit-context';
 import { applyAuditTableSchema } from '../src/sql';
-
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  'postgresql://test:test@localhost:5433/audit_test';
 
 const WARMUP = 30;
 const ITERATIONS = 300;
@@ -68,17 +68,18 @@ function printResult(r: BenchResult) {
 }
 
 // ---------------------------------------------------------------------------
-// Cleanup helper — must drop append-only rules before deleting audit_logs
+// Cleanup helper — temporarily removes append-only enforcement
 // ---------------------------------------------------------------------------
 
 async function cleanAuditLogs(prisma: PrismaClient) {
   await prisma.$executeRawUnsafe(
     `DROP RULE IF EXISTS audit_logs_no_delete ON audit_logs`,
   );
-  await prisma.$executeRaw`DELETE FROM audit_logs`;
   await prisma.$executeRawUnsafe(
-    `CREATE RULE audit_logs_no_delete AS ON DELETE TO audit_logs DO INSTEAD NOTHING`,
+    `DROP TRIGGER IF EXISTS audit_logs_no_delete_trg ON audit_logs`,
   );
+  await prisma.$executeRaw`DELETE FROM audit_logs`;
+  await applyAuditTableSchema(prisma);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,9 +89,7 @@ async function cleanAuditLogs(prisma: PrismaClient) {
 async function main() {
   console.log('=== @nestarc/audit-log Benchmark ===\n');
 
-  const basePrisma = new PrismaClient({
-    datasources: { db: { url: DATABASE_URL } },
-  });
+  const basePrisma = createTestPrismaClient();
   await basePrisma.$connect();
 
   // Setup: ensure users table + audit_logs table exist
@@ -112,6 +111,7 @@ async function main() {
     createAuditExtension({
       trackedModels: ['User'],
       sensitiveFields: ['password'],
+      prismaModule,
     }),
   ) as any;
 

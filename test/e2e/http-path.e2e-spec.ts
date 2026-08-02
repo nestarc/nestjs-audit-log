@@ -5,7 +5,11 @@ import {
   Post,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import {
+  createTestPrismaClient,
+  PrismaClient,
+  prismaModule,
+} from './prisma-client';
 import request from 'supertest';
 import { AuditLogModule } from '../../src/audit-log.module';
 import { createAuditExtension } from '../../src/prisma/audit-extension';
@@ -14,10 +18,6 @@ import { AuditAction } from '../../src/decorators/audit-action.decorator';
 import { AuditReason } from '../../src/decorators/audit-reason.decorator';
 import { applyAuditTableSchema } from '../../src/sql';
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  'postgresql://test:test@localhost:5433/audit_test';
-
 describe('HTTP path E2E', () => {
   let app: INestApplication;
   let basePrisma: PrismaClient;
@@ -25,14 +25,13 @@ describe('HTTP path E2E', () => {
   let httpServer: any;
 
   beforeAll(async () => {
-    basePrisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
-    });
+    basePrisma = createTestPrismaClient();
     await resetAuditStorage(basePrisma);
     prisma = basePrisma.$extends(
       createAuditExtension({
         trackedModels: ['User'],
         logger: silentLogger,
+        prismaModule,
       }),
     );
 
@@ -104,6 +103,7 @@ describe('HTTP path E2E', () => {
             ip: req.ip,
           }),
           logger: silentLogger,
+          prismaModule,
         }),
       ],
       controllers: [HttpAuditController, ClassNoAuditController],

@@ -1,17 +1,11 @@
-import { PrismaClient } from '@prisma/client';
+import { createTestPrismaClient, PrismaClient } from './prisma-client';
 import { applyAuditTableSchema } from '../../src/sql';
-
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  'postgresql://test:test@localhost:5433/audit_test';
 
 describe('append-only enforcement E2E', () => {
   let prisma: PrismaClient;
 
   beforeAll(async () => {
-    prisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
-    });
+    prisma = createTestPrismaClient();
   });
 
   beforeEach(async () => {

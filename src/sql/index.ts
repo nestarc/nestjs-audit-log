@@ -133,6 +133,8 @@ function ruleStatements(
   partitioned: boolean,
 ): string[] {
   const statements = [
+    `DROP TRIGGER IF EXISTS ${names.updateTrigger} ON ${names.tableName};`,
+    `DROP TRIGGER IF EXISTS ${names.deleteTrigger} ON ${names.tableName};`,
     `DO $$ BEGIN
   CREATE RULE ${names.updateRule} AS ON UPDATE TO ${names.tableName} DO INSTEAD NOTHING;
 EXCEPTION WHEN duplicate_object THEN NULL;
@@ -240,7 +242,7 @@ async function getTableRelkind(
   tableName: string,
 ): Promise<string | null> {
   const rows = await prisma.$queryRawUnsafe(
-    'SELECT relkind FROM pg_class WHERE oid = to_regclass($1)',
+    'SELECT relkind::text AS relkind FROM pg_class WHERE oid = to_regclass($1)',
     tableName,
   ) as Array<{ relkind?: string }>;
   return rows[0]?.relkind ?? null;

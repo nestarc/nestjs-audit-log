@@ -361,7 +361,7 @@ export class AuditService {
     const client = options.client ?? this.options.prisma;
     const Prisma = this.Prisma;
     const relkindRows = await client.$queryRaw(
-      Prisma.sql!`SELECT relkind FROM pg_class WHERE oid = to_regclass(${this.tableName})`,
+      Prisma.sql!`SELECT relkind::text AS relkind FROM pg_class WHERE oid = to_regclass(${this.tableName})`,
     ) as Array<{ relkind: string }>;
     const relkind = relkindRows[0]?.relkind;
 

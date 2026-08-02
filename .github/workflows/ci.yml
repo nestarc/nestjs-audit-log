@@ -12,7 +12,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18, 20, 22]
+        node-version: ['20.19', '22.12', '24']
 
     services:
       postgres:
@@ -45,7 +45,7 @@ jobs:
         run: npm ci
 
       - name: Generate Prisma client
-        run: npx prisma generate --schema=test/e2e/prisma/schema.prisma
+        run: npx prisma generate
 
       - name: Build
         run: npm run build
@@ -54,7 +54,7 @@ jobs:
         run: npm test
 
       - name: Push test schema
-        run: npx prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate
+        run: npx prisma db push
 
       - name: E2E tests
         run: npm run test:e2e
@@ -67,10 +67,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { nest: 10, prisma: 5, express: 4 }
-          - { nest: 10, prisma: 6, express: 4 }
-          - { nest: 11, prisma: 5, express: 5 }
-          - { nest: 11, prisma: 6, express: 5 }
+          - { nest: 10, prisma: 5, express: 4, client: legacy }
+          - { nest: 10, prisma: 6, express: 4, client: legacy }
+          - { nest: 10, prisma: 7, express: 4, client: generated }
+          - { nest: 11, prisma: 5, express: 5, client: legacy }
+          - { nest: 11, prisma: 6, express: 5, client: legacy }
+          - { nest: 11, prisma: 7, express: 5, client: generated }
 
     services:
       postgres:
@@ -89,6 +91,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://test:test@localhost:5432/audit_test
+      PRISMA_TEST_CLIENT: ${{ matrix.client }}
 
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +99,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20.19'
           cache: npm
 
       - name: Install dependencies
@@ -114,8 +117,13 @@ jobs:
             @prisma/client@^${{ matrix.prisma }} \
             prisma@^${{ matrix.prisma }}
 
-      - name: Generate Prisma client
-        run: npx prisma generate --schema=test/e2e/prisma/schema.prisma
+      - name: Generate Prisma 7 client
+        if: matrix.client == 'generated'
+        run: npx prisma generate
+
+      - name: Generate legacy Prisma client
+        if: matrix.client == 'legacy'
+        run: npx prisma generate --schema=test/e2e/prisma/schema.legacy.prisma
 
       - name: Build
         run: npm run build
@@ -123,8 +131,13 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Push test schema
-        run: npx prisma db push --schema=test/e2e/prisma/schema.prisma --skip-generate
+      - name: Push Prisma 7 test schema
+        if: matrix.client == 'generated'
+        run: npx prisma db push
+
+      - name: Push legacy Prisma test schema
+        if: matrix.client == 'legacy'
+        run: npx prisma db push --schema=test/e2e/prisma/schema.legacy.prisma --skip-generate
 
       - name: E2E tests
         run: npm run test:e2e

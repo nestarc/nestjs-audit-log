@@ -20,6 +20,11 @@ describe('AuditLogModule', () => {
       id: req.user?.id ?? null,
       type: 'user' as const,
     }),
+    prismaModule: {
+      Prisma: {
+        defineExtension: jest.fn(),
+      },
+    },
   };
 
   describe('forRoot', () => {

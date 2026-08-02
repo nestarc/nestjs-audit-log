@@ -3,6 +3,22 @@ import { AuditContext } from '../src/services/audit-context';
 import { AuditLogModuleOptions } from '../src/interfaces/audit-log-options.interface';
 import { encodeAuditCursor } from '../src/services/audit-cursor';
 
+jest.mock('@prisma/client', () => ({
+  Prisma: {
+    defineExtension: jest.fn(),
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
+    raw: (value: string) => ({ raw: value }),
+    join: (values: readonly unknown[], separator = ',') => ({
+      values,
+      separator,
+    }),
+    empty: { empty: true },
+  },
+}));
+
 const uuid1 = '11111111-1111-4111-8111-111111111111';
 const uuid2 = '22222222-2222-4222-8222-222222222222';
 const uuid3 = '33333333-3333-4333-8333-333333333333';
@@ -736,6 +752,9 @@ describe('AuditService', () => {
         expect.any(Function),
         { timeout: 60000, maxWait: 10000 },
       );
+      expect(
+        mockPrisma.$queryRaw.mock.calls[0][0].strings.join(''),
+      ).toContain('relkind::text AS relkind');
       expect(tx.$executeRaw).toHaveBeenCalledTimes(3);
     });
 

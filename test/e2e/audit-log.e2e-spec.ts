@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, Controller, Get, Patch, Module } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import {
+  createTestPrismaClient,
+  PrismaClient,
+  prismaModule,
+} from './prisma-client';
 import { AuditLogModule } from '../../src/audit-log.module';
 import { AuditService } from '../../src/services/audit.service';
 import { createAuditExtension } from '../../src/prisma/audit-extension';
@@ -8,10 +12,6 @@ import { AuditContext } from '../../src/services/audit-context';
 import { NoAudit } from '../../src/decorators/no-audit.decorator';
 import { AuditAction } from '../../src/decorators/audit-action.decorator';
 import { applyAuditTableSchema } from '../../src/sql';
-
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  'postgresql://test:test@localhost:5433/audit_test';
 
 describe('AuditLog E2E', () => {
   let app: INestApplication;
@@ -22,12 +22,11 @@ describe('AuditLog E2E', () => {
   const extensionOptions = {
     trackedModels: ['User'],
     sensitiveFields: ['password'],
+    prismaModule,
   };
 
   beforeAll(async () => {
-    basePrisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
-    });
+    basePrisma = createTestPrismaClient();
 
     // Provision audit_logs table + legacy append-only rules + indexes
     // Self-contained: works even if prisma db push was not run

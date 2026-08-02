@@ -4,6 +4,18 @@ describe('resolvePrismaNamespace', () => {
     jest.dontMock('@prisma/client');
   });
 
+  it('uses the legacy @prisma/client namespace when no module is provided', () => {
+    const Prisma = { defineExtension: jest.fn() };
+
+    jest.isolateModules(() => {
+      jest.doMock('@prisma/client', () => ({ Prisma }));
+
+      const { resolvePrismaNamespace } = require('../src/prisma/prisma-namespace');
+
+      expect(resolvePrismaNamespace({})).toBe(Prisma);
+    });
+  });
+
   it('preserves the original require failure as the error cause', () => {
     const cause = new Error('generated client missing');
 

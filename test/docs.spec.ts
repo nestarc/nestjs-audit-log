@@ -49,7 +49,18 @@ describe('v0.2.0 documentation gates', () => {
     expect(ci).toContain('nest: 11');
     expect(ci).toContain('prisma: 5');
     expect(ci).toContain('prisma: 6');
+    expect(ci).toContain('prisma: 7');
     expect(ci).toContain('npm run test:e2e');
+  });
+
+  it('documents Prisma 7 generator, adapter, and namespace injection setup', () => {
+    const readme = read('README.md');
+
+    expect(readme).toContain('Prisma 7 (primary)');
+    expect(readme).toContain('provider = "prisma-client"');
+    expect(readme).toContain("from '@prisma/adapter-pg'");
+    expect(readme).toContain('prismaModule');
+    expect(readme).toContain('prisma.config.ts');
   });
 
   it('documents v0.2.0 release notes in CHANGELOG', () => {

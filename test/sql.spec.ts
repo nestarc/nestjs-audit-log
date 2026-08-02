@@ -49,6 +49,8 @@ describe('SQL utilities', () => {
 
       expect(sql).toContain('CREATE RULE audit_logs_no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING');
       expect(sql).toContain('CREATE RULE audit_logs_no_delete AS ON DELETE TO audit_logs DO INSTEAD NOTHING');
+      expect(sql).toContain('DROP TRIGGER IF EXISTS audit_logs_no_update_trg');
+      expect(sql).toContain('DROP TRIGGER IF EXISTS audit_logs_no_delete_trg');
       expect(sql).not.toContain('CREATE TRIGGER audit_logs_no_update_trg');
     });
 
@@ -137,6 +139,10 @@ describe('SQL utilities', () => {
       await expect(
         applyAuditTableSchema(mockPrisma, { partitioned: true }),
       ).rejects.toThrow('flat audit table already exists');
+      expect(mockPrisma.$queryRawUnsafe).toHaveBeenCalledWith(
+        expect.stringContaining('relkind::text AS relkind'),
+        'audit_logs',
+      );
       expect(mockPrisma.$executeRawUnsafe).not.toHaveBeenCalled();
     });
   });
