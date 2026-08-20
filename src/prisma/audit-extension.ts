@@ -45,6 +45,15 @@ export interface AuditTransactionMethods<TTransactionClient> {
   ): Promise<TResult>;
 }
 
+export interface AuditDatabaseMapping {
+  /** PostgreSQL table name used by the Prisma model. */
+  tableName: string;
+  /** PostgreSQL schema name. Defaults to the connection's current schema. */
+  schema?: string;
+  /** Database column for the configured logical primary key field. */
+  primaryKeyColumn?: string;
+}
+
 interface InteractiveTransactionHost {
   $extends(extension: any): any;
   $transaction: (...args: any[]) => any;
@@ -79,6 +88,12 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
   sensitiveFieldsByModel?: Record<string, string[]>;
   /** Map of model name to primary key field name. Defaults to 'id'. */
   primaryKey?: Record<string, string>;
+  /**
+   * Database identifiers used for atomic row locks. Required for models that
+   * use Prisma mapping attributes when the generated Prisma namespace does
+   * not expose public DMMF mapping metadata.
+   */
+  databaseMapping?: Record<string, AuditDatabaseMapping>;
   logFailures?: boolean;
   ignoreTimestampOnlyUpdates?: boolean;
   prismaModule?: PrismaModuleLike;
@@ -448,6 +463,72 @@ function updatedAtFieldsFor(
     .map((field) => field.name);
 
   return fields && fields.length > 0 ? fields : ['updatedAt'];
+}
+
+function quotePostgresIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function storageIdentifiersFor(
+  model: string,
+  pkField: string,
+  options: AuditExtensionOptions,
+  Prisma: PrismaModuleLike['Prisma'],
+): { table: string; column: string } {
+  const explicitMapping = options.databaseMapping?.[model];
+  const modelMetadata = Prisma.dmmf?.datamodel?.models?.find(
+    (candidate) => candidate.name === model,
+  );
+  const fieldMetadata = modelMetadata?.fields?.find(
+    (field) => field.name === pkField,
+  );
+  const tableName = explicitMapping?.tableName ?? modelMetadata?.dbName ?? model;
+  const schemaName = explicitMapping?.schema ?? modelMetadata?.schema;
+  const schemaPrefix = schemaName
+    ? `${quotePostgresIdentifier(schemaName)}.`
+    : '';
+
+  return {
+    table: `${schemaPrefix}${quotePostgresIdentifier(tableName)}`,
+    column: quotePostgresIdentifier(
+      explicitMapping?.primaryKeyColumn ?? fieldMetadata?.dbName ?? pkField,
+    ),
+  };
+}
+
+async function readBeforeMutation(
+  client: any,
+  delegate: any,
+  model: string,
+  pkField: string,
+  where: unknown,
+  options: AuditExtensionOptions,
+  Prisma: PrismaModuleLike['Prisma'],
+): Promise<any> {
+  const candidate = await delegate.findFirst({ where });
+  if (options.consistency !== 'atomic-required' || !candidate) {
+    return candidate;
+  }
+
+  const pkValue = candidate[pkField];
+  if (pkValue == null) {
+    throw new Error(
+      `[@nestarc/audit-log] cannot lock ${model} before mutation because primary key field "${pkField}" is unavailable`,
+    );
+  }
+  if (typeof client.$queryRawUnsafe !== 'function') {
+    throw new Error(
+      '[@nestarc/audit-log] atomic row locking requires Prisma $queryRawUnsafe support',
+    );
+  }
+
+  const identifiers = storageIdentifiersFor(model, pkField, options, Prisma);
+  await client.$queryRawUnsafe(
+    `SELECT ${identifiers.column} FROM ${identifiers.table} WHERE ${identifiers.column} = $1 FOR UPDATE`,
+    pkValue,
+  );
+
+  return delegate.findFirst({ where: { [pkField]: pkValue } });
 }
 
 function isEmptyChanges(changes: Changes): boolean {
@@ -923,9 +1004,15 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             let before: any = null;
             let preReadFailed = false;
             try {
-              before = await delegate.findFirst({
-                where: args.where,
-              });
+              before = await readBeforeMutation(
+                auditClient,
+                delegate,
+                model,
+                pkField,
+                args.where,
+                options,
+                Prisma,
+              );
             } catch (error) {
               preReadFailed = true;
               reportAuditError(options, error, {
@@ -1037,9 +1124,15 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             let before: any = null;
             let preReadFailed = false;
             try {
-              before = await (auditClient as any)[
-                delegateName
-              ].findFirst({ where: args.where });
+              before = await readBeforeMutation(
+                auditClient,
+                (auditClient as any)[delegateName],
+                model,
+                pkField,
+                args.where,
+                options,
+                Prisma,
+              );
             } catch (error) {
               preReadFailed = true;
               reportAuditError(options, error, {
@@ -1123,9 +1216,15 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             let before: any = null;
             let preReadFailed = false;
             try {
-              before = await delegate.findFirst({
-                where: args.where,
-              });
+              before = await readBeforeMutation(
+                auditClient,
+                delegate,
+                model,
+                pkField,
+                args.where,
+                options,
+                Prisma,
+              );
             } catch (error) {
               preReadFailed = true;
               reportAuditError(options, error, {

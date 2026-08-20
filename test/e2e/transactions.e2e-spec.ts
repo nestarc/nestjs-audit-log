@@ -8,7 +8,7 @@ import { createAuditExtension } from '../../src/prisma/audit-extension';
 import { AuditService } from '../../src/services/audit.service';
 import { applyAuditTableSchema } from '../../src/sql';
 
-describe('transaction consistency E2E', () => {
+describe('best-effort transaction characterization E2E', () => {
   let basePrisma: PrismaClient;
   let prisma: any;
   let auditService: AuditService;

@@ -26,6 +26,7 @@ jest.mock('@prisma/client', () => ({
 function buildMockClient(overrides: Record<string, any> = {}) {
   return {
     $executeRaw: jest.fn().mockResolvedValue(1),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     $extends: jest.fn((ext: any) => ext),
     user: {
       findFirst: jest.fn(),
@@ -338,6 +339,68 @@ describe('createAuditExtension — query handlers', () => {
           }),
         ),
       ).rejects.toThrow('insert failed');
+    });
+
+    it('locks and refreshes the immediate preimage before an atomic update', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const txClient = buildMockClient();
+      txClient.user.findFirst
+        .mockResolvedValueOnce({ id: 'u1', name: 'Initial' })
+        .mockResolvedValueOnce({ id: 'u1', name: 'Writer One' })
+        .mockResolvedValueOnce({ id: 'u1', name: 'Writer Two' });
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, () =>
+        handlers.update({
+          model: 'User',
+          args: { where: { id: 'u1' }, data: { name: 'Writer Two' } },
+          query: jest.fn().mockResolvedValue({ id: 'u1', name: 'Writer Two' }),
+        }),
+      );
+
+      expect(txClient.$queryRawUnsafe).toHaveBeenCalledWith(
+        'SELECT "id" FROM "User" WHERE "id" = $1 FOR UPDATE',
+        'u1',
+      );
+      expect(txClient.user.findFirst).toHaveBeenNthCalledWith(2, {
+        where: { id: 'u1' },
+      });
+      const insertValues = txClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(insertValues[8])).toEqual({
+        name: { before: 'Writer One', after: 'Writer Two' },
+      });
+    });
+
+    it('fails closed when an atomic pre-read fails', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const txClient = buildMockClient();
+      txClient.user.findFirst.mockRejectedValue(new Error('pre-read failed'));
+      const query = jest.fn();
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await expect(
+        clientMethods.withAuditTransaction.call(transactionHost, () =>
+          handlers.update({
+            model: 'User',
+            args: { where: { id: 'u1' }, data: { name: 'After' } },
+            query,
+          }),
+        ),
+      ).rejects.toThrow('pre-read failed');
+      expect(query).not.toHaveBeenCalled();
+      expect(txClient.$executeRaw).not.toHaveBeenCalled();
     });
 
     it('fails closed when an atomic post-read fails', async () => {

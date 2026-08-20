@@ -4,7 +4,7 @@
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 1 완료 — Phase 2 동시성 release gate 착수 가능
+- 문서 상태: Phase 2 구현 완료 — peer matrix CI 통과 후 Phase 3 착수 가능
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적
@@ -401,22 +401,72 @@ NestJS 10 조합은 기존 CI peer matrix에서 검증하며, Phase 2의 전체 
 
 새 파일 후보: `test/e2e/transactions-atomic.e2e-spec.ts`.
 
-- [ ] create 정상 commit: 업무 1건 + 감사 1건 + 정확한 diff.
-- [ ] update 정상 commit: 정확한 immediate before/after.
-- [ ] delete 정상 commit: 업무 0건 + before-only 감사.
-- [ ] create/update/delete 강제 rollback: 업무 상태 원복 + 감사 0건.
-- [ ] 한 tx 안의 create -> update: 두 감사 행과 정확한 각 diff.
-- [ ] 한 tx 안의 여러 update: 각 단계의 before/after 정확성.
-- [ ] audit INSERT 실패: 업무 mutation 포함 전체 rollback.
-- [ ] pre-read/post-read 실패: atomic 모드의 공개 오류 계약 확인.
-- [ ] commit 전 base client에서 업무/감사 모두 비가시.
-- [ ] 정상 commit 후 업무/감사 모두 가시.
-- [ ] same-row concurrent writers: 정확한 diff 또는 명시적 serialization retry.
-- [ ] 기본 운영 DDL인 trigger enforcement와 함께 실행.
-- [ ] Nest 10/11 x Prisma 5/6/7 peer matrix에서 실행.
+- [x] create 정상 commit: 업무 1건 + 감사 1건 + 정확한 diff.
+- [x] update 정상 commit: 정확한 immediate before/after.
+- [x] delete 정상 commit: 업무 0건 + before-only 감사.
+- [x] create/update/delete 강제 rollback: 업무 상태 원복 + 감사 0건.
+- [x] 한 tx 안의 create -> update: 두 감사 행과 정확한 각 diff.
+- [x] 한 tx 안의 여러 update: 각 단계의 before/after 정확성.
+- [x] audit INSERT 실패: 업무 mutation 포함 전체 rollback.
+- [x] pre-read/post-read 실패: atomic 모드의 공개 오류 계약 확인.
+- [x] commit 전 base client에서 업무/감사 모두 비가시.
+- [x] 정상 commit 후 업무/감사 모두 가시.
+- [x] same-row concurrent writers: row lock 후 재조회로 정확한 diff.
+- [x] 기본 운영 DDL인 trigger enforcement와 함께 실행.
+- [x] atomic suite를 Nest 10/11 x Prisma 5/6/7 peer matrix의 `npm run test:e2e`에 포함.
 
 기존 orphan/stale 테스트는 best-effort 전용 characterization suite로 이름과 설명을 명확히
 바꾸고, atomic suite는 정확한 `0`/`1` counts를 단언하는 release blocker로 설정한다.
+
+#### Phase 2 완료 기록 (2026-08-21)
+
+동시성 계약과 release gate를 다음과 같이 확정했다.
+
+1. `atomic-required`의 단건 update/delete/upsert는 기존 pre-read로 대상 PK를 해석한 뒤 같은
+   transaction에서 PostgreSQL `SELECT ... FOR UPDATE`를 실행하고, 잠금 획득 후 PK로 preimage를
+   다시 조회한다. 업무 mutation과 post-read/audit INSERT는 잠금을 보유한 같은 transaction에서
+   이어진다.
+2. 따라서 다른 writer가 먼저 row lock을 보유하면 기다린 뒤 그 writer가 commit한 값을
+   immediate before로 기록한다. 높은 isolation level에서 PostgreSQL이 serialization failure를
+   선택하면 잘못된 diff를 commit하지 않고 transaction 전체가 실패한다.
+3. Prisma 7 `prisma-client` generator는 공개 `Prisma.dmmf`에 `@@map`/field mapping 정보를
+   제공하지 않는다. private runtime data model을 읽지 않기 위해 공개 `databaseMapping` 옵션을
+   추가했다. mapped table/schema/PK column을 사용하는 모델은 metadata를 공개 DMMF에서 얻을 수
+   없는 client에서 이 옵션을 지정하며, 누락/오설정은 business mutation 전에 fail-closed한다.
+4. atomic E2E를 12개 release-blocking case로 확장했다. 정상 create/update/delete, 한 tx의
+   create→update 및 다단 update, create/update/delete 일괄 rollback, audit INSERT failure,
+   extension fault injection에 의한 pre/post-read failure, commit 전 base-client 비가시성,
+   commit 후 동시 가시성을 정확한 count와 diff로 검증한다.
+5. same-row concurrency test는 첫 writer가 update 후 transaction을 유지한 상태에서 두 번째
+   writer가 `FOR UPDATE`에 실제 대기 중임을 `pg_stat_activity`로 확인하고 첫 writer를 release한다.
+   결과 diff는 `Initial → Writer One`, `Writer One → Writer Two`로 결정적으로 단언한다.
+6. atomic suite는 운영 기본 trigger enforcement를 재적용해 실행한다. 기존 transaction suite는
+   `best-effort transaction characterization E2E`로 이름을 변경하여 orphan/stale 허용 테스트가
+   원자성 보장으로 오해되지 않게 했다.
+7. `.github/workflows/ci.yml`의 peer matrix는 Nest 10/11 x Prisma 5/6/7 여섯 조합에서 전체
+   `npm run test:e2e`를 실행하므로 새 atomic suite도 모두의 release gate에 포함된다.
+
+검증 결과:
+
+```text
+npm test -- --runInBand
+Test Suites: 15 passed, 15 total
+Tests:       243 passed, 243 total
+
+npm run build
+성공
+
+npm run test:e2e
+Test Suites: 8 passed, 8 total
+Tests:       48 passed, 48 total
+
+git diff --check
+성공
+```
+
+로컬 PostgreSQL 검증 환경은 PostgreSQL 16, Node.js 24, NestJS 11, Prisma 7.9.1이다. 여섯
+peer 조합은 새 suite가 연결된 CI matrix의 필수 release gate이며, 실제 릴리스/merge 전 CI
+성공을 별도로 확인한다.
 
 ### Phase 3 — array transaction 및 bulk mutation 계약
 

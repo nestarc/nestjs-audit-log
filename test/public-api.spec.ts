@@ -8,6 +8,7 @@ import {
   mergeContextMetadata,
 } from '../src';
 import type {
+  AuditDatabaseMapping,
   AuditGetByIdOptions,
   AuditExtensionOptions,
   AuditErrorContext,
@@ -23,12 +24,18 @@ import type {
 
 describe('public API exports', () => {
   it('exports shared audit option types', () => {
+    const databaseMapping: AuditDatabaseMapping = {
+      tableName: 'users',
+      schema: 'public',
+      primaryKeyColumn: 'id',
+    };
     const phase: AuditErrorPhase = 'insert';
     const ctx: AuditErrorContext = { phase, model: 'User' };
     const logger: AuditLogger = {
       warn: jest.fn(),
       error: jest.fn(),
     };
+    expect(databaseMapping.tableName).toBe('users');
     const options: AuditSharedOptions = {
       tableName: 'audit_logs',
       tenantRequired: true,

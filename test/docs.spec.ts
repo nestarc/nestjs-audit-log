@@ -17,6 +17,8 @@ describe('documentation gates', () => {
     expect(readme).toContain('orphan success rows');
     expect(readme).toContain('AuditService.log(input, tx)');
     expect(readme).toContain('experimentalTxAudit');
+    expect(readme).toContain('databaseMapping');
+    expect(readme).toContain('lock the target row and refresh the preimage');
     expect(readme).toContain(
       'Preview — choose the automatic tracking consistency explicitly',
     );

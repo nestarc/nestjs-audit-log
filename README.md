@@ -264,6 +264,7 @@ Apply to individual handlers or entire controllers:
 | `sensitiveFields` | `string[]` | `[]` | Fields to mask as `[REDACTED]` in diffs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Per-model fields unioned with `sensitiveFields` |
 | `primaryKey` | `Record<string, string>` | `{ *: 'id' }` | Map of model name to primary key field name |
+| `databaseMapping` | `Record<string, { tableName: string; schema?: string; primaryKeyColumn?: string }>` | `{}` | PostgreSQL identifiers for atomic row locks; configure mapped models when public Prisma DMMF mapping metadata is unavailable |
 | `tableName` | `string` | `audit_logs` | Audit table used by automatic inserts |
 | `tenantRequired` | `boolean` | `false` | Missing tenant fails closed in `atomic-required`; `best-effort` reports `audit entry skipped` and returns the business mutation |
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup |
@@ -372,6 +373,12 @@ The helper forwards `timeout`, `maxWait`, and `isolationLevel`, preserves the tr
 and result types, rejects nested helper calls, and uses no private Prisma API. In
 `atomic-required`, pre-read, post-read, audit INSERT, and audit context construction errors are
 fail-closed. A tracked mutation outside the helper throws before its business query runs.
+Single-row update, delete, and upsert operations lock the target row and refresh the preimage before
+the mutation, so concurrent audited writers record the immediate committed before value. For Prisma
+clients that do not publicly expose DMMF mapping metadata, models using `@@map`, `@@schema`, or a
+mapped primary-key column must declare `databaseMapping` (for example,
+`{ User: { tableName: 'users' } }`). A missing or incorrect mapping fails closed before the business
+mutation.
 
 `best-effort` must be selected explicitly. If its caller transaction rolls back, the business row
 rolls back but the automatic audit row can remain as an orphan row. Transaction-local update diffs

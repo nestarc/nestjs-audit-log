@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `timeout`, `maxWait`, and `isolationLevel`, and keeps callback/result type inference.
 - PostgreSQL trigger-enforced atomic E2E coverage for helper guards, commit, rollback,
   transaction-local create/update diffs, delete, and audit INSERT failure rollback.
+- Atomic single-row update/delete/upsert row locking with refreshed immediate preimages, plus
+  `databaseMapping` for mapped PostgreSQL table/schema/primary-key identifiers when public Prisma
+  DMMF mapping metadata is unavailable.
 
 ### Breaking Changes
 

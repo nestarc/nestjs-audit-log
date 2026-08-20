@@ -14,9 +14,12 @@ export interface PrismaModuleLike {
       datamodel?: {
         models?: ReadonlyArray<{
           name: string;
+          dbName?: string | null;
+          schema?: string | null;
           kind?: string;
           fields?: ReadonlyArray<{
             name: string;
+            dbName?: string | null;
             kind?: string;
             isUpdatedAt?: boolean;
           }>;
