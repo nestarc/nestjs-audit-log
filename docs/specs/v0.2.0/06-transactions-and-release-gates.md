@@ -1,7 +1,7 @@
 # v0.2.0 Spec — Transaction Consistency & Release Gates
 
 Date: 2026-06-11
-Status: Draft
+Status: Historical v0.2.0 implementation specification — released; not the current package contract
 Roadmap items: #5 (트랜잭션 정합성 최소 대응), Release Gates 1–6
 
 ## Goal

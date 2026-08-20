@@ -8,6 +8,12 @@
 
 Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage.
 
+> **Preview — automatic tracking is best-effort and is not transaction-atomic.** An automatic
+> success row means the extension callback completed; it does not prove that the surrounding
+> transaction committed. Rollback can leave an orphan success row, and transaction-local update
+> diffs can be empty or stale. Use `AuditService.log(input, tx)` for authoritative,
+> rollback-consistent records until the stable transaction-first API is available.
+
 ## Requirements
 
 - NestJS 10 or 11

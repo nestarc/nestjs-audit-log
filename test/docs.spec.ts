@@ -17,6 +17,33 @@ describe('v0.2.0 documentation gates', () => {
     expect(readme).toContain('orphan rows on rollback');
     expect(readme).toContain('AuditService.log(input, tx)');
     expect(readme).toContain('experimentalTxAudit');
+    expect(readme).toContain(
+      'Preview — automatic tracking is best-effort and is not transaction-atomic',
+    );
+    expect(readme).toMatch(
+      /it does not prove that the surrounding\s+>\s+transaction committed/,
+    );
+  });
+
+  it('marks pre-release v0.2 planning documents as historical', () => {
+    const roadmap = read('docs/2026-06-11-v0.2.0-roadmap.md');
+    const overview = read('docs/specs/v0.2.0/00-overview.md');
+    const specs = [
+      '01-storage-retention.md',
+      '02-extension-reliability.md',
+      '03-tenant-isolation.md',
+      '04-actor-context.md',
+      '05-query-api-v2.md',
+      '06-transactions-and-release-gates.md',
+    ].map((name) => read(`docs/specs/v0.2.0/${name}`));
+
+    expect(roadmap).toContain('Status: Historical roadmap');
+    expect(roadmap).not.toContain('Status: Proposed');
+    expect(overview).toContain('Status: Historical implementation specification');
+    for (const spec of specs) {
+      expect(spec).toContain('Status: Historical v0.2.0 implementation specification');
+      expect(spec).not.toContain('Status: Draft');
+    }
   });
 
   it('removes obsolete atomicity claims from the design document', () => {
@@ -72,6 +99,9 @@ describe('v0.2.0 documentation gates', () => {
     expect(changelog).toContain('append-only default enforcement changed');
     expect(changelog).toContain('AuditService.prune');
     expect(changelog).toContain('experimentalTxAudit');
+    expect(changelog).toMatch(
+      /they\s+do not establish transaction-atomic automatic auditing/,
+    );
   });
 
   it('documents v0.2.0 storage, query, and nested-write behavior in README', () => {

@@ -1,7 +1,7 @@
 # v0.2.0 Spec — Query API v2
 
 Date: 2026-06-11
-Status: Draft
+Status: Historical v0.2.0 implementation specification — released; not the current package contract
 Roadmap items: #7 (연계: #4의 `query()` 테넌트 플래그 — spec 03과 한 PR 권장)
 
 ## Goal

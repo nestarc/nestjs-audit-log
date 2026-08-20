@@ -1,7 +1,7 @@
 # v0.2.0 Spec — Actor Context & Request Metadata
 
 Date: 2026-06-11
-Status: Draft
+Status: Historical v0.2.0 implementation specification — released; not the current package contract
 Roadmap items: #8, #9
 
 ## Goal

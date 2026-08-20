@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Automatic Prisma tracking is now prominently documented as Preview because its audit reads and
+  inserts are best-effort outside the caller transaction. An automatic success row is not evidence
+  that the surrounding transaction committed; use `AuditService.log(input, tx)` when rollback
+  consistency is required.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added
@@ -51,7 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `AuditService.getById(id, options?)` with tenant scoping.
 - `experimentalTxAudit` for opt-in transaction-aware audit routing when compatible Prisma internals are available, with safe fallback warning.
 - Nested-write boundary warnings for tracked top-level mutations.
-- Release gate E2E coverage for transactions, HTTP middleware/interceptor paths, batch/upsert operations, append-only enforcement, and the Nest/Prisma peer matrix.
+- E2E characterization coverage for the current transaction behavior, plus release-gate coverage
+  for HTTP middleware/interceptor paths, batch/upsert operations, append-only enforcement, and the
+  Nest/Prisma peer matrix. The transaction cases document orphan/stale best-effort behavior; they
+  do not establish transaction-atomic automatic auditing.
 
 ### Changed
 

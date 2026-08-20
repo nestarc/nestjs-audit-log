@@ -1,8 +1,12 @@
 # v0.2.0 Specs — Overview
 
 Date: 2026-06-12
-Status: Reviewed (초안 → 일관성 조정 → 적대적 검토 2종 → 수정 반영 완료)
+Status: Historical implementation specification — v0.2.0 released; not the current package contract
 Source: [../2026-06-11-v0.2.0-roadmap.md](../../2026-06-11-v0.2.0-roadmap.md)
+
+> These specifications preserve the v0.2.0 design and review record. Shipped behavior is described
+> by `README.md` and `CHANGELOG.md`; unresolved transaction-integrity work is tracked in
+> `docs/2026-08-20-audit-log-integrity-improvement-plan.md`.
 
 ## Purpose
 
