@@ -20,6 +20,7 @@ describe('AuditLog E2E', () => {
   let auditService: AuditService;
 
   const extensionOptions = {
+    consistency: 'best-effort' as const,
     trackedModels: ['User'],
     sensitiveFields: ['password'],
     prismaModule,

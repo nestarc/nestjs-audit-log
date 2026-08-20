@@ -7,21 +7,18 @@ function read(path: string): string {
   return readFileSync(join(root, path), 'utf8');
 }
 
-describe('v0.2.0 documentation gates', () => {
-  it('documents the automatic transaction orphan-row contract in README', () => {
+describe('documentation gates', () => {
+  it('documents atomic-required and explicit legacy best-effort contracts', () => {
     const readme = read('README.md');
 
-    expect(readme).toContain(
-      'automatic audit inserts do not join the caller transaction',
-    );
-    expect(readme).toContain('orphan rows on rollback');
+    expect(readme).toContain("consistency: 'atomic-required'");
+    expect(readme).toContain('withAuditTransaction()');
+    expect(readme).toContain('rejects tracked writes outside');
+    expect(readme).toContain('orphan success rows');
     expect(readme).toContain('AuditService.log(input, tx)');
     expect(readme).toContain('experimentalTxAudit');
     expect(readme).toContain(
-      'Preview — automatic tracking is best-effort and is not transaction-atomic',
-    );
-    expect(readme).toMatch(
-      /it does not prove that the surrounding\s+>\s+transaction committed/,
+      'Preview — choose the automatic tracking consistency explicitly',
     );
   });
 
@@ -133,14 +130,15 @@ describe('v0.2.0 documentation gates', () => {
     );
   });
 
-  it('documents tenantRequired path differences and current transaction opt-in behavior', () => {
+  it('documents tenantRequired path differences and atomic transaction behavior', () => {
     const readme = read('README.md');
 
     expect(readme).toContain('audit entry skipped');
-    expect(readme).toContain('business mutation still returns');
+    expect(readme).toContain('fails closed in `atomic-required`');
     expect(readme).toContain('tenantId and allTenants are mutually exclusive');
     expect(readme).toContain('No trackedModels/ignoredModels configured');
-    expect(readme).toContain('tx-aware audit unavailable');
+    expect(readme).toContain('uses no private Prisma API');
+    expect(readme).toContain('experimentalTxAudit` is deprecated');
     expect(readme).not.toContain('reserved for future transaction-aware routing');
   });
 

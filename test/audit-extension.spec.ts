@@ -135,7 +135,7 @@ describe('Prisma Audit Extension helpers', () => {
           operation: 'create',
           changes: {},
         },
-        { onAuditError },
+        { consistency: 'best-effort', onAuditError },
       );
       buildAuditInsertParams(
         {
@@ -145,7 +145,7 @@ describe('Prisma Audit Extension helpers', () => {
           operation: 'update',
           changes: {},
         },
-        { onAuditError },
+        { consistency: 'best-effort', onAuditError },
       );
 
       expect(onAuditError).toHaveBeenCalledTimes(1);
@@ -174,7 +174,7 @@ describe('Prisma Audit Extension helpers', () => {
           operation: 'create',
           changes: {},
         },
-        { logger },
+        { consistency: 'best-effort', logger },
       );
 
       expect(logger.warn).toHaveBeenCalledWith(

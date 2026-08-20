@@ -8,11 +8,10 @@
 
 Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage.
 
-> **Preview — automatic tracking is best-effort and is not transaction-atomic.** An automatic
-> success row means the extension callback completed; it does not prove that the surrounding
-> transaction committed. Rollback can leave an orphan success row, and transaction-local update
-> diffs can be empty or stale. Use `AuditService.log(input, tx)` for authoritative,
-> rollback-consistent records until the stable transaction-first API is available.
+> **Preview — choose the automatic tracking consistency explicitly.** The new
+> `atomic-required` mode commits and rolls back business mutations and automatic audit rows
+> together through `withAuditTransaction()`. Legacy `best-effort` mode is not transaction-atomic:
+> rollback can leave orphan success rows and transaction-local diffs can be stale.
 
 ## Requirements
 
@@ -24,7 +23,7 @@ Audit logging module for NestJS with automatic Prisma change tracking and append
 ## Features
 
 - **Automatic CUD tracking** via Prisma `$extends` — create, update, delete, upsert, and batch operations
-- **Transaction contract is explicit** — business writes keep the caller `$transaction`, but automatic audit inserts do not join the caller transaction (orphan rows on rollback — see Transaction Model)
+- **Transaction-first automatic tracking** — `atomic-required` binds business writes, audit reads, and audit inserts to one official Prisma interactive transaction
 - **Before/after diffs** with deep comparison for JSON fields
 - **Sensitive field masking** — configurable `[REDACTED]` replacement
 - **Manual logging API** — `AuditService.log()` for business events (with optional transaction support)
@@ -94,11 +93,12 @@ The library requires two Prisma clients with distinct roles:
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Prisma, PrismaClient } from './generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { createAuditExtension } from '@nestarc/audit-log';
+import { createAuditedClient } from '@nestarc/audit-log';
 
 export const prismaModule = { Prisma };
 
 const auditExtensionOptions = {
+  consistency: 'atomic-required' as const,
   trackedModels: ['User', 'Invoice', 'Document'],
   sensitiveFields: ['password', 'ssn'],
   prismaModule,
@@ -115,9 +115,7 @@ export class PrismaService implements OnModuleInit {
   });
 
   /** Extended client — use this for all application queries */
-  readonly client = this.base.$extends(
-    createAuditExtension(auditExtensionOptions),
-  );
+  readonly client = createAuditedClient(this.base, auditExtensionOptions);
 
   async onModuleInit() {
     await this.base.$connect();
@@ -172,10 +170,11 @@ export class AppModule {}
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createUser(data: CreateUserDto) {
-    // Automatic audit tracking fires because we use the extended client
-    return this.prisma.client.user.create({ data });
-  }
+      async createUser(data: CreateUserDto) {
+        return this.prisma.client.withAuditTransaction((tx) =>
+          tx.user.create({ data }),
+        );
+      }
 }
 ```
 
@@ -259,19 +258,20 @@ Apply to individual handlers or entire controllers:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
+| `consistency` | `'atomic-required' \| 'best-effort'` | required | `atomic-required` rejects tracked writes outside `withAuditTransaction()` and fails closed; `best-effort` preserves legacy non-atomic behavior |
 | `trackedModels` | `string[]` | all models when omitted | Allowlist of Prisma model names to track. `trackedModels: []` means no models are audited |
 | `ignoredModels` | `string[]` | `[]` | Denylist used only when `trackedModels` is not set |
 | `sensitiveFields` | `string[]` | `[]` | Fields to mask as `[REDACTED]` in diffs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Per-model fields unioned with `sensitiveFields` |
 | `primaryKey` | `Record<string, string>` | `{ *: 'id' }` | Map of model name to primary key field name |
 | `tableName` | `string` | `audit_logs` | Audit table used by automatic inserts |
-| `tenantRequired` | `boolean` | `false` | Skip automatic audit rows when tenant context is missing and report `audit entry skipped` through `onAuditError` or `logger.warn`; the business mutation still returns |
+| `tenantRequired` | `boolean` | `false` | Missing tenant fails closed in `atomic-required`; `best-effort` reports `audit entry skipped` and returns the business mutation |
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup |
 | `onAuditError` | `(error, ctx) => void` | — | Structured audit failure callback |
 | `logFailures` | `boolean` | `false` | Record best-effort failure audit rows for business write errors |
 | `ignoreTimestampOnlyUpdates` | `boolean` | `false` | Suppress `@updatedAt`-only update entries |
 | `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
-| `experimentalTxAudit` | `boolean` | `false` | Experimental opt-in, no semver guarantee. Routes audit reads/inserts through an interactive transaction client when Prisma internals expose one; logs `tx-aware audit unavailable` and falls back otherwise |
+| `experimentalTxAudit` | `boolean` | `false` | Deprecated legacy compatibility path for `best-effort`; uses private Prisma internals and may silently fall back |
 
 When neither `trackedModels` nor `ignoredModels` is configured, `createAuditExtension()` audits all Prisma models and emits a one-time `No trackedModels/ignoredModels configured` warning. Set `trackedModels` as an allowlist or `ignoredModels` as a denylist to narrow scope.
 
@@ -344,24 +344,55 @@ Nested relation writes are not fully audited in v0.3.0. When a tracked model mut
 
 | Path | Business write | Audit insert |
 |------|----------------|--------------|
-| Automatic tracking (extension) | Uses Prisma's `query(args)`, so the business write remains in the caller `$transaction` | Best-effort via the base client; automatic audit inserts do not join the caller transaction |
+| `atomic-required` + `withAuditTransaction()` | Same official Prisma interactive `tx` | Same `tx`; audit read/insert failure rolls back the business mutation |
+| `atomic-required` outside the helper | Rejected before execution | Not attempted |
+| Explicit `best-effort` | Uses Prisma's `query(args)`, so the business write remains in the caller `$transaction` | Independent base-client insert; does not join the caller transaction |
 | Manual logging with `AuditService.log(input, tx)` | Caller-controlled | Participates in the provided transaction |
 | Manual logging with `AuditService.log(input)` | Caller-controlled | Independent write via the base client |
 
-The key contract is explicit: automatic audit inserts do not join the caller transaction. If the caller transaction rolls back, the business row rolls back but the automatic audit row can remain as an orphan row. For updates inside an open transaction, automatic before/after diffs are based on committed state visible to the base client, so the diff can be empty or stale.
+Use the transaction-first API for authoritative automatic records:
+
+```typescript
+const prisma = createAuditedClient(basePrisma, {
+  consistency: 'atomic-required',
+  trackedModels: ['User', 'Invoice'],
+  prismaModule,
+});
+
+await prisma.withAuditTransaction(
+  async (tx) => {
+    await tx.user.update({ where: { id }, data: { name: 'After' } });
+    await tx.invoice.create({ data: invoice });
+  },
+  { timeout: 10_000, maxWait: 5_000, isolationLevel: 'Serializable' },
+);
+```
+
+The helper forwards `timeout`, `maxWait`, and `isolationLevel`, preserves the transaction callback
+and result types, rejects nested helper calls, and uses no private Prisma API. In
+`atomic-required`, pre-read, post-read, audit INSERT, and audit context construction errors are
+fail-closed. A tracked mutation outside the helper throws before its business query runs.
+
+`best-effort` must be selected explicitly. If its caller transaction rolls back, the business row
+rolls back but the automatic audit row can remain as an orphan row. Transaction-local update diffs
+can be empty or stale because its reads use the base client.
 
 The same best-effort rule applies to array transactions (`$transaction([...])`). When a later operation rolls back the batch, Prisma 7 may have already allowed an earlier operation's extension callback to write an orphan success audit row. Do not rely on automatic auditing for atomic batch audit semantics.
 
-When transaction consistency matters, use `AuditService.log(input, tx)` for the audit row you need to roll back with the business work. `experimentalTxAudit` is an opt-in experimental path that attempts transaction-aware routing through Prisma internals. It is off by default, has no semver guarantee, falls back with a `tx-aware audit unavailable` warning when unsupported, and can make audit statement failures abort the surrounding PostgreSQL transaction.
+Array transactions remain outside the atomic contract; use sequential operations inside
+`withAuditTransaction()` instead. `experimentalTxAudit` is deprecated and cannot be combined with
+`atomic-required`. `AuditService.log(input, tx)` remains the stable manual event path.
 
 ## Multi-Tenancy
 
-Tenant resolution uses this order: explicit `tenantResolver`, optional `@nestarc/tenancy`, then `null`. A throwing `tenantResolver` is treated differently by path so automatic auditing never breaks the business mutation.
+Tenant resolution uses this order: explicit `tenantResolver`, optional `@nestarc/tenancy`, then `null`.
+`atomic-required` treats resolution failures as transaction failures; `best-effort` reports and isolates
+them from the business mutation.
 
 | Path | Missing tenant behavior |
 |------|-------------------------|
 | Automatic tracking, `tenantRequired: false` | Writes an audit row with `tenant_id = null` |
-| Automatic tracking, `tenantRequired: true` | Skips the audit row, reports `audit entry skipped` with phase `tenant-resolution`, and the business mutation still returns |
+| Automatic tracking, `tenantRequired: true` | `atomic-required`: throws and rolls back; `best-effort`: skips the audit row, reports `audit entry skipped`, and returns the business mutation |
 | `AuditService.log()` with `tenantRequired: true` | Throws unless tenant context is available |
 | `query()` / `getById()` with explicit `tenantId` | Scopes to that tenant |
 | `query()` / `getById()` with `allTenants: true` | Omits tenant filtering for authorized cross-tenant reads |

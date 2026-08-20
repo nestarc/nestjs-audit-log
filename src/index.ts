@@ -13,8 +13,16 @@ export { AuditContext, mergeContextMetadata } from './services/audit-context';
 export type { AuditContextStore } from './services/audit-context';
 
 // Prisma Extension
-export { createAuditExtension } from './prisma/audit-extension';
-export type { AuditExtensionOptions } from './prisma/audit-extension';
+export {
+  createAuditExtension,
+  createAuditedClient,
+} from './prisma/audit-extension';
+export type {
+  AuditConsistency,
+  AuditExtensionOptions,
+  AuditTransactionMethods,
+  AuditTransactionOptions,
+} from './prisma/audit-extension';
 export type { PrismaModuleLike } from './prisma/prisma-namespace';
 
 // Decorators

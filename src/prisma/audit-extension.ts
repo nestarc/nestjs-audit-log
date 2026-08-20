@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { AuditContext, mergeContextMetadata } from '../services/audit-context';
 import {
   shouldTrackModel,
@@ -25,6 +26,39 @@ const NO_CONTEXT_WARNING_MESSAGE =
 let noContextWarningReported = false;
 let txAuditUnavailableWarned = false;
 
+export type AuditConsistency = 'atomic-required' | 'best-effort';
+
+export interface AuditTransactionOptions {
+  maxWait?: number;
+  timeout?: number;
+  isolationLevel?:
+    | 'ReadUncommitted'
+    | 'ReadCommitted'
+    | 'RepeatableRead'
+    | 'Serializable';
+}
+
+export interface AuditTransactionMethods<TTransactionClient> {
+  withAuditTransaction<TResult>(
+    callback: (tx: TTransactionClient) => Promise<TResult>,
+    options?: AuditTransactionOptions,
+  ): Promise<TResult>;
+}
+
+interface InteractiveTransactionHost {
+  $extends(extension: any): any;
+  $transaction: (...args: any[]) => any;
+}
+
+type TransactionClientOf<TClient> = TClient extends {
+  $transaction<TResult>(
+    callback: (tx: infer TTransactionClient) => Promise<TResult>,
+    options?: any,
+  ): Promise<TResult>;
+}
+  ? TTransactionClient
+  : never;
+
 export function _resetNoContextWarning(): void {
   noContextWarningReported = false;
 }
@@ -34,6 +68,11 @@ export function _resetTxAuditWarning(): void {
 }
 
 export interface AuditExtensionOptions extends AuditSharedOptions {
+  /**
+   * `atomic-required` rejects tracked writes outside withAuditTransaction().
+   * `best-effort` preserves the legacy non-atomic behavior.
+   */
+  consistency: AuditConsistency;
   trackedModels?: string[];
   ignoredModels?: string[];
   sensitiveFields?: string[];
@@ -47,9 +86,15 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
    * EXPERIMENTAL — no semver guarantee. Reserved for transaction-aware audit
    * routing when Prisma exposes a compatible internal transaction capability.
    * Default behavior remains best-effort outside the caller transaction.
+   * @deprecated Use consistency: 'atomic-required' with withAuditTransaction().
    */
   experimentalTxAudit?: boolean;
 }
+
+const ATOMIC_CONTEXT_ERROR =
+  '[@nestarc/audit-log] atomic-required tracked write must run inside withAuditTransaction()';
+const NESTED_TRANSACTION_ERROR =
+  '[@nestarc/audit-log] nested withAuditTransaction() calls are not supported';
 
 export function modelDelegateName(model: string): string {
   return model.charAt(0).toLowerCase() + model.slice(1);
@@ -57,7 +102,7 @@ export function modelDelegateName(model: string): string {
 
 export function getPkField(
   model: string,
-  options: AuditExtensionOptions,
+  options: Pick<AuditExtensionOptions, 'primaryKey'>,
 ): string {
   return options.primaryKey?.[model] ?? 'id';
 }
@@ -86,30 +131,38 @@ export interface AuditInsertInput {
   result?: 'success' | 'failure';
 }
 
+type AuditInsertBuildOptions = Omit<AuditExtensionOptions, 'consistency'> & {
+  consistency?: AuditConsistency;
+};
+
 export function buildAuditInsertParams(
   input: AuditInsertInput,
 ): AuditInsertParams;
 export function buildAuditInsertParams(
   input: AuditInsertInput,
-  options: AuditExtensionOptions,
+  options: AuditInsertBuildOptions,
 ): AuditInsertParams | null;
 export function buildAuditInsertParams(
   input: AuditInsertInput,
-  options: AuditExtensionOptions = {},
+  options: AuditInsertBuildOptions = {},
 ): AuditInsertParams | null {
+  const runtimeOptions: AuditExtensionOptions = {
+    consistency: 'best-effort',
+    ...options,
+  };
   const store = AuditContext.getStore();
   const actor = store?.actor ?? null;
   const actionOverride = store?.actionOverride;
   const action = actionOverride ?? input.action;
-  warnForMissingContextStore(input, options, action, store);
+  warnForMissingContextStore(input, runtimeOptions, action, store);
   let tenantId: string | null = null;
 
   try {
     tenantId = resolveTenantId({
-      tenantResolver: options.tenantResolver,
+      tenantResolver: runtimeOptions.tenantResolver,
     });
   } catch (error) {
-    reportAuditError(options, error, {
+    reportAuditError(runtimeOptions, error, {
       phase: 'tenant-resolution',
       model: input.targetType,
       operation: input.operation,
@@ -117,14 +170,14 @@ export function buildAuditInsertParams(
       targetId: input.targetId,
       tenantId: null,
     });
-    if (options.tenantRequired) {
+    if (runtimeOptions.tenantRequired) {
       return null;
     }
   }
 
-  if (tenantId === null && options.tenantRequired) {
+  if (tenantId === null && runtimeOptions.tenantRequired) {
     reportAuditError(
-      options,
+      runtimeOptions,
       new Error(
         '[@nestarc/audit-log] tenant context required but unavailable; audit entry skipped',
       ),
@@ -144,7 +197,7 @@ export function buildAuditInsertParams(
   const metadata = mergedMetadata
     ? redactObject(
         mergedMetadata,
-        getSensitiveFieldsFor(input.targetType, options),
+        getSensitiveFieldsFor(input.targetType, runtimeOptions),
       )
     : undefined;
 
@@ -285,7 +338,6 @@ function reportAuditError(
   if (options.onAuditError) {
     try {
       options.onAuditError(error, ctx);
-      return;
     } catch (callbackError) {
       try {
         logger.error(
@@ -296,8 +348,11 @@ function reportAuditError(
       } catch {
         // Reporting must never affect the caller's mutation.
       }
-      return;
     }
+    if (options.consistency === 'atomic-required') {
+      throw error;
+    }
+    return;
   }
 
   try {
@@ -308,6 +363,9 @@ function reportAuditError(
     );
   } catch {
     // Reporting must never affect the caller's mutation.
+  }
+  if (options.consistency === 'atomic-required') {
+    throw error;
   }
 }
 
@@ -333,8 +391,16 @@ function warnTxAuditUnavailable(
 function resolveAuditClient(
   client: any,
   options: AuditExtensionOptions,
+  transactionClient: any,
   internalParams?: { transaction?: { kind?: string } },
 ): any {
+  if (options.consistency === 'atomic-required') {
+    if (!transactionClient) {
+      throw new Error(ATOMIC_CONTEXT_ERROR);
+    }
+    return transactionClient;
+  }
+
   if (!options.experimentalTxAudit) {
     return client;
   }
@@ -602,7 +668,11 @@ async function tryLogFailure(
   },
   tableRef?: unknown,
 ): Promise<void> {
-  if (!options.logFailures || shouldSkipFailureAudit(input.error)) {
+  if (
+    options.consistency === 'atomic-required' ||
+    !options.logFailures ||
+    shouldSkipFailureAudit(input.error)
+  ) {
     return;
   }
 
@@ -629,6 +699,11 @@ async function tryAuditLog(
   tableRef?: unknown,
 ): Promise<void> {
   if (!params) {
+    if (options.consistency === 'atomic-required') {
+      throw new Error(
+        '[@nestarc/audit-log] atomic audit entry could not be constructed',
+      );
+    }
     return;
   }
 
@@ -642,6 +717,9 @@ async function tryAuditLog(
       targetId: params.targetId,
       tenantId: params.tenantId,
     });
+    if (options.consistency === 'atomic-required') {
+      throw error;
+    }
   }
 }
 
@@ -689,6 +767,19 @@ function warnForTrackingConfiguration(
 }
 
 export function createAuditExtension(options: AuditExtensionOptions): any {
+  if (
+    options.consistency !== 'atomic-required' &&
+    options.consistency !== 'best-effort'
+  ) {
+    throw new Error(
+      '[@nestarc/audit-log] consistency must be explicitly set to "atomic-required" or "best-effort"',
+    );
+  }
+  if (options.consistency === 'atomic-required' && options.experimentalTxAudit) {
+    throw new Error(
+      '[@nestarc/audit-log] experimentalTxAudit cannot be combined with atomic-required; use withAuditTransaction()',
+    );
+  }
   const sensitiveFieldsFor = (model: string) =>
     getSensitiveFieldsFor(model, options);
   const { trackedModels, ignoredModels } = options;
@@ -702,8 +793,27 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
     Prisma.dmmf?.datamodel?.models?.map((model) => model.name),
   );
 
+  const transactionContext = new AsyncLocalStorage<any>();
+
   return Prisma.defineExtension((client: any) => {
     return client.$extends({
+      name: '@nestarc/audit-log',
+      client: {
+        async withAuditTransaction<TResult>(
+          this: any,
+          callback: (tx: any) => Promise<TResult>,
+          transactionOptions?: AuditTransactionOptions,
+        ): Promise<TResult> {
+          if (transactionContext.getStore()) {
+            throw new Error(NESTED_TRANSACTION_ERROR);
+          }
+          return this.$transaction(
+            (tx: any) =>
+              transactionContext.run(tx, async () => await callback(tx)),
+            transactionOptions,
+          );
+        },
+      },
       query: {
         $allModels: {
           async create({ model, args, query, __internalParams }: any) {
@@ -714,6 +824,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const auditClient = resolveAuditClient(
               client,
               options,
+              transactionContext.getStore(),
               __internalParams,
             );
             const pkField = getPkField(model, options);
@@ -798,6 +909,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const auditClient = resolveAuditClient(
               client,
               options,
+              transactionContext.getStore(),
               __internalParams,
             );
             const pkField = getPkField(model, options);
@@ -917,6 +1029,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const auditClient = resolveAuditClient(
               client,
               options,
+              transactionContext.getStore(),
               __internalParams,
             );
             const pkField = getPkField(model, options);
@@ -996,6 +1109,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const auditClient = resolveAuditClient(
               client,
               options,
+              transactionContext.getStore(),
               __internalParams,
             );
             const pkField = getPkField(model, options);
@@ -1129,6 +1243,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const auditClient = resolveAuditClient(
               client,
               options,
+              transactionContext.getStore(),
               __internalParams,
             );
             let result: any;
@@ -1177,6 +1292,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const auditClient = resolveAuditClient(
               client,
               options,
+              transactionContext.getStore(),
               __internalParams,
             );
             let result: any;
@@ -1225,6 +1341,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const auditClient = resolveAuditClient(
               client,
               options,
+              transactionContext.getStore(),
               __internalParams,
             );
             const pkField = getPkField(model, options);
@@ -1321,4 +1438,16 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
       },
     });
   });
+}
+
+/**
+ * Creates an audited Prisma client while preserving the base client and
+ * interactive transaction callback types.
+ */
+export function createAuditedClient<TClient extends InteractiveTransactionHost>(
+  client: TClient,
+  options: AuditExtensionOptions,
+): TClient & AuditTransactionMethods<TransactionClientOf<TClient>> {
+  return client.$extends(createAuditExtension(options)) as TClient &
+    AuditTransactionMethods<TransactionClientOf<TClient>>;
 }

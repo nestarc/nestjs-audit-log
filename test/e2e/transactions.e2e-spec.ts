@@ -18,6 +18,7 @@ describe('transaction consistency E2E', () => {
     await resetAuditStorage(basePrisma);
     prisma = basePrisma.$extends(
       createAuditExtension({
+        consistency: 'best-effort',
         trackedModels: ['User'],
         logger: silentLogger,
         prismaModule,

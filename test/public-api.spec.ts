@@ -4,6 +4,7 @@ import {
   AuditReason,
   AUDIT_REASON_KEY,
   ensurePartitions,
+  createAuditedClient,
   mergeContextMetadata,
 } from '../src';
 import type {
@@ -91,9 +92,44 @@ describe('public API exports', () => {
 
   it('exports experimental transaction audit option type', () => {
     const options: AuditExtensionOptions = {
+      consistency: 'best-effort',
       experimentalTxAudit: true,
     };
 
     expect(options.experimentalTxAudit).toBe(true);
+  });
+
+  it('preserves transaction callback and result types for createAuditedClient', async () => {
+    type TransactionClient = {
+      user: { findUnique(): Promise<{ id: string } | null> };
+    };
+    const tx: TransactionClient = {
+      user: { findUnique: async () => ({ id: 'u1' }) },
+    };
+    const base = {
+      $extends(extension: any): any {
+        if (typeof extension === 'function') return extension(this);
+        return Object.assign(Object.create(this), extension.client);
+      },
+      async $transaction<TResult>(
+        callback: (transaction: TransactionClient) => Promise<TResult>,
+      ): Promise<TResult> {
+        return callback(tx);
+      },
+    };
+    const prismaModule = {
+      Prisma: { defineExtension: (factory: any) => factory },
+    };
+    const audited = createAuditedClient(base, {
+      consistency: 'atomic-required',
+      trackedModels: ['User'],
+      prismaModule,
+    });
+
+    const id: string | undefined = await audited.withAuditTransaction(
+      async (transaction) => (await transaction.user.findUnique())?.id,
+    );
+
+    expect(id).toBe('u1');
   });
 });

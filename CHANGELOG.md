@@ -7,12 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `createAuditedClient()` and its typed `withAuditTransaction(callback, options)` API. The helper
+  binds the official Prisma interactive transaction client through `AsyncLocalStorage`, forwards
+  `timeout`, `maxWait`, and `isolationLevel`, and keeps callback/result type inference.
+- PostgreSQL trigger-enforced atomic E2E coverage for helper guards, commit, rollback,
+  transaction-local create/update diffs, delete, and audit INSERT failure rollback.
+
+### Breaking Changes
+
+- `AuditExtensionOptions.consistency` is now required. Choose `atomic-required` for fail-closed
+  transaction-first tracking or explicitly select `best-effort` for the legacy behavior.
+- In `atomic-required`, tracked mutations outside `withAuditTransaction()` fail before the
+  business query executes. Nested `withAuditTransaction()` calls are not supported.
+
 ### Changed
 
-- Automatic Prisma tracking is now prominently documented as Preview because its audit reads and
-  inserts are best-effort outside the caller transaction. An automatic success row is not evidence
-  that the surrounding transaction committed; use `AuditService.log(input, tx)` when rollback
-  consistency is required.
+- Atomic audit pre/post reads and inserts use the same transaction as the business mutation and
+  fail closed without private Prisma APIs or silent fallback.
+- `experimentalTxAudit` is deprecated in favor of `atomic-required` and
+  `withAuditTransaction()`; it remains available only with explicit `best-effort` mode.
 
 ## [0.3.0] - 2026-08-02
 

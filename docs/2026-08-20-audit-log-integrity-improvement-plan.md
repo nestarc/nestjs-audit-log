@@ -4,7 +4,7 @@
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 0 완료 — Phase 1 착수 전 결정 필요
+- 문서 상태: Phase 1 완료 — Phase 2 동시성 release gate 착수 가능
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적
@@ -330,18 +330,72 @@ Phase 0는 문서·상태 커뮤니케이션만 변경하므로 PostgreSQL E2E�
 
 ### Phase 1 — 안정된 transaction-first API
 
-- [ ] 최종 API 이름과 타입을 확정한다.
-- [ ] transaction client용 전용 ALS context를 추가한다.
-- [ ] `withAuditTransaction()`을 구현한다.
-- [ ] atomic path가 pre/post-read와 INSERT에 동일 tx를 사용하도록 extension을 수정한다.
-- [ ] atomic path에서 audit 오류를 fail-closed로 처리한다.
-- [ ] atomic path의 silent fallback을 금지한다.
-- [ ] helper 밖 atomic tracked mutation을 business query 전에 차단한다.
-- [ ] timeout/maxWait/isolationLevel 전달과 타입 추론을 보존한다.
-- [ ] `experimentalTxAudit` deprecation/제거 계획을 CHANGELOG에 기록한다.
-- [ ] 기존 best-effort 동작은 명시적 consistency mode로만 유지한다.
+- [x] 최종 API 이름과 타입을 확정한다.
+- [x] transaction client용 전용 ALS context를 추가한다.
+- [x] `withAuditTransaction()`을 구현한다.
+- [x] atomic path가 pre/post-read와 INSERT에 동일 tx를 사용하도록 extension을 수정한다.
+- [x] atomic path에서 audit 오류를 fail-closed로 처리한다.
+- [x] atomic path의 silent fallback을 금지한다.
+- [x] helper 밖 atomic tracked mutation을 business query 전에 차단한다.
+- [x] timeout/maxWait/isolationLevel 전달과 타입 추론을 보존한다.
+- [x] `experimentalTxAudit` deprecation/제거 계획을 CHANGELOG에 기록한다.
+- [x] 기존 best-effort 동작은 명시적 consistency mode로만 유지한다.
 
 완료 조건: private Prisma API 없이 caller transaction과 자동 감사가 함께 commit/rollback한다.
+
+#### Phase 1 완료 기록 (2026-08-21)
+
+구현 전 결정을 다음과 같이 확정했다.
+
+1. 공개 팩토리는 `createAuditedClient(basePrisma, options)`, transaction 진입점은 반환
+   client의 `withAuditTransaction(callback, options)`으로 정했다. 기존
+   `createAuditExtension()`도 동일 helper를 런타임에 제공하지만 타입 추론을 보존하는 권장
+   진입점은 `createAuditedClient()`다.
+2. `consistency`는 필수이며 `atomic-required | best-effort` 두 값만 허용한다. 0.x 단계에서
+   즉시 명시적 선택으로 전환하고 이 변경을 CHANGELOG의 Breaking Changes에 기록했다.
+3. `atomic-required`는 helper가 연 공식 Prisma interactive transaction client를 전용
+   `AsyncLocalStorage`에 바인딩한다. tracked mutation의 query continuation, pre/post-read,
+   INSERT가 같은 tx를 사용하며 private Prisma API나 base-client fallback을 사용하지 않는다.
+4. atomic audit read/insert/context 실패는 원래 오류를 보고한 뒤 다시 throw하여 transaction을
+   rollback한다. 실패한 업무 mutation의 failure audit은 같은 transaction에 영속될 수 없으므로
+   atomic 모드에서는 시도하지 않는다.
+5. helper 밖 atomic tracked write는 business query 전에 오류를 내며 nested helper 호출도
+   명시적으로 거부한다. callback이 lazy PrismaPromise를 직접 반환해도 ALS 범위를 유지하도록
+   helper 내부에서 callback 결과를 await한다.
+6. `timeout`, `maxWait`, `isolationLevel`을 그대로 전달하고 공개 타입 테스트로 transaction
+   callback/result 추론을 고정했다.
+7. `experimentalTxAudit`은 `best-effort` 전용 deprecated 호환 경로로 남겼고
+   `atomic-required`와의 동시 설정을 거부한다. 제거 시점은 다음 minor의 실제 peer matrix 결과를
+   확인한 뒤 결정한다.
+8. 동시성 전략은 Phase 2에서 PK 대상 row lock(`FOR UPDATE`)을 우선 구현·검증한다. Phase 1은
+   transaction atomicity와 transaction-local sequential diff를 보장하지만 concurrent writer의
+   exact immediate-preimage까지 지원한다고 광고하지 않는다.
+
+추가한 PostgreSQL release gate는 운영 기본 trigger enforcement에서 helper 밖 차단, 정상
+create commit, transaction-local create→update diff, delete, 강제 rollback, audit INSERT 실패
+rollback을 결정적으로 검증한다. 전체 검증 결과는 이 문서의 Phase 1 변경 기록과 함께 유지한다.
+
+검증 결과:
+
+```text
+npm test -- --runInBand
+Test Suites: 15 passed, 15 total
+Tests:       241 passed, 241 total
+
+npm run build
+성공
+
+npm run test:e2e
+Test Suites: 8 passed, 8 total
+Tests:       42 passed, 42 total
+
+git diff --check
+성공
+```
+
+로컬 E2E 기준은 PostgreSQL 16, Node.js 24, NestJS 11, Prisma 7.9.1이다. Prisma 5/6 및
+NestJS 10 조합은 기존 CI peer matrix에서 검증하며, Phase 2의 전체 matrix release gate로
+계속 추적한다.
 
 ### Phase 2 — PostgreSQL 원자성 및 동시성 release gate
 

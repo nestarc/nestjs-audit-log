@@ -365,6 +365,7 @@ describe('Query API v2 E2E', () => {
     const service = serviceFor();
     const auditedPrisma = prisma.$extends(
       createAuditExtension({
+        consistency: 'best-effort',
         tableName: TABLE,
         trackedModels: ['User'],
         logger,

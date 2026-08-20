@@ -44,9 +44,11 @@ function buildMockClient(overrides: Record<string, any> = {}) {
  * with a mock client and returning the $allModels handlers.
  */
 function getHandlers(
-  options: Parameters<typeof createAuditExtension>[0] = { trackedModels: ['User'] },
+  options: Omit<Parameters<typeof createAuditExtension>[0], 'consistency'> & {
+    consistency?: 'atomic-required' | 'best-effort';
+  } = { trackedModels: ['User'] },
 ) {
-  createAuditExtension(options);
+  createAuditExtension({ consistency: 'best-effort', ...options });
   const mockClient = buildMockClient();
   const extended = capturedFactory(mockClient);
 
@@ -55,7 +57,7 @@ function getHandlers(
   const extendCall = mockClient.$extends.mock.calls[0][0];
   const handlers = extendCall.query.$allModels;
 
-  return { handlers, mockClient };
+  return { handlers, clientMethods: extendCall.client, mockClient };
 }
 
 describe('createAuditExtension — query handlers', () => {
@@ -68,6 +70,12 @@ describe('createAuditExtension — query handlers', () => {
   });
 
   describe('factory configuration', () => {
+    it('requires an explicit consistency mode', () => {
+      expect(() => createAuditExtension({} as any)).toThrow(
+        'consistency must be explicitly set',
+      );
+    });
+
     it('warns and audits all models when no tracking lists are configured', async () => {
       const logger = {
         warn: jest.fn(),
@@ -98,6 +106,7 @@ describe('createAuditExtension — query handlers', () => {
       const defineExtension = jest.fn((factory: any) => factory);
 
       createAuditExtension({
+        consistency: 'best-effort',
         trackedModels: ['User'],
         prismaModule: {
           Prisma: {
@@ -112,6 +121,7 @@ describe('createAuditExtension — query handlers', () => {
     it('throws a helpful error when prismaModule is missing defineExtension', () => {
       expect(() =>
         createAuditExtension({
+          consistency: 'best-effort',
           trackedModels: ['User'],
           prismaModule: {
             Prisma: {} as any,
@@ -123,6 +133,7 @@ describe('createAuditExtension — query handlers', () => {
     it('throws a helpful error for invalid tableName', () => {
       expect(() =>
         createAuditExtension({
+          consistency: 'best-effort',
           trackedModels: ['User'],
           tableName: 'audit-logs',
         }),
@@ -136,6 +147,7 @@ describe('createAuditExtension — query handlers', () => {
         _createItxClient: jest.fn(() => txClient),
       });
       createAuditExtension({
+        consistency: 'best-effort',
         trackedModels: ['User'],
         experimentalTxAudit: true,
       });
@@ -210,6 +222,7 @@ describe('createAuditExtension — query handlers', () => {
         return factory;
       });
       createAuditExtension({
+        consistency: 'best-effort',
         trackedModels: ['User'],
         tableName: 'audit.audit_logs',
         prismaModule: {
@@ -238,6 +251,139 @@ describe('createAuditExtension — query handlers', () => {
       expect(raw).toHaveBeenCalledWith('audit.audit_logs');
       const values = mockClient.$executeRaw.mock.calls[0].slice(1);
       expect(values[0]).toEqual({ raw: 'audit.audit_logs' });
+    });
+  });
+
+  describe('atomic-required transaction routing', () => {
+    it('rejects a tracked write before the business query outside the helper', async () => {
+      const { handlers } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const query = jest.fn();
+
+      await expect(
+        handlers.create({
+          model: 'User',
+          args: { data: { name: 'Alice' } },
+          query,
+        }),
+      ).rejects.toThrow('must run inside withAuditTransaction()');
+      expect(query).not.toHaveBeenCalled();
+    });
+
+    it('binds the official transaction client and forwards transaction options', async () => {
+      const { handlers, clientMethods, mockClient } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const txClient = buildMockClient();
+      const created = { id: 'u1', name: 'Alice' };
+      txClient.user.findFirst.mockResolvedValue(created);
+      const transactionOptions = {
+        timeout: 10_000,
+        maxWait: 5_000,
+        isolationLevel: 'Serializable' as const,
+      };
+      const transactionHost = {
+        $transaction: jest.fn(async (callback: (tx: any) => Promise<any>) =>
+          callback(txClient),
+        ),
+      };
+
+      const result = await clientMethods.withAuditTransaction.call(
+        transactionHost,
+        (tx: any) =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: jest.fn().mockResolvedValue(created),
+          }).then(() => tx),
+        transactionOptions,
+      );
+
+      expect(result).toBe(txClient);
+      expect(transactionHost.$transaction).toHaveBeenCalledWith(
+        expect.any(Function),
+        transactionOptions,
+      );
+      expect(txClient.user.findFirst).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the atomic audit insert fails', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const txClient = buildMockClient({
+        $executeRaw: jest.fn().mockRejectedValue(new Error('insert failed')),
+      });
+      const created = { id: 'u1', name: 'Alice' };
+      txClient.user.findFirst.mockResolvedValue(created);
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await expect(
+        clientMethods.withAuditTransaction.call(transactionHost, () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query: jest.fn().mockResolvedValue(created),
+          }),
+        ),
+      ).rejects.toThrow('insert failed');
+    });
+
+    it('fails closed when an atomic post-read fails', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const txClient = buildMockClient();
+      txClient.user.findFirst.mockRejectedValue(new Error('post-read failed'));
+      const query = jest.fn().mockResolvedValue({ id: 'u1', name: 'Alice' });
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await expect(
+        clientMethods.withAuditTransaction.call(transactionHost, () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { name: 'Alice' } },
+            query,
+          }),
+        ),
+      ).rejects.toThrow('post-read failed');
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('rejects nested withAuditTransaction calls', async () => {
+      const { clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await expect(
+        clientMethods.withAuditTransaction.call(transactionHost, () =>
+          clientMethods.withAuditTransaction.call(
+            transactionHost,
+            async () => undefined,
+          ),
+        ),
+      ).rejects.toThrow('nested withAuditTransaction() calls are not supported');
     });
   });
 

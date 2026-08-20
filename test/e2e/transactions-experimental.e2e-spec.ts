@@ -16,6 +16,7 @@ describe('experimental transaction-aware audit E2E', () => {
     await resetAuditStorage(basePrisma);
     prisma = basePrisma.$extends(
       createAuditExtension({
+        consistency: 'best-effort',
         trackedModels: ['User'],
         experimentalTxAudit: true,
         logger: silentLogger,
@@ -96,6 +97,7 @@ describe('experimental transaction-aware audit E2E', () => {
     const onAuditError = jest.fn();
     const brokenAuditPrisma = basePrisma.$extends(
       createAuditExtension({
+        consistency: 'best-effort',
         trackedModels: ['User'],
         experimentalTxAudit: true,
         tableName: 'missing_audit_logs',
