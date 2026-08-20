@@ -4,7 +4,7 @@
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 2 구현 완료 — peer matrix CI 통과 후 Phase 3 착수 가능
+- 문서 상태: Phase 3 구현 완료 — peer matrix CI 통과 후 Phase 4 착수 가능
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적
@@ -483,11 +483,60 @@ bulk mutation 결정 사항:
 
 작업:
 
-- [ ] summary-only를 유지할지 atomic 모드에서 거부할지 결정한다.
-- [ ] `createManyAndReturn/updateManyAndReturn` 지원 범위를 검토한다.
-- [ ] 레코드별 감사에 `maxBatchRecords`와 overflow 정책을 둔다.
-- [ ] 성공, 후반 실패, audit 실패, rollback을 실제 PostgreSQL로 검증한다.
-- [ ] count-only 로그를 "who changed what" 증거로 오해하지 않도록 action/metadata를 정의한다.
+- [x] summary-only를 유지할지 atomic 모드에서 거부할지 결정한다.
+- [x] `createManyAndReturn/updateManyAndReturn` 지원 범위를 검토한다.
+- [x] 레코드별 감사에 `maxBatchRecords`와 overflow 정책을 둔다.
+- [x] 성공, 후반 실패, audit 실패, rollback을 실제 PostgreSQL로 검증한다.
+- [x] count-only 로그를 "who changed what" 증거로 오해하지 않도록 action/metadata를 정의한다.
+
+#### Phase 3 완료 기록 (2026-08-21)
+
+array transaction과 bulk mutation 계약을 다음과 같이 확정했다.
+
+1. `atomic-required`에서 감지된 배열형 `$transaction([...])`은 첫 business query 전에 전용
+   오류로 거부한다. 공식 atomic 경로는 `withAuditTransaction()` callback 안에서 수행하는 순차
+   mutation뿐이다. 후반 unique 충돌이 예정된 배열 사례도 첫 business query 전에 거부되며
+   업무/감사 모두 정확히 0건임을 단언한다.
+2. `createMany`와 `updateMany`는 Prisma 결과만으로 레코드별 target 및 exact diff를 구성할 수
+   없으므로 atomic 모드에서 mutation 전에 거부한다. best-effort에서는 기존 summary 행을
+   유지하되 이것을 레코드 증거로 오해할 수 없도록 metadata 계약을 강화했다.
+3. summary 행은 복수형 action(`Model.createdMany`, `Model.updatedMany`,
+   `Model.deletedMany`), `targetId: null`, 빈 changes를 사용한다. metadata는
+   `auditKind: 'summary'`, 실제 `operation`, `recordCount`, `recordsAudited: false`를 필수로
+   포함한다.
+4. atomic `deleteMany`는 최대 `maxBatchRecords`(기본 1000)의 preimage를 동일 tx에서 조회하고
+   각 PK row를 `FOR UPDATE`로 잠근 뒤 다시 읽는다. mutation count와 캡처한 preimage 수가
+   다르면 불완전한 감사를 commit하지 않고 전체 rollback한다.
+5. 정상 `deleteMany`는 레코드마다 singular `Model.deleted` action과 before-only diff를 남기며,
+   metadata에 `auditKind: 'record'`, `operation: 'deleteMany'`, `batchSize`를 기록한다.
+6. cap overflow 기본 정책은 `reject`다. `batchOverflow: 'summary'`는 best-effort에서만 명시적으로
+   선택할 수 있고, 결과 summary에는 `overflow: true`와 `maxBatchRecords`가 추가된다. atomic
+   설정과 summary overflow 조합은 팩토리 생성 시 거부한다.
+7. `createManyAndReturn/updateManyAndReturn`은 Prisma peer 버전별 가용성과 반환 projection이
+   다르고 update preimage도 제공하지 않으므로 이번 안정 계약에서 두 모드 모두 미지원으로
+   확정했다. tracked model에는 사용하지 않도록 README에 명시했다.
+8. PostgreSQL trigger enforcement 환경에서 array 후반 실패, atomic count-only 거부,
+   `deleteMany` 성공, 후반 실패 rollback, cap overflow, audit INSERT 실패 rollback을 6개
+   release-blocking E2E로 추가했다.
+
+검증 결과:
+
+```text
+npm test -- --runInBand
+Test Suites: 15 passed, 15 total
+Tests:       249 passed, 249 total
+
+npm run build
+성공
+
+npm run test:e2e
+Test Suites: 9 passed, 9 total
+Tests:       55 passed, 55 total
+```
+
+로컬 PostgreSQL 검증 환경은 PostgreSQL 16, Node.js 24, NestJS 11, Prisma 7.9.1이다. 새 E2E는
+기존 `npm run test:e2e`에 포함되므로 Nest 10/11 x Prisma 5/6/7 peer matrix의 release gate로
+실행된다. 실제 merge 전 여섯 조합의 CI 성공은 별도로 확인한다.
 
 ### Phase 4 — soft-delete 교차 패키지 원자성
 

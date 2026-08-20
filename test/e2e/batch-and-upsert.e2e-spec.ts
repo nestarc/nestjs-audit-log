@@ -121,8 +121,26 @@ describe('batch and upsert E2E', () => {
     `;
 
     expect(logs).toEqual([
-      { action: 'User.createdMany', changes: {}, metadata: { count: 2 } },
-      { action: 'User.updatedMany', changes: {}, metadata: { count: 2 } },
+      {
+        action: 'User.createdMany',
+        changes: {},
+        metadata: {
+          auditKind: 'summary',
+          operation: 'createMany',
+          recordCount: 2,
+          recordsAudited: false,
+        },
+      },
+      {
+        action: 'User.updatedMany',
+        changes: {},
+        metadata: {
+          auditKind: 'summary',
+          operation: 'updateMany',
+          recordCount: 2,
+          recordsAudited: false,
+        },
+      },
     ]);
   });
 });

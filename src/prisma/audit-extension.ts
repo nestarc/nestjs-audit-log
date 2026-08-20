@@ -27,6 +27,7 @@ let noContextWarningReported = false;
 let txAuditUnavailableWarned = false;
 
 export type AuditConsistency = 'atomic-required' | 'best-effort';
+export type AuditBatchOverflow = 'reject' | 'summary';
 
 export interface AuditTransactionOptions {
   maxWait?: number;
@@ -94,6 +95,15 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
    * not expose public DMMF mapping metadata.
    */
   databaseMapping?: Record<string, AuditDatabaseMapping>;
+  /**
+   * Maximum records that deleteMany may audit individually. Defaults to 1000.
+   */
+  maxBatchRecords?: number;
+  /**
+   * Behavior when deleteMany matches more than maxBatchRecords. Defaults to
+   * reject. Summary overflow is available only in best-effort mode.
+   */
+  batchOverflow?: AuditBatchOverflow;
   logFailures?: boolean;
   ignoreTimestampOnlyUpdates?: boolean;
   prismaModule?: PrismaModuleLike;
@@ -108,8 +118,11 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
 
 const ATOMIC_CONTEXT_ERROR =
   '[@nestarc/audit-log] atomic-required tracked write must run inside withAuditTransaction()';
+const ATOMIC_ARRAY_TRANSACTION_ERROR =
+  '[@nestarc/audit-log] atomic-required does not support array $transaction([...]); use sequential mutations inside withAuditTransaction()';
 const NESTED_TRANSACTION_ERROR =
   '[@nestarc/audit-log] nested withAuditTransaction() calls are not supported';
+const DEFAULT_MAX_BATCH_RECORDS = 1000;
 
 export function modelDelegateName(model: string): string {
   return model.charAt(0).toLowerCase() + model.slice(1);
@@ -411,6 +424,9 @@ function resolveAuditClient(
 ): any {
   if (options.consistency === 'atomic-required') {
     if (!transactionClient) {
+      if (internalParams?.transaction?.kind === 'batch') {
+        throw new Error(ATOMIC_ARRAY_TRANSACTION_ERROR);
+      }
       throw new Error(ATOMIC_CONTEXT_ERROR);
     }
     return transactionClient;
@@ -436,6 +452,53 @@ function resolveAuditClient(
     warnTxAuditUnavailable(options, error);
     return client;
   }
+}
+
+function batchSummaryMetadata(
+  operation: string,
+  count: number,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    auditKind: 'summary',
+    operation,
+    recordCount: count,
+    recordsAudited: false,
+    ...extra,
+  };
+}
+
+function deleteManyRecordMetadata(count: number): Record<string, unknown> {
+  return {
+    auditKind: 'record',
+    operation: 'deleteMany',
+    batchSize: count,
+  };
+}
+
+function assertAtomicBulkSummaryUnsupported(
+  options: AuditExtensionOptions,
+  operation: 'createMany' | 'updateMany',
+): void {
+  if (options.consistency !== 'atomic-required') return;
+  const singular = operation === 'createMany' ? 'create()' : 'update()';
+  throw new Error(
+    `[@nestarc/audit-log] atomic-required does not support ${operation} because it only provides count-level audit evidence; use sequential ${singular} calls inside withAuditTransaction()`,
+  );
+}
+
+function batchLimit(options: AuditExtensionOptions): number {
+  return options.maxBatchRecords ?? DEFAULT_MAX_BATCH_RECORDS;
+}
+
+function batchOverflowError(
+  model: string,
+  count: number,
+  limit: number,
+): Error {
+  return new Error(
+    `[@nestarc/audit-log] ${model}.deleteMany matched more than maxBatchRecords (${limit}; observed at least ${count}); narrow the filter or increase maxBatchRecords`,
+  );
 }
 
 function auditFlags(flags: {
@@ -529,6 +592,43 @@ async function readBeforeMutation(
   );
 
   return delegate.findFirst({ where: { [pkField]: pkValue } });
+}
+
+async function lockAndRefreshBatch(
+  client: any,
+  delegate: any,
+  model: string,
+  pkField: string,
+  records: any[],
+  options: AuditExtensionOptions,
+  Prisma: PrismaModuleLike['Prisma'],
+): Promise<any[]> {
+  if (options.consistency !== 'atomic-required' || records.length === 0) {
+    return records;
+  }
+  if (typeof client.$queryRawUnsafe !== 'function') {
+    throw new Error(
+      '[@nestarc/audit-log] atomic row locking requires Prisma $queryRawUnsafe support',
+    );
+  }
+
+  const identifiers = storageIdentifiersFor(model, pkField, options, Prisma);
+  const refreshed: any[] = [];
+  for (const record of records) {
+    const pkValue = record?.[pkField];
+    if (pkValue == null) {
+      throw new Error(
+        `[@nestarc/audit-log] cannot lock ${model}.deleteMany record because primary key field "${pkField}" is unavailable`,
+      );
+    }
+    await client.$queryRawUnsafe(
+      `SELECT ${identifiers.column} FROM ${identifiers.table} WHERE ${identifiers.column} = $1 FOR UPDATE`,
+      pkValue,
+    );
+    const current = await delegate.findFirst({ where: { [pkField]: pkValue } });
+    if (current) refreshed.push(current);
+  }
+  return refreshed;
 }
 
 function isEmptyChanges(changes: Changes): boolean {
@@ -859,6 +959,31 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
   if (options.consistency === 'atomic-required' && options.experimentalTxAudit) {
     throw new Error(
       '[@nestarc/audit-log] experimentalTxAudit cannot be combined with atomic-required; use withAuditTransaction()',
+    );
+  }
+  if (
+    options.maxBatchRecords !== undefined &&
+    (!Number.isInteger(options.maxBatchRecords) || options.maxBatchRecords < 1)
+  ) {
+    throw new Error(
+      '[@nestarc/audit-log] maxBatchRecords must be a positive integer',
+    );
+  }
+  if (
+    options.batchOverflow !== undefined &&
+    options.batchOverflow !== 'reject' &&
+    options.batchOverflow !== 'summary'
+  ) {
+    throw new Error(
+      '[@nestarc/audit-log] batchOverflow must be "reject" or "summary"',
+    );
+  }
+  if (
+    options.consistency === 'atomic-required' &&
+    options.batchOverflow === 'summary'
+  ) {
+    throw new Error(
+      '[@nestarc/audit-log] batchOverflow: "summary" is only available in best-effort mode',
     );
   }
   const sensitiveFieldsFor = (model: string) =>
@@ -1339,6 +1464,8 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               return query(args);
             }
 
+            assertAtomicBulkSummaryUnsupported(options, 'createMany');
+
             const auditClient = resolveAuditClient(
               client,
               options,
@@ -1365,7 +1492,10 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 targetType: model,
                 targetId: null,
                 changes: {},
-                metadata: { count: (result as any).count },
+                metadata: batchSummaryMetadata(
+                  'createMany',
+                  (result as any).count,
+                ),
                 operation: 'createMany',
               }, options);
               await tryAuditLog(auditClient, params, options, {
@@ -1387,6 +1517,8 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
+
+            assertAtomicBulkSummaryUnsupported(options, 'updateMany');
 
             const auditClient = resolveAuditClient(
               client,
@@ -1414,7 +1546,10 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 targetType: model,
                 targetId: null,
                 changes: {},
-                metadata: { count: (result as any).count },
+                metadata: batchSummaryMetadata(
+                  'updateMany',
+                  (result as any).count,
+                ),
                 operation: 'updateMany',
               }, options);
               await tryAuditLog(auditClient, params, options, {
@@ -1445,13 +1580,45 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
+            const maxBatchRecords = batchLimit(options);
+            const overflowPolicy = options.batchOverflow ?? 'reject';
             let records: any[] = [];
             let preReadFailed = false;
+            let overflowed = false;
             try {
               records = await (auditClient as any)[
                 delegateName
-              ].findMany({ where: args.where });
+              ].findMany({
+                where: args.where,
+                take: maxBatchRecords + 1,
+              });
+              if (records.length > maxBatchRecords) {
+                if (
+                  options.consistency === 'atomic-required' ||
+                  overflowPolicy === 'reject'
+                ) {
+                  throw batchOverflowError(
+                    model,
+                    records.length,
+                    maxBatchRecords,
+                  );
+                }
+                overflowed = true;
+                records = [];
+              }
+              records = await lockAndRefreshBatch(
+                auditClient,
+                (auditClient as any)[delegateName],
+                model,
+                pkField,
+                records,
+                options,
+                Prisma,
+              );
             } catch (error) {
+              if (error instanceof Error && error.message.includes('maxBatchRecords')) {
+                throw error;
+              }
               preReadFailed = true;
               reportAuditError(options, error, {
                 phase: 'pre-read',
@@ -1474,17 +1641,23 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               throw error;
             }
 
-            if (preReadFailed) {
+            if (preReadFailed || overflowed) {
               try {
                 const params = buildAuditInsertParams({
                   action: `${model}.deletedMany`,
                   targetType: model,
                   targetId: null,
                   changes: {},
-                  metadata: {
-                    count: (result as any).count,
-                    preReadFailed: true,
-                  },
+                  metadata: batchSummaryMetadata(
+                    'deleteMany',
+                    (result as any).count,
+                    preReadFailed
+                      ? { preReadFailed: true }
+                      : {
+                          overflow: true,
+                          maxBatchRecords,
+                        },
+                  ),
                   operation: 'deleteMany',
                 }, options);
                 await tryAuditLog(auditClient, params, options, {
@@ -1499,6 +1672,14 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 });
               }
             } else {
+              if (
+                options.consistency === 'atomic-required' &&
+                (result as any).count !== records.length
+              ) {
+                throw new Error(
+                  `[@nestarc/audit-log] ${model}.deleteMany affected ${(result as any).count} records but captured ${records.length} preimages; the transaction was rolled back to avoid incomplete audit evidence`,
+                );
+              }
               for (const record of records) {
                 try {
                   const changes = computeDeleteChanges(
@@ -1515,6 +1696,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                         ? String(recordPk)
                         : null,
                     changes,
+                    metadata: deleteManyRecordMetadata(records.length),
                     operation: 'deleteMany',
                   }, options);
                   await tryAuditLog(auditClient, params, options, {

@@ -265,6 +265,8 @@ Apply to individual handlers or entire controllers:
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Per-model fields unioned with `sensitiveFields` |
 | `primaryKey` | `Record<string, string>` | `{ *: 'id' }` | Map of model name to primary key field name |
 | `databaseMapping` | `Record<string, { tableName: string; schema?: string; primaryKeyColumn?: string }>` | `{}` | PostgreSQL identifiers for atomic row locks; configure mapped models when public Prisma DMMF mapping metadata is unavailable |
+| `maxBatchRecords` | `number` | `1000` | Maximum records audited individually by `deleteMany`; a positive integer |
+| `batchOverflow` | `'reject' \| 'summary'` | `'reject'` | Behavior when `deleteMany` exceeds the cap; `'summary'` is explicit best-effort-only fallback |
 | `tableName` | `string` | `audit_logs` | Audit table used by automatic inserts |
 | `tenantRequired` | `boolean` | `false` | Missing tenant fails closed in `atomic-required`; `best-effort` reports `audit entry skipped` and returns the business mutation |
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup |
@@ -386,9 +388,29 @@ can be empty or stale because its reads use the base client.
 
 The same best-effort rule applies to array transactions (`$transaction([...])`). When a later operation rolls back the batch, Prisma 7 may have already allowed an earlier operation's extension callback to write an orphan success audit row. Do not rely on automatic auditing for atomic batch audit semantics.
 
-Array transactions remain outside the atomic contract; use sequential operations inside
-`withAuditTransaction()` instead. `experimentalTxAudit` is deprecated and cannot be combined with
-`atomic-required`. `AuditService.log(input, tx)` remains the stable manual event path.
+Array transactions remain outside the atomic contract. In `atomic-required`, a detected array
+`$transaction([...])` fails before the business query with an error directing callers to sequential
+operations inside `withAuditTransaction()`. `experimentalTxAudit` is deprecated and cannot be
+combined with `atomic-required`. `AuditService.log(input, tx)` remains the stable manual event path.
+
+### Bulk mutation contract
+
+| Operation | `atomic-required` | `best-effort` |
+|-----------|-------------------|---------------|
+| `createMany` | Rejected before mutation because Prisma only returns count-level evidence | One `Model.createdMany` summary row |
+| `updateMany` | Rejected before mutation because exact record before/after diffs are unavailable | One `Model.updatedMany` summary row |
+| `deleteMany` | Locks and refreshes at most `maxBatchRecords` preimages, then writes one `Model.deleted` row per deleted record in the same transaction | Writes record rows up to the cap; overflow rejects unless `batchOverflow: 'summary'` is explicitly selected |
+| `createManyAndReturn` / `updateManyAndReturn` | Not supported | Not supported or intercepted; do not use them for tracked models |
+
+Summary rows are deliberately not shaped like record evidence: `targetId` is `null`, `changes` is
+empty, and metadata contains `auditKind: 'summary'`, the exact `operation`, `recordCount`, and
+`recordsAudited: false`. Per-record `deleteMany` rows keep the singular `Model.deleted` action and
+include `auditKind: 'record'`, `operation: 'deleteMany'`, and `batchSize` metadata.
+
+The default overflow policy is fail-closed. Best-effort callers that explicitly choose summary
+overflow receive one `Model.deletedMany` row with `overflow: true` and `maxBatchRecords`; it is a
+batch activity marker, not evidence of which rows were deleted. In atomic mode, a cap overflow,
+preimage/affected-count mismatch, or any audit insert failure rolls back the entire `deleteMany`.
 
 ## Multi-Tenancy
 

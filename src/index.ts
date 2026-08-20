@@ -18,6 +18,7 @@ export {
   createAuditedClient,
 } from './prisma/audit-extension';
 export type {
+  AuditBatchOverflow,
   AuditConsistency,
   AuditDatabaseMapping,
   AuditExtensionOptions,

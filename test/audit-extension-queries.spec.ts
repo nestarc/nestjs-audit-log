@@ -141,6 +141,40 @@ describe('createAuditExtension — query handlers', () => {
       ).toThrow('Invalid audit tableName');
     });
 
+    it('validates batch limits and atomic overflow policy', () => {
+      expect(() =>
+        createAuditExtension({
+          consistency: 'best-effort',
+          maxBatchRecords: 0,
+        }),
+      ).toThrow('maxBatchRecords must be a positive integer');
+
+      expect(() =>
+        createAuditExtension({
+          consistency: 'atomic-required',
+          batchOverflow: 'summary',
+        }),
+      ).toThrow('only available in best-effort mode');
+    });
+
+    it('reports array transactions as outside the atomic contract', async () => {
+      const { handlers } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const query = jest.fn();
+
+      await expect(
+        handlers.create({
+          model: 'User',
+          args: { data: { name: 'Array' } },
+          query,
+          __internalParams: { transaction: { kind: 'batch' } },
+        }),
+      ).rejects.toThrow('does not support array $transaction([...])');
+      expect(query).not.toHaveBeenCalled();
+    });
+
     it('routes audit reads and inserts through the interactive transaction client when experimentalTxAudit is available', async () => {
       const txClient = buildMockClient();
       txClient.user.findFirst.mockResolvedValue({ id: 'u1', name: 'Alice' });
@@ -1440,6 +1474,30 @@ describe('createAuditExtension — query handlers', () => {
       );
 
       expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(values[9])).toEqual({
+        auditKind: 'summary',
+        operation: 'createMany',
+        recordCount: 5,
+        recordsAudited: false,
+      });
+    });
+
+    it('rejects count-only createMany in atomic-required before mutation', async () => {
+      const { handlers } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const query = jest.fn();
+
+      await expect(
+        handlers.createMany({
+          model: 'User',
+          args: { data: [{ name: 'User' }] },
+          query,
+        }),
+      ).rejects.toThrow('only provides count-level audit evidence');
+      expect(query).not.toHaveBeenCalled();
     });
   });
 
@@ -1460,6 +1518,30 @@ describe('createAuditExtension — query handlers', () => {
       );
 
       expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(JSON.parse(values[9])).toEqual({
+        auditKind: 'summary',
+        operation: 'updateMany',
+        recordCount: 3,
+        recordsAudited: false,
+      });
+    });
+
+    it('rejects count-only updateMany in atomic-required before mutation', async () => {
+      const { handlers } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const query = jest.fn();
+
+      await expect(
+        handlers.updateMany({
+          model: 'User',
+          args: { where: {}, data: { name: 'New' } },
+          query,
+        }),
+      ).rejects.toThrow('only provides count-level audit evidence');
+      expect(query).not.toHaveBeenCalled();
     });
   });
 
@@ -1486,6 +1568,13 @@ describe('createAuditExtension — query handlers', () => {
 
       // One audit log per record
       expect(mockClient.$executeRaw).toHaveBeenCalledTimes(2);
+      const metadata = mockClient.$executeRaw.mock.calls.map((call) =>
+        JSON.parse(call.slice(1)[9]),
+      );
+      expect(metadata).toEqual([
+        { auditKind: 'record', operation: 'deleteMany', batchSize: 2 },
+        { auditKind: 'record', operation: 'deleteMany', batchSize: 2 },
+      ]);
     });
 
     it('handles deleteMany with no matching records', async () => {
@@ -1539,8 +1628,57 @@ describe('createAuditExtension — query handlers', () => {
       expect(values[4]).toBe('User.deletedMany');
       expect(JSON.parse(values[8])).toEqual({});
       expect(JSON.parse(values[9])).toEqual({
-        count: 2,
+        auditKind: 'summary',
+        operation: 'deleteMany',
+        recordCount: 2,
+        recordsAudited: false,
         preReadFailed: true,
+      });
+    });
+
+    it('rejects deleteMany overflow before mutation by default', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        maxBatchRecords: 1,
+      });
+      mockClient.user.findMany.mockResolvedValue([
+        { id: 'u1', name: 'One' },
+        { id: 'u2', name: 'Two' },
+      ]);
+      const query = jest.fn();
+
+      await expect(
+        handlers.deleteMany({ model: 'User', args: { where: {} }, query }),
+      ).rejects.toThrow('more than maxBatchRecords');
+      expect(query).not.toHaveBeenCalled();
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('uses an explicit summary when best-effort overflow policy allows it', async () => {
+      const { handlers, mockClient } = getHandlers({
+        trackedModels: ['User'],
+        maxBatchRecords: 1,
+        batchOverflow: 'summary',
+      });
+      mockClient.user.findMany.mockResolvedValue([
+        { id: 'u1', name: 'One' },
+        { id: 'u2', name: 'Two' },
+      ]);
+      const query = jest.fn().mockResolvedValue({ count: 3 });
+
+      await handlers.deleteMany({ model: 'User', args: { where: {} }, query });
+
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(mockClient.$executeRaw).toHaveBeenCalledTimes(1);
+      const values = mockClient.$executeRaw.mock.calls[0].slice(1);
+      expect(values[4]).toBe('User.deletedMany');
+      expect(JSON.parse(values[9])).toEqual({
+        auditKind: 'summary',
+        operation: 'deleteMany',
+        recordCount: 3,
+        recordsAudited: false,
+        overflow: true,
+        maxBatchRecords: 1,
       });
     });
 

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Atomic single-row update/delete/upsert row locking with refreshed immediate preimages, plus
   `databaseMapping` for mapped PostgreSQL table/schema/primary-key identifiers when public Prisma
   DMMF mapping metadata is unavailable.
+- Atomic `deleteMany` row locking and per-record evidence, bounded by `maxBatchRecords`, with
+  PostgreSQL release gates for success, rollback, overflow, and audit insert failure.
+- `batchOverflow` for an explicit best-effort `deleteMany` summary fallback.
 
 ### Breaking Changes
 
@@ -24,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   transaction-first tracking or explicitly select `best-effort` for the legacy behavior.
 - In `atomic-required`, tracked mutations outside `withAuditTransaction()` fail before the
   business query executes. Nested `withAuditTransaction()` calls are not supported.
+- Atomic array `$transaction([...])`, `createMany`, and `updateMany` calls are rejected before
+  mutation. Use sequential single-record operations inside `withAuditTransaction()`.
 
 ### Changed
 
@@ -31,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   fail closed without private Prisma APIs or silent fallback.
 - `experimentalTxAudit` is deprecated in favor of `atomic-required` and
   `withAuditTransaction()`; it remains available only with explicit `best-effort` mode.
+- Best-effort bulk summary metadata now identifies `auditKind`, `operation`, `recordCount`, and
+  `recordsAudited: false`; per-record `deleteMany` rows identify their batch origin and size.
+- `createManyAndReturn` and `updateManyAndReturn` are explicitly outside the automatic tracking
+  contract for both consistency modes.
 
 ## [0.3.0] - 2026-08-02
 
