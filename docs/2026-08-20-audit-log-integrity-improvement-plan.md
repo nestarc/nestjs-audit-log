@@ -4,7 +4,7 @@
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 3 구현 완료 — peer matrix CI 통과 후 Phase 4 착수 가능
+- 문서 상태: Phase 4 구현 완료 — coordinated peer matrix CI 통과 후 Phase 5 착수 가능
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적
@@ -548,16 +548,95 @@ Tests:       55 passed, 55 total
 
 작업:
 
-- [ ] 지원하는 extension 적용 순서를 하나로 고정한다.
-- [ ] event listener가 아닌 동일 tx 통합 지점을 설계한다.
-- [ ] action naming을 확정한다. 예: `Model.softDeleted`, `Model.restored`, `Model.purged`.
-- [ ] soft-delete tx client 또는 audit hook을 lifecycle payload에 전달할지 결정한다.
-- [ ] cascade의 행별/summary semantics를 정한다.
-- [ ] commit/rollback, restore, repeated operation, purge, cascade, bulk E2E를 추가한다.
-- [ ] tenant/soft-delete/audit 세 extension의 조합을 실제 PostgreSQL로 검증한다.
+- [x] 지원하는 extension 적용 순서를 하나로 고정한다.
+- [x] event listener가 아닌 동일 tx 통합 지점을 설계한다.
+- [x] action naming을 확정한다. 예: `Model.softDeleted`, `Model.restored`, `Model.purged`.
+- [x] soft-delete tx client 또는 audit hook을 lifecycle payload에 전달할지 결정한다.
+- [x] cascade의 행별/summary semantics를 정한다.
+- [x] commit/rollback, restore, repeated operation, purge, cascade, bulk E2E를 추가한다.
+- [x] tenant/soft-delete/audit 세 extension의 조합을 실제 PostgreSQL로 검증한다.
 
 완료 조건: 문서에 제시된 공식 조합에서 soft-delete mutation과 감사 행이 항상 함께
 commit/rollback하며 action과 diff가 결정적이어야 한다.
+
+#### Phase 4 완료 기록 (2026-08-21)
+
+교차 패키지 원자성 계약을 다음과 같이 확정했다.
+
+1. 공식 extension 순서는 tenancy → audit-log → soft-delete다. audit-log가
+   `withAuditTransaction()`과 공식 interactive transaction client를 소유하고, soft-delete는
+   `auditLifecycle: 'atomic-required'`를 통해 이 bridge를 필수로 사용한다. bridge나 transaction
+   context가 없으면 mutation 전에 fail-closed한다.
+2. audit-log에 타입 보존 `withAuditLifecycle(input, callback)` 통합 지점을 추가했다. 이 helper는
+   현재 transaction client를 callback에 전달하고 기존 actor/reason/metadata context를 보존하면서
+   lifecycle action과 metadata를 설정한다. event listener는 알림 용도이며 원자 감사 경로가 아니다.
+3. action은 `Model.softDeleted`, `Model.restored`, `Model.purged`로 확정했다. metadata는
+   `auditKind: 'record'`, `lifecycle: 'soft-delete'`, `lifecycleOperation`을 사용한다. rewrite 전 outer
+   delete/deleteMany 감사는 transaction-local suppression으로 제거하여 레코드마다 lifecycle 행이
+   정확히 하나만 남는다.
+4. 단건 delete는 active row만, restore는 deleted row만 대상으로 하므로 repeated delete/restore는
+   실패하며 추가 감사 행을 남기지 않는다. force delete와 retention purge는 모두 `Model.purged`를
+   사용하고 `lifecycleOperation`으로 `forceDelete`/`purge`를 구분한다.
+5. atomic cascade delete/restore는 summary가 아니라 child별 record audit로 확정했다. 각 child는
+   자신의 모델 action과 before/after diff를 가지며 `cascadeDelete`/`cascadeRestore`를 metadata에
+   기록한다. purge는 라이브러리가 암묵적 cascade를 만들지 않고 데이터베이스 FK 계약을 따른다.
+6. atomic `deleteMany`/`restoreMany`는 레코드별 단건 mutation으로 변환한다. 기본 1000인
+   `auditMaxBatchRecords`를 넘으면 mutation 전에 거부하며, audit-log의 `maxBatchRecords`도 같거나
+   더 크게 맞춘다. summary fallback은 authoritative lifecycle 계약에 포함하지 않는다.
+7. `nestjs-soft-delete`에 실제 PostgreSQL cross-package suite를 추가했다. sibling 저장소가 있으면
+   일반 E2E에도 포함되고 `npm run test:e2e:cross-package`는 sibling 존재를 강제한다. suite는 실제
+   tenancy extension의 interactive `set_config` 경로, audit atomic extension, soft-delete extension을
+   함께 구성하여 tenant metadata, commit/rollback, restore rollback, repeated operation,
+   force-delete/purge, cascade, bulk 후반 실패를 검증한다.
+8. 세 저장소 README/CHANGELOG와 `nestarc.dev`의 installation, auto-tracking, restore/purge,
+   extension chaining 문서를 같은 순서·action·transaction 경계로 갱신했다. 기존 event listener
+   기반 best-effort 감사 예시는 공식 조합에서 제거했다.
+
+검증 결과:
+
+```text
+# nestjs-audit-log
+npm test -- --runInBand
+Test Suites: 15 passed, 15 total
+Tests:       251 passed, 251 total
+
+npm run build
+성공
+
+npm run test:e2e
+Test Suites: 9 passed, 9 total
+Tests:       55 passed, 55 total
+
+# nestjs-soft-delete
+npm test
+Test Files:  15 passed, 15 total
+Tests:       188 passed, 188 total
+
+npm run build
+성공
+
+npm run test:e2e
+Test Files:  8 passed, 8 total
+Tests:       52 passed, 52 total
+
+npm run test:e2e:cross-package
+Test Files:  1 passed, 1 total
+Tests:       6 passed, 6 total
+
+# nestarc.dev
+npm run catalog:test
+Tests: 69 passed, 69 total
+
+npm run docs:build
+VitePress build 성공
+
+git diff --check
+세 저장소 모두 성공
+```
+
+로컬 교차 검증 환경은 PostgreSQL 15(soft-delete cross-package suite) 및 PostgreSQL 16
+(audit-log suite), Node.js 24, NestJS 11, Prisma 7.9.1이다. 실제 merge 전 coordinated 변경이
+적용된 상태에서 각 저장소의 Nest 10/11 x Prisma peer matrix CI 성공을 별도로 확인한다.
 
 ### Phase 5 — 감사 제품 기본 무결성 보강
 

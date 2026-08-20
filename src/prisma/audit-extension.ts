@@ -44,6 +44,19 @@ export interface AuditTransactionMethods<TTransactionClient> {
     callback: (tx: TTransactionClient) => Promise<TResult>,
     options?: AuditTransactionOptions,
   ): Promise<TResult>;
+  withAuditLifecycle<TResult>(
+    input: AuditLifecycleInput,
+    callback: (tx: TTransactionClient) => Promise<TResult>,
+  ): Promise<TResult>;
+}
+
+export interface AuditLifecycleInput {
+  /** Deterministic lifecycle action, for example `User.softDeleted`. */
+  action: string;
+  /** Metadata merged into the ambient audit context for this mutation. */
+  metadata?: Record<string, unknown>;
+  /** Internal extension-composition signal for a rewritten outer operation. */
+  suppressOuterOperation?: { model: string; operation: 'delete' | 'deleteMany' };
 }
 
 export interface AuditDatabaseMapping {
@@ -122,6 +135,8 @@ const ATOMIC_ARRAY_TRANSACTION_ERROR =
   '[@nestarc/audit-log] atomic-required does not support array $transaction([...]); use sequential mutations inside withAuditTransaction()';
 const NESTED_TRANSACTION_ERROR =
   '[@nestarc/audit-log] nested withAuditTransaction() calls are not supported';
+const AUDIT_LIFECYCLE_CONTEXT_ERROR =
+  '[@nestarc/audit-log] withAuditLifecycle() must run inside withAuditTransaction()';
 const DEFAULT_MAX_BATCH_RECORDS = 1000;
 
 export function modelDelegateName(model: string): string {
@@ -1000,6 +1015,22 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
   );
 
   const transactionContext = new AsyncLocalStorage<any>();
+  const lifecycleSuppressions = new AsyncLocalStorage<
+    Array<{ model: string; operation: 'delete' | 'deleteMany' }>
+  >();
+
+  const consumeLifecycleSuppression = (
+    model: string,
+    operation: 'delete' | 'deleteMany',
+  ): boolean => {
+    const suppressions = lifecycleSuppressions.getStore();
+    const index = suppressions?.findIndex(
+      (item) => item.model === model && item.operation === operation,
+    ) ?? -1;
+    if (!suppressions || index < 0) return false;
+    suppressions.splice(index, 1);
+    return true;
+  };
 
   return Prisma.defineExtension((client: any) => {
     return client.$extends({
@@ -1015,8 +1046,42 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           }
           return this.$transaction(
             (tx: any) =>
-              transactionContext.run(tx, async () => await callback(tx)),
+              transactionContext.run(tx, () =>
+                lifecycleSuppressions.run([], async () => await callback(tx)),
+              ),
             transactionOptions,
+          );
+        },
+        async withAuditLifecycle<TResult>(
+          input: AuditLifecycleInput,
+          callback: (tx: any) => Promise<TResult>,
+        ): Promise<TResult> {
+          const tx = transactionContext.getStore();
+          if (!tx) {
+            throw new Error(AUDIT_LIFECYCLE_CONTEXT_ERROR);
+          }
+          if (!input || typeof input.action !== 'string' || input.action.length === 0) {
+            throw new Error(
+              '[@nestarc/audit-log] withAuditLifecycle() requires a non-empty action',
+            );
+          }
+          if (input.suppressOuterOperation) {
+            lifecycleSuppressions.getStore()?.push(input.suppressOuterOperation);
+          }
+
+          const parent = AuditContext.getStore();
+          return AuditContext.run(
+            {
+              actor: parent?.actor ?? null,
+              noAudit: parent?.noAudit ?? false,
+              actionOverride: input.action,
+              metadata: {
+                ...(parent?.metadata ?? {}),
+                ...(input.metadata ?? {}),
+              },
+              ...(parent?.reason !== undefined ? { reason: parent.reason } : {}),
+            },
+            async () => await callback(tx),
           );
         },
       },
@@ -1280,6 +1345,10 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 error,
               }, auditTableRef);
               throw error;
+            }
+
+            if (consumeLifecycleSuppression(model, 'delete')) {
+              return result;
             }
 
             try {
@@ -1639,6 +1708,10 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
                 error,
               }, auditTableRef);
               throw error;
+            }
+
+            if (consumeLifecycleSuppression(model, 'deleteMany')) {
+              return result;
             }
 
             if (preReadFailed || overflowed) {

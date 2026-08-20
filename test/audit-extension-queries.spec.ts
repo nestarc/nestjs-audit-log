@@ -482,6 +482,65 @@ describe('createAuditExtension — query handlers', () => {
         ),
       ).rejects.toThrow('nested withAuditTransaction() calls are not supported');
     });
+
+    it('runs lifecycle mutations on the bound tx with deterministic action and metadata', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      txClient.user.findFirst
+        .mockResolvedValueOnce({ id: 'u1', deletedAt: null })
+        .mockResolvedValueOnce({ id: 'u1', deletedAt: null })
+        .mockResolvedValueOnce({ id: 'u1', deletedAt: new Date('2026-08-21T00:00:00.000Z') });
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, () =>
+        clientMethods.withAuditLifecycle(
+          {
+            action: 'User.softDeleted',
+            metadata: { lifecycle: 'soft-delete', lifecycleOperation: 'delete' },
+          },
+          (tx: any) => {
+            expect(tx).toBe(txClient);
+            return handlers.update({
+              model: 'User',
+              args: {
+                where: { id: 'u1' },
+                data: { deletedAt: new Date('2026-08-21T00:00:00.000Z') },
+              },
+              query: jest.fn().mockResolvedValue({
+                id: 'u1',
+                deletedAt: new Date('2026-08-21T00:00:00.000Z'),
+              }),
+            });
+          },
+        ),
+      );
+
+      const insertValues = txClient.$executeRaw.mock.calls[0].slice(1);
+      expect(insertValues[4]).toBe('User.softDeleted');
+      expect(JSON.parse(insertValues[9])).toEqual({
+        lifecycle: 'soft-delete',
+        lifecycleOperation: 'delete',
+      });
+    });
+
+    it('rejects lifecycle integration outside the transaction helper', async () => {
+      const { clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+
+      await expect(
+        clientMethods.withAuditLifecycle(
+          { action: 'User.softDeleted' },
+          async () => undefined,
+        ),
+      ).rejects.toThrow('must run inside withAuditTransaction()');
+    });
   });
 
   // ─── shouldSkip ──────────────────────────────────────────────

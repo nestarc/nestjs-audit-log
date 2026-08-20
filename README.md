@@ -412,6 +412,45 @@ overflow receive one `Model.deletedMany` row with `overflow: true` and `maxBatch
 batch activity marker, not evidence of which rows were deleted. In atomic mode, a cap overflow,
 preimage/affected-count mismatch, or any audit insert failure rolls back the entire `deleteMany`.
 
+### Atomic soft-delete lifecycle integration
+
+`@nestarc/soft-delete` can route rewritten lifecycle mutations through the same official transaction.
+Apply extensions in the fixed order tenancy → audit-log → soft-delete:
+
+```typescript
+const prisma = basePrisma
+  .$extends(createPrismaTenancyExtension(tenancyService))
+  .$extends(createAuditExtension({
+    consistency: 'atomic-required',
+    trackedModels: ['User', 'Post', 'Comment'],
+    databaseMapping: {
+      User: { tableName: 'users' },
+      Post: { tableName: 'posts' },
+      Comment: { tableName: 'comments' },
+    },
+    prismaModule,
+  }))
+  .$extends(createPrismaSoftDeleteExtension({
+    softDeleteModels: ['User', 'Post', 'Comment'],
+    auditLifecycle: 'atomic-required',
+    auditMaxBatchRecords: 1000,
+    cascade: { User: ['Post'], Post: ['Comment'] },
+    dmmf: prismaDmmf,
+  }));
+
+await prisma.withAuditTransaction((tx) =>
+  tx.user.delete({ where: { id } }),
+);
+```
+
+The bridge covers soft-delete, restore, force-delete/purge, cascade, and supported bulk lifecycle
+mutations. Actions are `Model.softDeleted`, `Model.restored`, and `Model.purged`; cascade rows are
+record-level and identify `cascadeDelete` or `cascadeRestore` in `metadata.lifecycleOperation`.
+`deleteMany` and
+`restoreMany` become record-level mutations and fail before mutation when `auditMaxBatchRecords` is
+exceeded. Lifecycle events remain notifications, not authoritative audit integration. Purge does not
+invent cascade semantics; configured database foreign-key behavior still applies.
+
 ## Multi-Tenancy
 
 Tenant resolution uses this order: explicit `tenantResolver`, optional `@nestarc/tenancy`, then `null`.

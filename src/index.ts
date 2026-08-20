@@ -22,6 +22,7 @@ export type {
   AuditConsistency,
   AuditDatabaseMapping,
   AuditExtensionOptions,
+  AuditLifecycleInput,
   AuditTransactionMethods,
   AuditTransactionOptions,
 } from './prisma/audit-extension';

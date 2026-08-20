@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `withAuditLifecycle()` as the same-transaction integration point for `@nestarc/soft-delete`,
+  including rewritten outer-operation suppression so each affected record receives exactly one
+  `Model.softDeleted`, `Model.restored`, or `Model.purged` row.
+- PostgreSQL cross-package coverage for lifecycle commit/rollback, repeated operations, cascade,
+  bulk mutation, purge, and tenant metadata.
 - `createAuditedClient()` and its typed `withAuditTransaction(callback, options)` API. The helper
   binds the official Prisma interactive transaction client through `AsyncLocalStorage`, forwards
   `timeout`, `maxWait`, and `isolationLevel`, and keeps callback/result type inference.
