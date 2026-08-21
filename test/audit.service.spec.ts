@@ -847,6 +847,18 @@ describe('AuditService', () => {
       expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
     });
 
+    it('rejects retention ahead of the slowest required stream checkpoint', async () => {
+      const checkpoint = encodeAuditCursor(
+        '2026-01-01T00:00:00.000000Z',
+        uuid1,
+      );
+      await expect(service.prune({
+        olderThan: new Date('2026-02-01T00:00:00.000Z'),
+        requiredCheckpoints: [checkpoint],
+      })).rejects.toThrow('retention cutoff is ahead of a required stream checkpoint');
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('deletes old rows on flat trigger-enforced tables inside a transaction', async () => {
       const tx = {
         $executeRaw: jest

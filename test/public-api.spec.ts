@@ -7,6 +7,9 @@ import {
   ensurePartitions,
   createAuditedClient,
   mergeContextMetadata,
+  AuditStreamRunner,
+  HttpAuditStreamSink,
+  PostgresAuditStreamStore,
 } from '../src';
 import type {
   AuditDatabaseMapping,
@@ -24,6 +27,8 @@ import type {
   AuditScanOptions,
   AuditScanPage,
   EnsurePartitionsOptions,
+  AuditStreamCheckpointStore,
+  AuditStreamSink,
 } from '../src';
 
 describe('public API exports', () => {
@@ -113,6 +118,19 @@ describe('public API exports', () => {
     expect(csv.columns).toBe('v1');
     expect(page.entries).toEqual([]);
     expect(AUDIT_CSV_COLUMNS_V1[0]).toBe('schemaVersion');
+  });
+
+  it('exports durable stream core, sink, and store APIs', () => {
+    const checkpointStore: AuditStreamCheckpointStore = {
+      load: async () => null,
+      save: async () => undefined,
+    };
+    const sink: AuditStreamSink = { deliver: async () => undefined };
+    expect(checkpointStore).toBeDefined();
+    expect(sink).toBeDefined();
+    expect(typeof AuditStreamRunner).toBe('function');
+    expect(typeof HttpAuditStreamSink).toBe('function');
+    expect(typeof PostgresAuditStreamStore).toBe('function');
   });
 
   it('exports experimental transaction audit option type', () => {

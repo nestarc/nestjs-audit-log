@@ -158,6 +158,20 @@ describe('documentation gates', () => {
     expect(changelog).toContain('`AuditService.exportCsv()`');
   });
 
+  it('documents durable at-least-once stream and retention contracts', () => {
+    const readme = read('README.md');
+    const changelog = read('CHANGELOG.md');
+
+    expect(readme).toContain('### Durable log streams');
+    expect(readme).toContain('new AuditStreamRunner');
+    expect(readme).toContain('PostgresAuditStreamStore');
+    expect(readme).toContain('Idempotency-Key');
+    expect(readme).toContain('Retry-After');
+    expect(readme).toContain('requiredCheckpoints');
+    expect(changelog).toContain('`AuditStreamRunner`');
+    expect(changelog).toContain('`HttpAuditStreamSink`');
+  });
+
   it('keeps the design document aligned with v0.2.0 query, storage, and tenancy contracts', () => {
     const design = read('docs/2026-04-04-audit-log-design.md');
 

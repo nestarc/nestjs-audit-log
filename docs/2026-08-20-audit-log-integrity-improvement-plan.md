@@ -4,7 +4,7 @@
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 6 구현 완료 — coordinated peer matrix CI 통과 후 Phase 7 착수 가능
+- 문서 상태: Phase 7 구현 완료 — coordinated peer matrix CI 통과 후 릴리스 가능
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적
@@ -812,24 +812,92 @@ write path에서 SIEM callback을 직접 호출하지 않는다. commit된 audit
 
 필수 운영 계약:
 
-- at-least-once delivery
-- audit entry ID 기반 멱등성
-- batch ACK 뒤 checkpoint 저장
-- retry/backoff 및 `Retry-After`
-- terminal 4xx와 DLQ/실패 상태
-- backpressure
-- tenant별 filter와 redaction
-- metrics 및 error hook
-- slowest required checkpoint보다 앞선 retention prune 방지 또는 detach-first 운영 절차
+- [x] at-least-once delivery
+- [x] audit entry ID 기반 멱등성
+- [x] batch ACK 뒤 checkpoint 저장
+- [x] retry/backoff 및 `Retry-After`
+- [x] terminal 4xx와 DLQ/실패 상태
+- [x] backpressure
+- [x] tenant별 filter와 redaction
+- [x] metrics 및 error hook
+- [x] slowest required checkpoint보다 앞선 retention prune 방지 또는 detach-first 운영 절차
 
 구현 순서:
 
-1. generic HTTP JSON/NDJSON sink
-2. S3/object storage sink
-3. Datadog/Splunk provider mapping
-4. 필요 시 Snowflake/GCS 등 추가
+1. [x] generic HTTP JSON/NDJSON sink
+2. [x] S3/object storage sink
+3. [x] Datadog/Splunk provider mapping
+4. 필요 시 Snowflake 전용 mapping 등 추가(이번 Phase의 필수 완료 범위 밖)
 
 스케줄링은 라이브러리 내부에 넣지 않고 host의 cron/BullMQ가 one-shot runner를 호출한다.
+
+#### Phase 7 완료 기록 (2026-08-21)
+
+durable log stream core와 최초 adapter 계약을 다음과 같이 확정했다.
+
+1. `AuditStreamRunner.runOnce()`는 host cron/BullMQ가 호출하는 one-shot runner다. 내부 scheduler나
+   background timer를 만들지 않으며 Phase 6 `scan()`의 committed row만 tenant-scoped forward
+   order로 읽는다. 페이지는 하나씩 ACK될 때까지 다음 페이지를 전달하지 않아 sink backpressure를
+   그대로 따른다.
+2. `AuditStreamCheckpointStore`는 last ACK checkpoint와 in-progress high-watermark를 함께 저장한다.
+   sink 또는 idempotent DLQ ACK 뒤에만 checkpoint를 갱신한다. ACK 뒤 checkpoint 저장이 실패하면
+   다음 실행이 같은 entry ID를 다시 전달하므로 at-least-once를 유지하며, 재시작도 원래 bounded
+   high-watermark 안에서 이어진다.
+3. batch ID는 `firstEntryId:lastEntryId`로 결정적이며 generic HTTP sink는 이를
+   `Idempotency-Key`로 전송한다. object storage sink도 같은 ID의 deterministic key와 conditional
+   create를 사용한다. receiver/provider는 batch ID 또는 각 audit entry ID로 중복 제거한다.
+4. network 오류, HTTP 408/425/429 및 5xx는 bounded exponential backoff로 재시도한다.
+   `Retry-After` delta/date를 지원하되 `maxBackoffMs`를 넘지 않는다. 나머지 4xx는 terminal이며,
+   DLQ가 있으면 idempotent DLQ write 뒤 checkpoint를 진행하고 DLQ가 없으면 실패 상태로 종료하여
+   checkpoint를 진행하지 않는다.
+5. `PostgresAuditStreamStore`와 `applyAuditStreamStoreSchema()`를 추가했다. checkpoint table은
+   stream별 진행 범위를 upsert하고, dead-letter table은 `(stream_id, batch_id)` unique key로 terminal
+   batch를 중복 없이 보존한다. 한 `streamId`에는 하나의 active runner를 운영하도록 문서화했으며,
+   겹친 실행이 발생해도 stable ID 덕분에 중복 전달이지 누락으로 바뀌지 않는다.
+6. `redact(entry)`는 전달 전 clone에만 적용하고 idempotency 근거인 entry ID 변경을 거부한다.
+   scan scope는 기존처럼 explicit `tenantId` 또는 의도적인 `allTenants: true`만 허용한다.
+   `onMetric`은 delivered/retried/dead-lettered/failed 상태를, `onError`는 delivery 오류를 보고하며
+   hook 자체의 오류는 전달/체크포인트 의미를 바꾸지 않는다.
+7. `HttpAuditStreamSink`는 versioned JSON envelope와 NDJSON을 지원한다. provider-neutral
+   `ObjectStorageAuditStreamSink`는 S3/GCS SDK를 작은 conditional `putObject()` 계약으로 받는다.
+   `DatadogAuditStreamSink`는 HTTP Logs v2 array 및 1000-entry limit을, `SplunkAuditStreamSink`는
+   HEC event envelope batch와 `Splunk` authorization header를 구현한다. endpoint/region/credential은
+   host가 명시적으로 주입한다.
+8. `AuditService.prune({ requiredCheckpoints })`를 추가해 cutoff가 required stream의 last ACK를
+   넘으면 DB maintenance 전에 거부한다. 아직 checkpoint가 없는 required stream 차단과 detached
+   archive tailing은 host 운영 정책으로 남겼고, 더 이른 partition 이동이 필요하면 detach-first 후
+   외부 archive 소비가 완료되기 전 drop하지 않도록 README에 명시했다.
+9. PostgreSQL release gate 3건을 추가했다. tenant-scoped 두 batch가 순차 ACK되고 durable state가
+   다음 run을 idle로 만드는지, sink ACK 뒤 checkpoint failure가 동일 ID 재전달을 만드는지,
+   terminal 422 batch가 DLQ에 먼저 저장된 뒤 checkpoint가 진행되는지를 실제 table로 검증한다.
+
+검증 결과:
+
+```text
+npm run build
+성공
+
+npm test -- --runInBand
+Test Suites: 19 passed, 19 total
+Tests:       292 passed, 292 total
+
+npm run test:e2e -- --runTestsByPath test/e2e/phase7-durable-stream.e2e-spec.ts
+Test Suites: 1 passed, 1 total
+Tests:       3 passed, 3 total
+
+npm run test:e2e
+Test Suites: 12 passed, 12 total
+Tests:       66 passed, 66 total
+
+git diff --check
+성공
+```
+
+로컬 PostgreSQL 검증 환경은 PostgreSQL 16, Node.js 24, NestJS 11, Prisma 7.9.1이다. 새 suite는
+기존 `npm run test:e2e`에 포함되므로 Nest 10/11 x Prisma 5/6/7 peer matrix의 release gate로
+실행된다. 실제 merge 전 coordinated matrix CI 성공은 별도로 확인한다. Snowflake 전용 mapping은
+구체적인 수요가 생길 때 추가하며, GCS는 현재 provider-neutral object storage contract로 연결할 수
+있다.
 
 ## 7. 외부 제품 근거와 해석 범위
 

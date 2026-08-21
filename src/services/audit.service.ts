@@ -46,6 +46,11 @@ export interface AuditPruneOptions {
   client?: any;
   timeoutMs?: number;
   maxWaitMs?: number;
+  /**
+   * Last ACKed checkpoints for every required stream. Pruning is rejected when
+   * it would pass any checkpoint and remove entries that stream has not ACKed.
+   */
+  requiredCheckpoints?: readonly string[];
 }
 
 export interface AuditPruneResult {
@@ -839,6 +844,22 @@ export class AuditService {
         throw new TypeError(
           `[@nestarc/audit-log] ${name} must be a positive integer.`,
         );
+      }
+    }
+    if (options.requiredCheckpoints !== undefined) {
+      if (!Array.isArray(options.requiredCheckpoints)) {
+        throw new TypeError(
+          '[@nestarc/audit-log] requiredCheckpoints must be an array of scan checkpoints.',
+        );
+      }
+      for (const checkpoint of options.requiredCheckpoints) {
+        const decoded = decodeAuditCursor(checkpoint);
+        if (options.olderThan.getTime() > Date.parse(decoded.ts)) {
+          throw new Error(
+            '[@nestarc/audit-log] retention cutoff is ahead of a required stream checkpoint. ' +
+              'Advance the slow stream or use an externally managed detach-first archive procedure.',
+          );
+        }
       }
     }
   }

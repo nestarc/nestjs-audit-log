@@ -61,6 +61,50 @@ export type {
   AuditLogger,
 } from './interfaces/audit-shared-options.interface';
 
+// Durable log streams
+export {
+  AuditStreamDeliveryError,
+  AuditStreamRunner,
+} from './stream/audit-stream';
+export type {
+  AuditStreamBatchContext,
+  AuditStreamCheckpointStore,
+  AuditStreamDeadLetter,
+  AuditStreamDeadLetterStore,
+  AuditStreamErrorContext,
+  AuditStreamMetric,
+  AuditStreamRunnerOptions,
+  AuditStreamRunResult,
+  AuditStreamSink,
+  AuditStreamState,
+} from './stream/audit-stream';
+export { HttpAuditStreamSink } from './stream/http-sink';
+export type {
+  AuditHttpStreamFormat,
+  HttpAuditStreamSinkOptions,
+} from './stream/http-sink';
+export {
+  DatadogAuditStreamSink,
+  ObjectStorageAuditStreamSink,
+  SplunkAuditStreamSink,
+} from './stream/provider-sinks';
+export type {
+  AuditObjectStorageClient,
+  AuditObjectStoragePutInput,
+  DatadogAuditStreamSinkOptions,
+  ObjectStorageAuditStreamSinkOptions,
+  SplunkAuditStreamSinkOptions,
+} from './stream/provider-sinks';
+export {
+  applyAuditStreamStoreSchema,
+  getAuditStreamStoreStatements,
+  PostgresAuditStreamStore,
+} from './stream/postgres-store';
+export type {
+  AuditStreamStoreSQLOptions,
+  PostgresAuditStreamStoreOptions,
+} from './stream/postgres-store';
+
 // Constants
 export { AUDIT_LOG_OPTIONS } from './audit-log.constants';
 

@@ -419,8 +419,86 @@ csv.pipe(httpResponse);
 CSV `v1` columns are exported by `AUDIT_CSV_COLUMNS_V1` and begin with a `schemaVersion` field. Rows
 use RFC 4180 quoting and CRLF delimiters; `changes` and `metadata` use recursively key-sorted
 canonical JSON. Text cells beginning with an Excel formula marker (`=`, `+`, `-`, or `@`, including
-leading whitespace) receive an apostrophe prefix. HTTP authorization and headers, files, S3/object
-storage, scheduling, retry, and checkpoint persistence remain host-application responsibilities.
+leading whitespace) receive an apostrophe prefix. HTTP authorization, file response headers, and
+export-job scheduling remain host-application responsibilities.
+
+### Durable log streams
+
+`AuditStreamRunner` tails only committed rows through `scan()` and performs one bounded run. Invoke
+it from the host application's cron, BullMQ worker, or another scheduler; the package does not start
+background timers. The PostgreSQL store persists both the last ACKed checkpoint and an in-progress
+high-watermark, so a restart resumes the same bounded range.
+
+```typescript
+import {
+  applyAuditStreamStoreSchema,
+  AuditStreamRunner,
+  HttpAuditStreamSink,
+  PostgresAuditStreamStore,
+} from '@nestarc/audit-log';
+
+await applyAuditStreamStoreSchema(prisma); // run through migrations in production
+
+const streamStore = new PostgresAuditStreamStore({ prisma, prismaModule });
+const runner = new AuditStreamRunner(auditService, {
+  streamId: 'tenant-1-primary-siem',
+  scan: {
+    tenantId: 'tenant-1', // or intentional allTenants: true
+    action: 'invoice.*',
+    batchSize: 500,
+  },
+  sink: new HttpAuditStreamSink({
+    url: process.env.SIEM_URL!,
+    format: 'ndjson', // or json
+    headers: { authorization: `Bearer ${process.env.SIEM_TOKEN}` },
+  }),
+  checkpointStore: streamStore,
+  deadLetterStore: streamStore,
+  maxRetries: 5,
+  onMetric: (metric) => metrics.record(metric),
+  onError: (error, context) => logger.error({ error, context }),
+});
+
+await runner.runOnce({ signal: abortController.signal });
+```
+
+Delivery is at least once. A batch is ACKed only by a successful sink call (or an idempotent DLQ
+write for a terminal batch), and its checkpoint is saved afterward. If checkpoint persistence
+fails, the same audit entry IDs are sent again. Generic HTTP requests publish their deterministic
+`firstEntryId:lastEntryId` batch ID as `Idempotency-Key`; receivers must deduplicate by batch or
+entry ID. Pages are delivered sequentially for backpressure. Network failures, HTTP 408/425/429,
+and 5xx responses retry with bounded exponential backoff; `Retry-After` is honored up to
+`maxBackoffMs`. Other 4xx responses are terminal: with a DLQ store they are durably recorded before
+the checkpoint advances, and without one the run fails without advancing. Metrics and error hooks
+are observational and cannot change delivery state.
+
+`ObjectStorageAuditStreamSink` writes deterministic NDJSON objects with conditional create
+(`If-None-Match: *` semantics) through a provider-neutral client; adapt an AWS S3/GCS client to its
+small `putObject()` interface. `DatadogAuditStreamSink` maps a batch to the Datadog HTTP Logs array
+contract, while `SplunkAuditStreamSink` emits newline-delimited HEC event envelopes. Both accept an
+explicit endpoint so region and deployment selection stays with the host. Configure only one
+active runner for a given `streamId`; overlapping runs can redeliver but entry IDs remain stable.
+
+Stream-specific redaction can be applied with `redact(entry)`. The runner clones each entry before
+calling it and rejects a redactor that changes the entry ID. Export scope remains explicit and
+never uses ambient tenancy.
+
+Retention must not pass the slowest required stream. Load every required stream state and pass its
+non-null checkpoint to `prune()`:
+
+```typescript
+await auditService.prune({
+  olderThan: cutoff,
+  requiredCheckpoints: requiredStates
+    .map((state) => state.checkpoint)
+    .filter((value): value is string => value !== null),
+});
+```
+
+The prune call fails before database maintenance when the cutoff is newer than any supplied
+checkpoint. A required stream with no checkpoint must block prune at the host policy layer. For
+partition archives that must move sooner, use an externally managed detach-first procedure and
+tail the detached storage before dropping it.
 
 ### Nested writes
 

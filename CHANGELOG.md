@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `AuditStreamRunner`, a host-scheduled one-shot durable tailer with at-least-once delivery,
+  deterministic entry-ID batch keys, sequential backpressure, bounded retry/backoff with
+  `Retry-After`, terminal failure handling, DLQ support, redaction, metrics, and error hooks.
+- `PostgresAuditStreamStore` plus `applyAuditStreamStoreSchema()` for resumable checkpoint,
+  in-progress high-watermark, and idempotent dead-letter persistence.
+- Generic JSON/NDJSON `HttpAuditStreamSink`, provider-neutral conditional-create
+  `ObjectStorageAuditStreamSink`, and Datadog HTTP Logs / Splunk HEC mappings.
+- Phase 7 PostgreSQL release gates for durable progress, at-least-once redelivery after checkpoint
+  failure, and terminal-batch DLQ persistence before checkpoint advancement.
+
 - `AuditService.scan()` for explicit tenant-scoped or intentional all-tenant forward scans with
   resumable `(created_at, id)` checkpoints, a fixed high-watermark, bounded batches, filters, and
   `AbortSignal` cancellation. The scan path never runs `COUNT(*)`.
@@ -46,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   related-model mutations inside `withAuditTransaction()`.
 
 ### Changed
+
+- `AuditService.prune()` accepts `requiredCheckpoints` and rejects retention cutoffs that would
+  pass the slowest required durable stream checkpoint.
 
 - Atomic audit pre/post reads and inserts use the same transaction as the business mutation and
   fail closed without private Prisma APIs or silent fallback.
