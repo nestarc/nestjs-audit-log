@@ -200,7 +200,7 @@ describe('AuditService', () => {
       expect(JSON.parse(metadataJson)).toEqual({
         email: '[REDACTED]',
         ssn: '[REDACTED]',
-        nested: { email: 'nested@test.com' },
+        nested: { email: '[REDACTED]' },
       });
     });
 
@@ -725,6 +725,16 @@ describe('AuditService', () => {
   });
 
   describe('prune()', () => {
+    it.each([
+      [{ olderThan: new Date('invalid') }, 'olderThan'],
+      [{ olderThan: new Date(), timeoutMs: 0 }, 'timeoutMs'],
+      [{ olderThan: new Date(), timeoutMs: 1.5 }, 'timeoutMs'],
+      [{ olderThan: new Date(), maxWaitMs: -1 }, 'maxWaitMs'],
+    ])('rejects invalid maintenance input before querying: %s', async (input, message) => {
+      await expect(service.prune(input as any)).rejects.toThrow(message);
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('deletes old rows on flat trigger-enforced tables inside a transaction', async () => {
       const tx = {
         $executeRaw: jest
@@ -755,6 +765,9 @@ describe('AuditService', () => {
       expect(
         mockPrisma.$queryRaw.mock.calls[0][0].strings.join(''),
       ).toContain('relkind::text AS relkind');
+      expect(
+        mockPrisma.$queryRaw.mock.calls[1][0].strings.join(''),
+      ).toContain('tgrelid = to_regclass');
       expect(tx.$executeRaw).toHaveBeenCalledTimes(3);
     });
 
@@ -898,6 +911,9 @@ describe('AuditService', () => {
 
       expect(result.deletedRows).toBe(4);
       expect(tx.$executeRaw).toHaveBeenCalledTimes(3);
+      expect(
+        mockPrisma.$queryRaw.mock.calls[2][0].strings.join(''),
+      ).toContain('ev_class = to_regclass');
     });
   });
 });

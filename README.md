@@ -193,7 +193,7 @@ export class UserService {
 | `correlationIdGetter` | `(req) => string \| undefined` | — | Custom correlation ID source |
 | `tableName` | `string` | `audit_logs` | Audit table name used by module-side log/query/prune APIs |
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup before the optional `@nestarc/tenancy` fallback |
-| `sensitiveFields` | `string[]` | `[]` | Metadata redaction keys for manual logs |
+| `sensitiveFields` | `string[]` | `[]` | Metadata keys redacted recursively in objects and arrays for manual logs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Model-specific metadata redaction keys |
 | `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
 
@@ -261,7 +261,7 @@ Apply to individual handlers or entire controllers:
 | `consistency` | `'atomic-required' \| 'best-effort'` | required | `atomic-required` rejects tracked writes outside `withAuditTransaction()` and fails closed; `best-effort` preserves legacy non-atomic behavior |
 | `trackedModels` | `string[]` | all models when omitted | Allowlist of Prisma model names to track. `trackedModels: []` means no models are audited |
 | `ignoredModels` | `string[]` | `[]` | Denylist used only when `trackedModels` is not set |
-| `sensitiveFields` | `string[]` | `[]` | Fields to mask as `[REDACTED]` in diffs |
+| `sensitiveFields` | `string[]` | `[]` | Keys to mask recursively as `[REDACTED]` in scalar and nested JSON diffs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Per-model fields unioned with `sensitiveFields` |
 | `primaryKey` | `Record<string, string>` | `{ *: 'id' }` | Map of model name to primary key field name |
 | `databaseMapping` | `Record<string, { tableName: string; schema?: string; primaryKeyColumn?: string }>` | `{}` | PostgreSQL identifiers for atomic row locks; configure mapped models when public Prisma DMMF mapping metadata is unavailable |
@@ -308,6 +308,41 @@ await auditService.prune({
 
 Flat pruning temporarily disables the delete trigger, or drops and recreates the legacy delete RULE, inside one interactive transaction. Partitioned pruning never deletes partial months; it only drops or detaches partitions whose upper bound is at or before `olderThan`.
 
+`olderThan` must be a valid `Date`. `timeoutMs` and `maxWaitMs`, when supplied for flat pruning,
+must be positive integers. Flat pruning takes an `ACCESS EXCLUSIVE` lock while enforcement is
+temporarily changed; prefer partitioning for large audit tables.
+
+### Database hardening
+
+The generated row triggers block `UPDATE` and `DELETE`, but PostgreSQL `TRUNCATE` does not run row
+triggers. A table owner or superuser can also alter/disable triggers, drop the table, or otherwise
+bypass append-only enforcement. Treat trigger enforcement as detection and accident prevention,
+not as a privilege boundary.
+
+Use separate runtime and maintenance identities. The application identity should not own the table
+and should receive only `SELECT` and `INSERT`; keep the owner-capable maintenance connection outside
+the application process and pass it explicitly to `prune({ client })`:
+
+```sql
+CREATE ROLE audit_owner NOLOGIN;
+-- Create/login-role provisioning is environment-specific.
+
+ALTER TABLE audit_logs OWNER TO audit_owner;
+ALTER FUNCTION audit_logs_block_mutation() OWNER TO audit_owner;
+
+REVOKE ALL ON TABLE audit_logs FROM PUBLIC;
+REVOKE ALL ON TABLE audit_logs FROM app_runtime;
+GRANT SELECT, INSERT ON TABLE audit_logs TO app_runtime;
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM app_runtime;
+```
+
+Do not grant `audit_owner` membership, database superuser, or schema `CREATE` privileges to the
+runtime role. Restrict who can obtain the maintenance credential, alert on `ALTER TABLE`,
+`DROP TABLE`, `TRUNCATE`, and changes to audit triggers, and test the grants after migrations. An
+optional `BEFORE TRUNCATE FOR EACH STATEMENT` trigger can make accidental owner-side truncation
+fail loudly, but it is still owner-disableable; `REVOKE TRUNCATE` plus owner separation is the
+authoritative control.
+
 ### Query API v2
 
 `AuditService.query()` returns deterministic newest-first pages ordered by `(created_at, id)`. Prefer cursor pagination for feeds:
@@ -341,7 +376,14 @@ if (page.hasMore) {
 
 ### Nested writes
 
-Nested relation writes are not fully audited in v0.3.0. When a tracked model mutation contains a nested write such as `posts.create`, the extension records the top-level model mutation and emits one logger warning per model/relation. Full nested-write auditing is planned for a later release.
+Nested relation mutations are not synthesized into child audit rows. In `atomic-required`, a nested
+`create`, `connect`, `disconnect`, `update`, `upsert`, `delete`, `set`, or corresponding `*Many`
+operation targeting a tracked related model is rejected before the business query. Express it as
+explicit related-model mutations inside `withAuditTransaction()` so each record receives an atomic
+audit row. Relations whose target model is intentionally outside the tracking configuration do not
+trigger this guard when Prisma exposes the relation metadata. If that metadata is unavailable, the
+atomic path fails conservatively. `best-effort` preserves the top-level mutation and emits one
+warning per model/relation, so it is not authoritative evidence for the nested changes.
 
 ### Transaction Model
 
@@ -372,7 +414,8 @@ await prisma.withAuditTransaction(
 ```
 
 The helper forwards `timeout`, `maxWait`, and `isolationLevel`, preserves the transaction callback
-and result types, rejects nested helper calls, and uses no private Prisma API. In
+and result types, rejects nested helper calls, and uses no private Prisma API. `timeout` and
+`maxWait`, when supplied, must be positive integers. In
 `atomic-required`, pre-read, post-read, audit INSERT, and audit context construction errors are
 fail-closed. A tracked mutation outside the helper throws before its business query runs.
 Single-row update, delete, and upsert operations lock the target row and refresh the preimage before

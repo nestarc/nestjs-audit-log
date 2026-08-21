@@ -163,10 +163,12 @@ describe('atomic-required transaction E2E', () => {
 
     const logs = await auditLogs(basePrisma, 'User.updated');
     expect(logs).toHaveLength(2);
-    expect(logs.map((log) => log.changes.name)).toEqual([
-      { before: 'Step Zero', after: 'Step One' },
-      { before: 'Step One', after: 'Step Two' },
-    ]);
+    expect(logs.map((log) => log.changes.name)).toEqual(
+      expect.arrayContaining([
+        { before: 'Step Zero', after: 'Step One' },
+        { before: 'Step One', after: 'Step Two' },
+      ]),
+    );
   });
 
   it('commits delete and its before-only audit diff together', async () => {

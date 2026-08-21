@@ -4,7 +4,7 @@
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 4 구현 완료 — coordinated peer matrix CI 통과 후 Phase 5 착수 가능
+- 문서 상태: Phase 5 구현 완료 — coordinated peer matrix CI 통과 후 Phase 6 착수 가능
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적
@@ -642,15 +642,70 @@ git diff --check
 
 CSV/SIEM 전에 다음을 별도 이슈로 닫는다.
 
-- [ ] nested writes 미지원 범위를 좁히거나 원자적으로 기록한다.
-- [ ] 중첩 JSON PII redaction을 지원한다. 현재는 최상위 exact key 위주다:
+- [x] nested writes 미지원 범위를 좁히거나 원자적으로 기록한다.
+- [x] 중첩 JSON PII redaction을 지원한다. 현재는 최상위 exact key 위주다:
       `src/prisma/diff.ts:23-49`.
-- [ ] UPDATE/DELETE 외 TRUNCATE, table owner 우회, 권한 분리/REVOKE 운영 가이드를 추가한다.
-- [ ] retention flat prune의 trigger/RULE catalog 조회를 대상 table OID로 제한한다:
+- [x] UPDATE/DELETE 외 TRUNCATE, table owner 우회, 권한 분리/REVOKE 운영 가이드를 추가한다.
+- [x] retention flat prune의 trigger/RULE catalog 조회를 대상 table OID로 제한한다:
       `src/services/audit.service.ts:503-517`.
-- [ ] flat prune rollback, trigger 재활성, detach, dry-run, 경계 partition 보존을 실제 PostgreSQL로
+- [x] flat prune rollback, trigger 재활성, detach, dry-run, 경계 partition 보존을 실제 PostgreSQL로
       검증한다.
-- [ ] `olderThan`, timeout, maxWait 입력 유효성을 검사한다.
+- [x] `olderThan`, timeout, maxWait 입력 유효성을 검사한다.
+
+#### Phase 5 완료 기록 (2026-08-21)
+
+감사 제품의 기본 무결성 경계를 다음과 같이 보강했다.
+
+1. nested relation mutation을 자동 child audit으로 추측해 합성하지 않는다. `atomic-required`는
+   tracked related model을 대상으로 하는 `create/connect/disconnect/update/upsert/delete/set` 및
+   대응 `*Many` nested write를 business query 전에 fail-closed한다. 호출자는
+   `withAuditTransaction()` 안에서 명시적 related-model mutation으로 풀어 각 레코드 감사 행을
+   남긴다. Prisma 공개 DMMF에서 relation target을 확인할 수 있으면 tracking 범위 밖 모델은 guard
+   대상에서 제외하고, metadata가 없으면 원자 경로가 보수적으로 거부한다. `best-effort`는 기존
+   top-level 기록과 relation별 1회 경고 계약을 유지한다.
+2. `sensitiveFields`/`sensitiveFieldsByModel` exact key matching을 객체와 배열 전체에 재귀 적용한다.
+   자동 create/update/delete diff와 `AuditService.log()` metadata가 같은 immutable redaction
+   primitive를 사용하며, 일치한 key의 subtree 전체를 `[REDACTED]`로 대체한다.
+3. README Database hardening 가이드에 row trigger가 `TRUNCATE`를 막지 못한다는 한계, table
+   owner/superuser의 trigger 변경·비활성화·DDL 우회 가능성, runtime과 maintenance owner identity
+   분리, `SELECT/INSERT` allowlist와 `UPDATE/DELETE/TRUNCATE` REVOKE 예시, DDL/trigger 변경 감시를
+   추가했다. optional statement-level TRUNCATE trigger는 defense-in-depth일 뿐 권한 분리를
+   대체하지 않는다고 명시했다.
+4. flat prune enforcement 탐지는 이름만 조회하지 않고 `pg_trigger.tgrelid` 및
+   `pg_rewrite.ev_class`가 `to_regclass(target table)`과 같은지 확인한다. 다른 table의 같은 이름
+   trigger/RULE이 maintenance 경로를 오인시키지 않는다.
+5. `prune()`은 DB 조회 전에 유효한 `olderThan: Date`와 양의 정수 `timeoutMs`/`maxWaitMs`를
+   검사한다. `withAuditTransaction()`도 transaction을 열기 전에 양의 정수 `timeout`/`maxWait`를
+   검사한다.
+6. `test/e2e/retention-integrity.e2e-spec.ts`를 PostgreSQL release gate에 추가했다. 강제 DELETE
+   실패 시 flat prune의 행과 trigger 상태가 함께 rollback되는지, 정상 prune 뒤 trigger가 다시
+   활성인지, partition dry-run이 무변경인지, cutoff가 속한 경계 partition을 보존하는지, 완전히
+   만료된 partition만 detach되어 독립 table로 남는지를 검증한다.
+7. transaction 안의 여러 audit 행은 PostgreSQL `now()` 기본값 때문에 같은 `created_at`을 가질 수
+   있으므로 기존 multi-update E2E는 UUID tie-break 순서를 mutation 순서로 오해하지 않고 두 exact
+   diff transition의 집합을 결정적으로 검증하도록 안정화했다.
+
+검증 결과:
+
+```text
+npm test -- --runInBand
+Test Suites: 15 passed, 15 total
+Tests:       260 passed, 260 total
+
+npm run build
+성공
+
+npm run test:e2e
+Test Suites: 10 passed, 10 total
+Tests:       59 passed, 59 total
+
+git diff --check
+성공
+```
+
+로컬 PostgreSQL 검증 환경은 PostgreSQL 16.15, Node.js 24, NestJS 11, Prisma 7.9.1이다. 새
+retention suite는 기존 `npm run test:e2e`에 포함되므로 Nest 10/11 x Prisma 5/6/7 peer
+matrix의 release gate로 실행된다. 실제 merge 전 coordinated matrix CI 성공은 별도로 확인한다.
 
 ### Phase 6 — tenant-scoped streaming export 및 CSV
 

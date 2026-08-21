@@ -358,6 +358,7 @@ export class AuditService {
   }
 
   async prune(options: AuditPruneOptions): Promise<AuditPruneResult> {
+    this.validatePruneOptions(options);
     const client = options.client ?? this.options.prisma;
     const Prisma = this.Prisma;
     const relkindRows = await client.$queryRaw(
@@ -503,7 +504,9 @@ export class AuditService {
     const names = deriveAuditObjectNames(this.tableName);
     const triggerRows = await client.$queryRaw(
       Prisma.sql!`SELECT EXISTS (
-        SELECT 1 FROM pg_trigger WHERE tgname = ${names.deleteTrigger}
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = ${names.deleteTrigger}
+          AND tgrelid = to_regclass(${this.tableName})
       ) AS "exists"`,
     ) as Array<{ exists: boolean }>;
     const hasTrigger = triggerRows[0]?.exists === true;
@@ -511,7 +514,9 @@ export class AuditService {
       ? [{ exists: false }]
       : await client.$queryRaw(
           Prisma.sql!`SELECT EXISTS (
-            SELECT 1 FROM pg_rewrite WHERE rulename = ${names.deleteRule}
+            SELECT 1 FROM pg_rewrite
+            WHERE rulename = ${names.deleteRule}
+              AND ev_class = to_regclass(${this.tableName})
           ) AS "exists"`,
         ) as Array<{ exists: boolean }>;
     const hasRule = ruleRows[0]?.exists === true;
@@ -561,6 +566,28 @@ export class AuditService {
       deletedRows,
       dryRun: false,
     };
+  }
+
+  private validatePruneOptions(options: AuditPruneOptions): void {
+    if (
+      !options ||
+      !(options.olderThan instanceof Date) ||
+      !Number.isFinite(options.olderThan.getTime())
+    ) {
+      throw new TypeError(
+        '[@nestarc/audit-log] olderThan must be a valid Date.',
+      );
+    }
+    for (const [name, value] of [
+      ['timeoutMs', options.timeoutMs],
+      ['maxWaitMs', options.maxWaitMs],
+    ] as const) {
+      if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
+        throw new TypeError(
+          `[@nestarc/audit-log] ${name} must be a positive integer.`,
+        );
+      }
+    }
   }
 
   private resolveQueryTenantId(

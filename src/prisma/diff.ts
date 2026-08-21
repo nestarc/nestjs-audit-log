@@ -24,13 +24,48 @@ export function redactObject(
   obj: Record<string, unknown>,
   fields: string[],
 ): Record<string, unknown> {
-  const redacted = { ...obj };
-  for (const field of fields) {
-    if (Object.prototype.hasOwnProperty.call(redacted, field)) {
-      redacted[field] = '[REDACTED]';
-    }
+  const sensitiveFields = new Set(fields);
+  return redactNestedValue(obj, sensitiveFields) as Record<string, unknown>;
+}
+
+function redactNestedValue(
+  value: unknown,
+  sensitiveFields: ReadonlySet<string>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactNestedValue(item, sensitiveFields));
   }
-  return redacted;
+  if (value === null || typeof value !== 'object' || !isPlainObject(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+      key,
+      sensitiveFields.has(key)
+        ? '[REDACTED]'
+        : redactNestedValue(child, sensitiveFields),
+    ]),
+  );
+}
+
+function isPlainObject(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function redactFieldValue(
+  key: string,
+  value: unknown,
+  sensitiveFields: string[],
+): unknown {
+  if (sensitiveFields.includes(key)) {
+    return '[REDACTED]';
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  return redactNestedValue(value, new Set(sensitiveFields));
 }
 
 function stableStringify(value: unknown): string {
@@ -82,7 +117,7 @@ export function computeCreateChanges(
   const changes: Changes = {};
   for (const [key, value] of Object.entries(after)) {
     changes[key] = {
-      after: sensitiveFields.includes(key) ? '[REDACTED]' : value,
+      after: redactFieldValue(key, value, sensitiveFields),
     };
   }
   return changes;
@@ -101,8 +136,8 @@ export function computeUpdateChanges(
     }
     if (!isDeepEqual(before[key], value)) {
       changes[key] = {
-        before: sensitiveFields.includes(key) ? '[REDACTED]' : before[key],
-        after: sensitiveFields.includes(key) ? '[REDACTED]' : value,
+        before: redactFieldValue(key, before[key], sensitiveFields),
+        after: redactFieldValue(key, value, sensitiveFields),
       };
     }
   }
@@ -116,7 +151,7 @@ export function computeDeleteChanges(
   const changes: Changes = {};
   for (const [key, value] of Object.entries(before)) {
     changes[key] = {
-      before: sensitiveFields.includes(key) ? '[REDACTED]' : value,
+      before: redactFieldValue(key, value, sensitiveFields),
     };
   }
   return changes;

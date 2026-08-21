@@ -349,6 +349,51 @@ describe('createAuditExtension — query handlers', () => {
       expect(mockClient.$executeRaw).not.toHaveBeenCalled();
     });
 
+    it.each([
+      [{ timeout: 0 }, 'timeout'],
+      [{ timeout: 1.5 }, 'timeout'],
+      [{ maxWait: -1 }, 'maxWait'],
+    ])('rejects invalid transaction timing options: %s', async (options, message) => {
+      const { clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const transactionHost = { $transaction: jest.fn() };
+
+      await expect(
+        clientMethods.withAuditTransaction.call(
+          transactionHost,
+          async () => undefined,
+          options,
+        ),
+      ).rejects.toThrow(message);
+      expect(transactionHost.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects nested writes before the atomic business query', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const query = jest.fn();
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await expect(
+        clientMethods.withAuditTransaction.call(transactionHost, () =>
+          handlers.create({
+            model: 'User',
+            args: { data: { posts: { create: { title: 'Nested' } } } },
+            query,
+          }),
+        ),
+      ).rejects.toThrow('does not support nested writes');
+      expect(query).not.toHaveBeenCalled();
+      expect(txClient.$executeRaw).not.toHaveBeenCalled();
+    });
+
     it('fails closed when the atomic audit insert fails', async () => {
       const { handlers, clientMethods } = getHandlers({
         consistency: 'atomic-required',
@@ -624,7 +669,7 @@ describe('createAuditExtension — query handlers', () => {
       );
     });
 
-    it('does not warn for connect-only relation changes', async () => {
+    it('warns for connect-only relation changes that are absent from scalar diffs', async () => {
       const logger = {
         warn: jest.fn(),
         error: jest.fn(),
@@ -648,7 +693,7 @@ describe('createAuditExtension — query handlers', () => {
           }),
       );
 
-      expect(logger.warn).not.toHaveBeenCalledWith(
+      expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('nested write on User.posts'),
       );
     });

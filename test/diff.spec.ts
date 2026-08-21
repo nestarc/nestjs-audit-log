@@ -68,6 +68,30 @@ describe('computeCreateChanges', () => {
       password: { after: '[REDACTED]' },
     });
   });
+
+  it('redacts sensitive keys nested in JSON objects and arrays', () => {
+    const result = computeCreateChanges(
+      {
+        profile: {
+          contact: { email: 'alice@example.com' },
+          sessions: [{ token: 'one' }, { token: 'two' }],
+        },
+      },
+      ['email', 'token'],
+    );
+
+    expect(result).toEqual({
+      profile: {
+        after: {
+          contact: { email: '[REDACTED]' },
+          sessions: [
+            { token: '[REDACTED]' },
+            { token: '[REDACTED]' },
+          ],
+        },
+      },
+    });
+  });
 });
 
 describe('computeUpdateChanges', () => {
@@ -251,21 +275,31 @@ describe('getSensitiveFieldsFor', () => {
 });
 
 describe('redactObject', () => {
-  it('returns a redacted shallow copy without mutating the input', () => {
+  it('recursively redacts objects and arrays without mutating the input', () => {
+    const timestamp = new Date('2026-08-21T00:00:00.000Z');
     const input = {
       email: 'alice@test.com',
-      nested: { email: 'nested@test.com' },
+      nested: {
+        email: 'nested@test.com',
+        contacts: [{ email: 'array@test.com' }],
+      },
       token: null,
+      timestamp,
     };
 
     const result = redactObject(input, ['email', 'token']);
 
     expect(result).toEqual({
       email: '[REDACTED]',
-      nested: { email: 'nested@test.com' },
+      nested: {
+        email: '[REDACTED]',
+        contacts: [{ email: '[REDACTED]' }],
+      },
       token: '[REDACTED]',
+      timestamp,
     });
     expect(input.email).toBe('alice@test.com');
+    expect(input.nested.email).toBe('nested@test.com');
     expect(input.token).toBeNull();
   });
 });

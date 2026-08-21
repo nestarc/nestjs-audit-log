@@ -135,6 +135,8 @@ const ATOMIC_ARRAY_TRANSACTION_ERROR =
   '[@nestarc/audit-log] atomic-required does not support array $transaction([...]); use sequential mutations inside withAuditTransaction()';
 const NESTED_TRANSACTION_ERROR =
   '[@nestarc/audit-log] nested withAuditTransaction() calls are not supported';
+const NESTED_WRITE_ATOMIC_ERROR =
+  '[@nestarc/audit-log] atomic-required does not support nested writes to tracked related models; run explicit related-model mutations inside withAuditTransaction()';
 const AUDIT_LIFECYCLE_CONTEXT_ERROR =
   '[@nestarc/audit-log] withAuditLifecycle() must run inside withAuditTransaction()';
 const DEFAULT_MAX_BATCH_RECORDS = 1000;
@@ -654,7 +656,9 @@ const nestedWriteWarnings = new Set<string>();
 const nestedWriteOperatorKeys = new Set([
   'create',
   'createMany',
+  'connect',
   'connectOrCreate',
+  'disconnect',
   'update',
   'updateMany',
   'upsert',
@@ -667,18 +671,18 @@ export function _resetNestedWriteWarnings(): void {
   nestedWriteWarnings.clear();
 }
 
-function relationFieldNamesFor(
+function relationFieldsFor(
   model: string,
   Prisma: PrismaModuleLike['Prisma'],
-): Set<string> | undefined {
+): Map<string, string> | undefined {
   const fields = Prisma.dmmf?.datamodel?.models
     ?.find((candidate) => candidate.name === model)
     ?.fields;
   if (!fields) return undefined;
-  return new Set(
+  return new Map(
     fields
       .filter((field) => field.kind === 'object')
-      .map((field) => field.name),
+      .flatMap((field) => field.type ? [[field.name, field.type] as const] : []),
   );
 }
 
@@ -691,63 +695,83 @@ function hasNestedWriteOperator(value: unknown): boolean {
   );
 }
 
-function warnForNestedWritesInData(
+function nestedWriteRelationsInData(
   model: string,
-  operation: string,
   data: unknown,
   options: AuditExtensionOptions,
   Prisma: PrismaModuleLike['Prisma'],
-): void {
+): string[] {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    return;
+    return [];
   }
 
-  try {
-    const relationFields = relationFieldNamesFor(model, Prisma);
-    for (const [field, value] of Object.entries(
-      data as Record<string, unknown>,
-    )) {
-      if (relationFields && !relationFields.has(field)) {
-        continue;
-      }
-      if (!hasNestedWriteOperator(value)) {
-        continue;
-      }
-
-      const key = `${model}.${field}`;
-      if (nestedWriteWarnings.has(key)) {
-        continue;
-      }
-      nestedWriteWarnings.add(key);
-      (options.logger ?? console).warn(
-        `[@nestarc/audit-log] nested write on ${key} is not audited — ` +
-          `only the top-level ${model} mutation is recorded. ` +
-          '(full nested-write auditing is planned for 0.3.0)',
-      );
+  const relationFields = relationFieldsFor(model, Prisma);
+  const relations: string[] = [];
+  for (const [field, value] of Object.entries(data as Record<string, unknown>)) {
+    const relatedModel = relationFields?.get(field);
+    if (relationFields && !relatedModel) {
+      continue;
     }
-  } catch (error) {
-    reportAuditError(options, error, {
-      phase: 'context',
-      model,
-      operation,
-    });
+    if (!hasNestedWriteOperator(value)) {
+      continue;
+    }
+    if (
+      relatedModel &&
+      !shouldTrackModel(
+        relatedModel,
+        options.trackedModels,
+        options.ignoredModels,
+      )
+    ) {
+      continue;
+    }
+    relations.push(`${model}.${field}`);
   }
+  return relations;
 }
 
-function warnForNestedWrites(
+function enforceNestedWriteContract(
   model: string,
   operation: string,
   args: any,
   options: AuditExtensionOptions,
   Prisma: PrismaModuleLike['Prisma'],
 ): void {
-  if (operation === 'upsert') {
-    warnForNestedWritesInData(model, operation, args?.create, options, Prisma);
-    warnForNestedWritesInData(model, operation, args?.update, options, Prisma);
-    return;
-  }
+  try {
+    const relations = operation === 'upsert'
+      ? [
+          ...nestedWriteRelationsInData(model, args?.create, options, Prisma),
+          ...nestedWriteRelationsInData(model, args?.update, options, Prisma),
+        ]
+      : nestedWriteRelationsInData(model, args?.data, options, Prisma);
+    const uniqueRelations = Array.from(new Set(relations));
+    if (uniqueRelations.length === 0) return;
 
-  warnForNestedWritesInData(model, operation, args?.data, options, Prisma);
+    if (options.consistency === 'atomic-required') {
+      throw new Error(
+        `${NESTED_WRITE_ATOMIC_ERROR}: ${uniqueRelations.join(', ')}`,
+      );
+    }
+
+    for (const key of uniqueRelations) {
+      if (nestedWriteWarnings.has(key)) continue;
+      nestedWriteWarnings.add(key);
+      (options.logger ?? console).warn(
+        `[@nestarc/audit-log] nested write on ${key} is not audited — ` +
+          `only the top-level ${model} mutation is recorded. ` +
+          'Use explicit related-model mutations inside withAuditTransaction() for authoritative records.',
+      );
+    }
+  } catch (error) {
+    if (options.consistency === 'atomic-required') throw error;
+    reportAuditError(options, error, { phase: 'context', model, operation });
+  }
+}
+
+function validatePositiveInteger(value: number | undefined, name: string): void {
+  if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
+    throw new TypeError(`[@nestarc/audit-log] ${name} must be a positive integer`);
+  }
 }
 
 function tryInjectPk(
@@ -1044,6 +1068,8 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           if (transactionContext.getStore()) {
             throw new Error(NESTED_TRANSACTION_ERROR);
           }
+          validatePositiveInteger(transactionOptions?.timeout, 'timeout');
+          validatePositiveInteger(transactionOptions?.maxWait, 'maxWait');
           return this.$transaction(
             (tx: any) =>
               transactionContext.run(tx, () =>
@@ -1100,7 +1126,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
-            warnForNestedWrites(model, 'create', args, options, Prisma);
+            enforceNestedWriteContract(model, 'create', args, options, Prisma);
             const pkInjected = tryInjectPk(args, pkField, options, {
               model,
               operation: 'create',
@@ -1186,7 +1212,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
             const delegate = (auditClient as any)[delegateName];
-            warnForNestedWrites(model, 'update', args, options, Prisma);
+            enforceNestedWriteContract(model, 'update', args, options, Prisma);
             const pkInjected = tryInjectPk(args, pkField, options, {
               model,
               operation: 'update',
@@ -1402,7 +1428,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
             const delegate = (auditClient as any)[delegateName];
-            warnForNestedWrites(model, 'upsert', args, options, Prisma);
+            enforceNestedWriteContract(model, 'upsert', args, options, Prisma);
             const pkInjected = tryInjectPk(args, pkField, options, {
               model,
               operation: 'upsert',

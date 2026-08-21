@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   business query executes. Nested `withAuditTransaction()` calls are not supported.
 - Atomic array `$transaction([...])`, `createMany`, and `updateMany` calls are rejected before
   mutation. Use sequential single-record operations inside `withAuditTransaction()`.
+- Atomic nested writes targeting tracked related models are rejected before mutation. Use explicit
+  related-model mutations inside `withAuditTransaction()`.
 
 ### Changed
 
@@ -45,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `recordsAudited: false`; per-record `deleteMany` rows identify their batch origin and size.
 - `createManyAndReturn` and `updateManyAndReturn` are explicitly outside the automatic tracking
   contract for both consistency modes.
+- Sensitive keys are redacted recursively within nested JSON objects and arrays in automatic diffs
+  and manual metadata.
+- Flat-prune trigger/RULE discovery is scoped to the target table OID, preventing same-named catalog
+  objects on another table from selecting the wrong maintenance path.
+- `olderThan`, transaction `timeout`/`maxWait`, and prune `timeoutMs`/`maxWaitMs` are validated before
+  database work starts.
+- Retention and database-hardening guidance now covers rollback-safe enforcement restoration,
+  `TRUNCATE`, table-owner/superuser bypass, and runtime/maintenance role separation.
 
 ## [0.3.0] - 2026-08-02
 
