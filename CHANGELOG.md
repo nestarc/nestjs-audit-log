@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `AuditService.scan()` for explicit tenant-scoped or intentional all-tenant forward scans with
+  resumable `(created_at, id)` checkpoints, a fixed high-watermark, bounded batches, filters, and
+  `AbortSignal` cancellation. The scan path never runs `COUNT(*)`.
+- `AuditService.exportCsv()` as a backpressure-aware Node.js `Readable`, with a published CSV `v1`
+  column schema, RFC 4180 escaping and CRLF records, canonical JSON, optional UTF-8 BOM, and Excel
+  formula-injection defense.
+- PostgreSQL streaming-export coverage for tenant isolation, checkpoint resume, high-watermark
+  stability, filtering, and CSV serialization.
 - `withAuditLifecycle()` as the same-transaction integration point for `@nestarc/soft-delete`,
   including rewritten outer-operation suppression so each affected record receives exactly one
   `Model.softDeleted`, `Model.restored`, or `Model.purged` row.

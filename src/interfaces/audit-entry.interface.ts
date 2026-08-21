@@ -44,6 +44,36 @@ export interface AuditGetByIdOptions {
   allTenants?: boolean;
 }
 
+export type AuditExportScope =
+  | { tenantId: string; allTenants?: never }
+  | { allTenants: true; tenantId?: never };
+
+export type AuditScanOptions = AuditExportScope & {
+  action?: string;
+  actorId?: string;
+  targetType?: string;
+  targetId?: string;
+  from?: Date;
+  to?: Date;
+  batchSize?: number;
+  after?: string;
+  until?: string;
+  signal?: AbortSignal;
+};
+
+export interface AuditScanPage {
+  entries: AuditEntry[];
+  checkpoint: string | null;
+  highWatermark: string;
+}
+
+export type AuditCsvColumnVersion = 'v1';
+
+export type AuditCsvOptions = AuditScanOptions & {
+  columns?: AuditCsvColumnVersion;
+  includeBom?: boolean;
+};
+
 export interface ManualAuditLogInput {
   action: string;
   targetId?: string;

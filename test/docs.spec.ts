@@ -144,6 +144,20 @@ describe('documentation gates', () => {
     expect(readme).not.toContain('reserved for future transaction-aware routing');
   });
 
+  it('documents forward tenant-scoped scan and streaming CSV contracts', () => {
+    const readme = read('README.md');
+    const changelog = read('CHANGELOG.md');
+
+    expect(readme).toContain('### Streaming export and CSV');
+    expect(readme).toContain('auditService.scan({');
+    expect(readme).toContain('page.highWatermark');
+    expect(readme).toContain('auditService.exportCsv({');
+    expect(readme).toContain('AUDIT_CSV_COLUMNS_V1');
+    expect(readme).toContain('host-application responsibilities');
+    expect(changelog).toContain('`AuditService.scan()`');
+    expect(changelog).toContain('`AuditService.exportCsv()`');
+  });
+
   it('keeps the design document aligned with v0.2.0 query, storage, and tenancy contracts', () => {
     const design = read('docs/2026-04-04-audit-log-design.md');
 

@@ -3,6 +3,7 @@ export { AuditLogModule } from './audit-log.module';
 
 // Service
 export { AuditService } from './services/audit.service';
+export { AUDIT_CSV_COLUMNS_V1 } from './services/audit-csv';
 export type {
   AuditPruneOptions,
   AuditPruneResult,
@@ -39,9 +40,14 @@ export { AuditInterceptor } from './interceptors/audit.interceptor';
 export type { AuditActor, ActorExtractor } from './interfaces/actor.interface';
 export type {
   AuditEntry,
+  AuditCsvColumnVersion,
+  AuditCsvOptions,
+  AuditExportScope,
   AuditGetByIdOptions,
   AuditQueryOptions,
   AuditQueryResult,
+  AuditScanOptions,
+  AuditScanPage,
   ManualAuditLogInput,
 } from './interfaces/audit-entry.interface';
 export type {

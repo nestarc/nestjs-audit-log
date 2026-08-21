@@ -4,7 +4,7 @@
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 5 구현 완료 — coordinated peer matrix CI 통과 후 Phase 6 착수 가능
+- 문서 상태: Phase 6 구현 완료 — coordinated peer matrix CI 통과 후 Phase 7 착수 가능
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적
@@ -743,13 +743,68 @@ scan(options: AuditScanOptions): AsyncIterable<AuditScanPage>;
 
 원칙:
 
-- export/stream에서는 ambient tenant scope를 허용하지 않는다.
-- `tenantId` 또는 의도적인 `allTenants: true`를 타입과 런타임 모두에서 강제한다.
-- COUNT를 실행하지 않는다.
-- high-watermark를 고정하여 export 도중 삽입된 행 때문에 범위가 흔들리지 않게 한다.
-- CSV는 전체 배열 반환이 아니라 backpressure-aware `Readable`/serializer로 제공한다.
-- RFC 4180 escaping, versioned columns, canonical JSON, Excel formula injection 방어를 포함한다.
-- HTTP endpoint, 파일 저장, S3 업로드 job은 host application의 책임으로 둔다.
+- [x] export/stream에서는 ambient tenant scope를 허용하지 않는다.
+- [x] `tenantId` 또는 의도적인 `allTenants: true`를 타입과 런타임 모두에서 강제한다.
+- [x] COUNT를 실행하지 않는다.
+- [x] high-watermark를 고정하여 export 도중 삽입된 행 때문에 범위가 흔들리지 않게 한다.
+- [x] CSV는 전체 배열 반환이 아니라 backpressure-aware `Readable`/serializer로 제공한다.
+- [x] RFC 4180 escaping, versioned columns, canonical JSON, Excel formula injection 방어를 포함한다.
+- [x] HTTP endpoint, 파일 저장, S3 업로드 job은 host application의 책임으로 둔다.
+
+#### Phase 6 완료 기록 (2026-08-21)
+
+tenant-scoped streaming export와 CSV 계약을 다음과 같이 확정했다.
+
+1. `AuditService.scan()`은 `(created_at, id)` 오름차순 `AsyncIterable<AuditScanPage>`를 제공한다.
+   시작 시 필터에 일치하는 최대 key를 `highWatermark`로 한 번 고정하고 모든 페이지에 같은 값을
+   반환한다. 각 비어 있지 않은 페이지의 마지막 key가 `checkpoint`이며 `after`는 exclusive,
+   `until`은 inclusive다. 원래 high-watermark를 `until`로 전달하면 같은 bounded run을 재개한다.
+2. scan/export는 ambient tenant resolver를 전혀 사용하지 않는다. 공개 union type과 runtime
+   validation 모두 정확히 하나의 `tenantId` 또는 `allTenants: true`를 요구하며 빈 tenant,
+   상호 중복, `allTenants: false`를 SQL 전에 거부한다.
+3. scan은 `COUNT(*)` 없이 high-watermark 조회 1회와 bounded keyset page query만 실행한다.
+   `batchSize` 기본값은 500, 허용 범위는 1~10,000이다. action wildcard, actor, target,
+   from/to filter와 `AbortSignal`을 지원하며 빈 범위는 null checkpoint의 빈 페이지 하나를 준다.
+4. `AuditService.exportCsv()`는 scan을 직접 소비하는 Node.js `Readable`이다. 전체 entry 배열을
+   만들지 않고 async generator와 stream backpressure에 따라 header/row chunk를 생성한다.
+   optional UTF-8 BOM을 지원한다.
+5. CSV 열 계약은 `v1`으로 고정하고 `AUDIT_CSV_COLUMNS_V1`을 공개 export했다. 첫 열
+   `schemaVersion`도 각 row에 `v1`을 기록한다. RFC 4180 quoting, CRLF row delimiter, 재귀 key-sort
+   canonical JSON, leading whitespace를 포함한 `=`, `+`, `-`, `@` Excel formula marker의 apostrophe
+   prefix 방어를 적용했다.
+6. HTTP endpoint/authorization/header, 파일 및 object storage 기록, scheduler, retry, ACK 이후
+   checkpoint 영속화는 host application 책임으로 유지했다. README 예제는 delivery ACK 뒤에만
+   checkpoint를 저장하고 동일 filter 및 original high-watermark로 재개하도록 명시한다.
+7. PostgreSQL release gate 4건을 추가해 tenant leak 없는 forward scan, export 중 신규 상한 초과
+   row 제외, checkpoint+until 재개, all-tenant filter, 실제 CSV canonicalization/escaping/formula
+   defense를 검증한다. 단위 테스트는 empty scan, runtime scope/입력 검증, cancellation, BOM,
+   serializer 세부 계약을 고정한다.
+
+검증 결과:
+
+```text
+npm test -- --runInBand
+Test Suites: 16 passed, 16 total
+Tests:       277 passed, 277 total
+
+npm run build
+성공
+
+npm run test:e2e -- --runTestsByPath test/e2e/phase6-streaming-export.e2e-spec.ts
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+
+npm run test:e2e
+Test Suites: 11 passed, 11 total
+Tests:       63 passed, 63 total
+
+git diff --check
+성공
+```
+
+로컬 PostgreSQL 검증 환경은 PostgreSQL 16.15, Node.js 24, NestJS 11, Prisma 7.9.1이다. 새
+E2E는 기존 `npm run test:e2e`에 포함되므로 Nest 10/11 x Prisma 5/6/7 peer matrix의 release
+gate로 실행된다. 실제 merge 전 coordinated matrix CI 성공은 별도로 확인한다.
 
 ### Phase 7 — durable log stream core와 adapter
 

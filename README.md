@@ -374,6 +374,54 @@ if (page.hasMore) {
 
 `includeTotal: false` skips the `COUNT(*)` query and omits `total` from the result. Cursors do not encode filters; keep the same filter set on each page unless you intentionally want a new filtered scan below the cursor boundary. `getById(id, { tenantId })` returns one audit row within the same tenant scoping rules; use `allTenants: true` only for deliberately authorized cross-tenant admin reads.
 
+### Streaming export and CSV
+
+Use `scan()` for forward, checkpointed export rather than adapting the newest-first `query()` API.
+Export never uses ambient tenant context: pass exactly one of `tenantId` or the deliberately
+cross-tenant `allTenants: true`. The scan runs no `COUNT(*)` query.
+
+```typescript
+let checkpoint: string | undefined;
+
+for await (const page of auditService.scan({
+  tenantId: 'tenant-1',
+  action: 'invoice.*',
+  from: new Date('2026-08-01T00:00:00.000Z'),
+  batchSize: 500,
+  after: checkpoint,
+  signal: abortController.signal,
+})) {
+  await deliver(page.entries);
+  checkpoint = page.checkpoint ?? checkpoint; // persist only after delivery is acknowledged
+  await saveCheckpoint(checkpoint, page.highWatermark);
+}
+```
+
+Entries are ordered by `(created_at, id)` ascending. At scan start, `highWatermark` is fixed to the
+greatest matching row, so newer rows do not extend an in-progress export. To resume the exact same
+bounded run, pass the saved `checkpoint` as `after` and the saved high-watermark as `until`. Keep the
+same filters when resuming; checkpoints intentionally do not encode filters. `batchSize` defaults to
+500 and must be between 1 and 10,000. An empty scan yields one empty page with a null checkpoint.
+
+`exportCsv()` consumes the same scan primitive and returns a backpressure-aware Node.js `Readable`:
+
+```typescript
+const csv = auditService.exportCsv({
+  tenantId: 'tenant-1',
+  columns: 'v1',
+  includeBom: true, // optional; useful for some spreadsheet clients
+  batchSize: 500,
+});
+
+csv.pipe(httpResponse);
+```
+
+CSV `v1` columns are exported by `AUDIT_CSV_COLUMNS_V1` and begin with a `schemaVersion` field. Rows
+use RFC 4180 quoting and CRLF delimiters; `changes` and `metadata` use recursively key-sorted
+canonical JSON. Text cells beginning with an Excel formula marker (`=`, `+`, `-`, or `@`, including
+leading whitespace) receive an apostrophe prefix. HTTP authorization and headers, files, S3/object
+storage, scheduling, retry, and checkpoint persistence remain host-application responsibilities.
+
 ### Nested writes
 
 Nested relation mutations are not synthesized into child audit rows. In `atomic-required`, a nested
@@ -508,6 +556,7 @@ them from the business mutation.
 | `query()` / `getById()` with explicit `tenantId` | Scopes to that tenant |
 | `query()` / `getById()` with `allTenants: true` | Omits tenant filtering for authorized cross-tenant reads |
 | `query()` / `getById()` with `tenantRequired: true` and no tenant | Throws unless `tenantId` or `allTenants` is explicit |
+| `scan()` / `exportCsv()` | Never uses ambient scope; requires exactly one of explicit `tenantId` or `allTenants: true` |
 
 `tenantId` and `allTenants` are mutually exclusive; the thrown error includes `tenantId and allTenants are mutually exclusive`. Without `tenantRequired`, an ambient query with no tenant context is allowed but logs a one-time warning because it is unscoped.
 

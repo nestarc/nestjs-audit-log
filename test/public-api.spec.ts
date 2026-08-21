@@ -1,5 +1,6 @@
 import {
   AuditActorMiddleware,
+  AUDIT_CSV_COLUMNS_V1,
   AuditInterceptor,
   AuditReason,
   AUDIT_REASON_KEY,
@@ -9,6 +10,7 @@ import {
 } from '../src';
 import type {
   AuditDatabaseMapping,
+  AuditCsvOptions,
   AuditGetByIdOptions,
   AuditExtensionOptions,
   AuditErrorContext,
@@ -19,6 +21,8 @@ import type {
   AuditPruneResult,
   AuditTableSQLOptions,
   AuditQueryResult,
+  AuditScanOptions,
+  AuditScanPage,
   EnsurePartitionsOptions,
 } from '../src';
 
@@ -95,6 +99,20 @@ describe('public API exports', () => {
 
     expect(getByIdOptions.tenantId).toBe('tenant-1');
     expect(queryResult.nextCursor).toBeNull();
+  });
+
+  it('exports tenant-scoped scan and versioned CSV types', () => {
+    const scan: AuditScanOptions = { tenantId: 'tenant-1', batchSize: 100 };
+    const csv: AuditCsvOptions = { allTenants: true, columns: 'v1' };
+    const page: AuditScanPage = {
+      entries: [],
+      checkpoint: null,
+      highWatermark: 'checkpoint',
+    };
+    expect(scan.tenantId).toBe('tenant-1');
+    expect(csv.columns).toBe('v1');
+    expect(page.entries).toEqual([]);
+    expect(AUDIT_CSV_COLUMNS_V1[0]).toBe('schemaVersion');
   });
 
   it('exports experimental transaction audit option type', () => {

@@ -1,7 +1,8 @@
 import { AuditService } from '../src/services/audit.service';
 import { AuditContext } from '../src/services/audit-context';
 import { AuditLogModuleOptions } from '../src/interfaces/audit-log-options.interface';
-import { encodeAuditCursor } from '../src/services/audit-cursor';
+import { AuditScanPage } from '../src/interfaces/audit-entry.interface';
+import { decodeAuditCursor, encodeAuditCursor } from '../src/services/audit-cursor';
 
 jest.mock('@prisma/client', () => ({
   Prisma: {
@@ -639,6 +640,117 @@ describe('AuditService', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('query() executed without tenant scope'),
       );
+    });
+  });
+
+  describe('scan() and exportCsv()', () => {
+    const entry = (id: string, cursorTs: string, action = 'user.created') => ({
+      id,
+      tenantId: 'tenant-1',
+      actorId: null,
+      actorType: 'system',
+      actorIp: null,
+      action,
+      targetType: 'User',
+      targetId: id,
+      source: 'manual' as const,
+      changes: null,
+      metadata: null,
+      result: 'success' as const,
+      createdAt: new Date(cursorTs),
+      cursorTs,
+    });
+
+    it('streams forward pages under one fixed high-watermark without COUNT', async () => {
+      const first = entry(uuid1, '2026-06-11T03:14:15.000001Z');
+      const second = entry(uuid2, '2026-06-11T03:14:16.000001Z');
+      const third = entry(uuid3, '2026-06-11T03:14:17.000001Z');
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([{ id: uuid3, cursorTs: third.cursorTs }])
+        .mockResolvedValueOnce([first, second, third])
+        .mockResolvedValueOnce([third]);
+
+      const pages: AuditScanPage[] = [];
+      for await (const page of service.scan({ tenantId: 'tenant-1', batchSize: 2 })) {
+        pages.push(page);
+      }
+
+      expect(pages.map((page) => page.entries.map((item) => item.id))).toEqual([
+        [uuid1, uuid2],
+        [uuid3],
+      ]);
+      expect(pages[0].checkpoint).toBe(
+        encodeAuditCursor(second.cursorTs, uuid2),
+      );
+      expect(pages[0].highWatermark).toBe(pages[1].highWatermark);
+      expect(pages[0].highWatermark).toBe(
+        encodeAuditCursor(third.cursorTs, uuid3),
+      );
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(3);
+      expect('cursorTs' in pages[0].entries[0]).toBe(false);
+      const statements = mockPrisma.$queryRaw.mock.calls.map(
+        (call: any[]) => Array.from(call[0].strings as readonly string[]).join(''),
+      );
+      expect(statements.join('\n')).not.toContain('COUNT(');
+      expect(statements).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('ORDER BY created_at ASC, id ASC'),
+        ]),
+      );
+    });
+
+    it('yields one empty page with a resumable watermark for an empty scan', async () => {
+      mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+      const pages: AuditScanPage[] = [];
+      for await (const page of service.scan({ allTenants: true })) pages.push(page);
+      expect(pages).toHaveLength(1);
+      expect(pages[0]).toMatchObject({ entries: [], checkpoint: null });
+      expect(pages[0].highWatermark).toEqual(expect.any(String));
+      expect(() => decodeAuditCursor(pages[0].highWatermark)).not.toThrow();
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      [{}, 'exactly one of tenantId or allTenants'],
+      [{ tenantId: 'tenant-1', allTenants: true }, 'exactly one of tenantId or allTenants'],
+      [{ tenantId: '' }, 'tenantId must be a non-empty string'],
+      [{ allTenants: false }, 'allTenants must be true'],
+      [{ allTenants: true, batchSize: 0 }, 'batchSize must be an integer between 1 and 10000'],
+      [{ allTenants: true, from: new Date('invalid') }, 'from must be a valid Date'],
+    ])('rejects invalid explicit export scope/options %#', (options, message) => {
+      expect(() => service.scan(options as any)).toThrow(message);
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('honors an already-aborted signal before querying', () => {
+      const controller = new AbortController();
+      controller.abort('stop');
+      expect(() => service.scan({ allTenants: true, signal: controller.signal }))
+        .toThrow(expect.objectContaining({ name: 'AbortError' }));
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-boolean CSV BOM option before creating a stream', () => {
+      expect(() =>
+        service.exportCsv({ allTenants: true, includeBom: 'yes' } as any),
+      ).toThrow('includeBom must be a boolean');
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('returns a UTF-8 Readable with optional BOM, header, and streamed rows', async () => {
+      const row = entry(uuid1, '2026-06-11T03:14:15.000001Z', '=formula');
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([{ id: uuid1, cursorTs: row.cursorTs }])
+        .mockResolvedValueOnce([row]);
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of service.exportCsv({ tenantId: 'tenant-1', includeBom: true })) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const csv = Buffer.concat(chunks).toString('utf8');
+      expect(csv.startsWith('\uFEFFschemaVersion,id,tenantId')).toBe(true);
+      expect(csv).toContain("'=formula");
+      expect(csv.endsWith('\r\n')).toBe(true);
     });
   });
 
