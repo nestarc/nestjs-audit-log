@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-21
+
 ### Added
 
 - `AuditStreamRunner`, a host-scheduled one-shot durable tailer with at-least-once delivery,
