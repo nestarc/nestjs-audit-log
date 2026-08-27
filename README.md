@@ -673,12 +673,18 @@ npm run build
 # Unit tests
 npm test
 
-# E2E tests (starts Docker PostgreSQL automatically)
+# One-command E2E (waits for PostgreSQL and always runs teardown)
 npm run test:e2e:full
 
-# Cleanup
+# Manual lifecycle for keeping PostgreSQL running between commands
+npm run test:e2e:setup
+npm run test:e2e
 npm run test:e2e:teardown
 ```
+
+`test:e2e:full` runs teardown after success, test failure, or an interrupt. The individual
+setup, test, and teardown commands remain available for debugging;
+`test:e2e:setup` intentionally leaves PostgreSQL running until teardown.
 
 ## License
 
