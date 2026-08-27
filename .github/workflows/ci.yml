@@ -51,7 +51,12 @@ jobs:
         run: npm run build
 
       - name: Unit tests
+        if: matrix.node-version != '24'
         run: npm test
+
+      - name: Unit tests with coverage
+        if: matrix.node-version == '24'
+        run: npm run test:cov -- --runInBand
 
       - name: Push test schema
         run: npx prisma db push
