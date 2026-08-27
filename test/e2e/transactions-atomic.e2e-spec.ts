@@ -645,8 +645,7 @@ function createLifecycleDeleteRewrite(
   targetId: string,
   callback: (tx: any) => Promise<any>,
 ): any {
-  let lifecycleClient: any;
-  lifecycleClient = client.$extends({
+  const lifecycleClient: any = client.$extends({
     name: '@nestarc/audit-log-e2e-delete-lifecycle-rewrite',
     query: {
       user: {
@@ -678,8 +677,7 @@ function createLifecycleDeleteManyRewrite(
   targetIds: string[],
   callback: (tx: any) => Promise<any>,
 ): any {
-  let lifecycleClient: any;
-  lifecycleClient = client.$extends({
+  const lifecycleClient: any = client.$extends({
     name: '@nestarc/audit-log-e2e-delete-many-lifecycle-rewrite',
     query: {
       user: {

@@ -47,6 +47,14 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Lint
+        if: matrix.node-version == '24'
+        run: npm run lint
+
+      - name: Typecheck
+        if: matrix.node-version == '24'
+        run: npm run typecheck
+
       - name: Build
         run: npm run build
 

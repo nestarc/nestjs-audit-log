@@ -9,7 +9,6 @@ describe('@NoAudit()', () => {
       handler() {}
     }
 
-    const metadata = Reflect.getMetadata(NO_AUDIT_KEY, new TestController().handler);
     // SetMetadata sets on the method descriptor
     const meta = Reflect.getMetadata(NO_AUDIT_KEY, TestController.prototype.handler);
     expect(meta).toBe(true);

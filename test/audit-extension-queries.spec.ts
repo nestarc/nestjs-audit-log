@@ -51,7 +51,7 @@ function getHandlers(
 ) {
   createAuditExtension({ consistency: 'best-effort', ...options });
   const mockClient = buildMockClient();
-  const extended = capturedFactory(mockClient);
+  capturedFactory(mockClient);
 
   // extended is the result of client.$extends({ query: { $allModels: { ... } } })
   // We need to extract the handlers from the $extends call
@@ -1330,7 +1330,7 @@ describe('createAuditExtension — query handlers', () => {
     });
 
     it('handles create when result has no PK value', async () => {
-      const { handlers, mockClient } = getHandlers({ trackedModels: ['User'] });
+      const { handlers } = getHandlers({ trackedModels: ['User'] });
       const created = { name: 'Alice' }; // no id field
       const mockQuery = jest.fn().mockResolvedValue(created);
 

@@ -3,7 +3,6 @@ import {
   computeUpdateChanges,
   computeDeleteChanges,
   shouldTrackModel,
-  isDeepEqual,
   getSensitiveFieldsFor,
   redactObject,
 } from '../src/prisma/diff';
@@ -174,7 +173,6 @@ describe('computeUpdateChanges', () => {
   });
 
   it('treats identical Date instances as unchanged', () => {
-    const date = new Date('2026-01-01');
     const result = computeUpdateChanges(
       { createdAt: new Date('2026-01-01') },
       { createdAt: new Date('2026-01-01') },

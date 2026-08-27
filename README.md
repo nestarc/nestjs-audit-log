@@ -670,6 +670,10 @@ npm run build
 ### Run tests
 
 ```bash
+# Static quality gates
+npm run lint
+npm run typecheck
+
 # Unit tests
 npm test
 
