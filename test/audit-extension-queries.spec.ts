@@ -573,6 +573,442 @@ describe('createAuditExtension — query handlers', () => {
       });
     });
 
+    it('does not suppress a later delete after a lifecycle callback fails', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const deleted = { id: 'u1', name: 'Alice' };
+      txClient.user.findFirst.mockResolvedValue(deleted);
+      const lifecycleError = new Error('lifecycle failed before mutation');
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await expect(
+          handlers.delete({
+            model: 'User',
+            args: { where: { id: deleted.id } },
+            query: () =>
+              clientMethods.withAuditLifecycle(
+                {
+                  action: 'User.softDeleted',
+                  suppressOuterOperation: { model: 'User', operation: 'delete' },
+                },
+                async () => {
+                  throw lifecycleError;
+                },
+              ),
+          }),
+        ).rejects.toBe(lifecycleError);
+
+        await handlers.delete({
+          model: 'User',
+          args: { where: { id: deleted.id } },
+          query: jest.fn().mockResolvedValue(deleted),
+        });
+      });
+
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw.mock.calls[0].slice(1)[4]).toBe(
+        'User.deleted',
+      );
+    });
+
+    it('does not suppress a later deleteMany after a lifecycle callback fails', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const records = [
+        { id: 'u1', name: 'Alice' },
+        { id: 'u2', name: 'Bob' },
+      ];
+      txClient.user.findMany.mockResolvedValue(records);
+      txClient.user.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(records.find((record) => record.id === where.id)),
+      );
+      const lifecycleError = new Error('lifecycle failed before mutation');
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await expect(
+          handlers.deleteMany({
+            model: 'User',
+            args: { where: { id: { in: records.map((record) => record.id) } } },
+            query: () =>
+              clientMethods.withAuditLifecycle(
+                {
+                  action: 'User.softDeleted',
+                  suppressOuterOperation: {
+                    model: 'User',
+                    operation: 'deleteMany',
+                  },
+                },
+                async () => {
+                  throw lifecycleError;
+                },
+              ),
+          }),
+        ).rejects.toBe(lifecycleError);
+
+        await handlers.deleteMany({
+          model: 'User',
+          args: { where: { id: { in: records.map((record) => record.id) } } },
+          query: jest.fn().mockResolvedValue({ count: records.length }),
+        });
+      });
+
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(2);
+      expect(
+        txClient.$executeRaw.mock.calls.map((call: any[]) => call.slice(1)[4]),
+      ).toEqual(['User.deleted', 'User.deleted']);
+    });
+
+    it('suppresses only the matching outer delete after a successful lifecycle mutation', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const before = { id: 'u1', name: 'Alice', deletedAt: null };
+      const after = {
+        ...before,
+        deletedAt: new Date('2026-08-27T00:00:00.000Z'),
+      };
+      txClient.user.findFirst
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(before)
+        .mockResolvedValueOnce(after);
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, () =>
+        handlers.delete({
+          model: 'User',
+          args: { where: { id: before.id } },
+          query: () =>
+            clientMethods.withAuditLifecycle(
+              {
+                action: 'User.softDeleted',
+                metadata: { lifecycle: 'soft-delete' },
+                suppressOuterOperation: { model: 'User', operation: 'delete' },
+              },
+              () =>
+                handlers.update({
+                  model: 'User',
+                  args: {
+                    where: { id: before.id },
+                    data: { deletedAt: after.deletedAt },
+                  },
+                  query: jest.fn().mockResolvedValue(after),
+                }),
+            ),
+        }),
+      );
+
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw.mock.calls[0].slice(1)[4]).toBe(
+        'User.softDeleted',
+      );
+    });
+
+    it('suppresses only the matching outer deleteMany after successful lifecycle mutations', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const records = [
+        { id: 'u1', name: 'Alice' },
+        { id: 'u2', name: 'Bob' },
+      ];
+      txClient.user.findMany.mockResolvedValue(records);
+      txClient.user.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(records.find((record) => record.id === where.id)),
+      );
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, () =>
+        handlers.deleteMany({
+          model: 'User',
+          args: { where: { id: { in: records.map((record) => record.id) } } },
+          query: () =>
+            clientMethods.withAuditLifecycle(
+              {
+                action: 'User.softDeleted',
+                suppressOuterOperation: {
+                  model: 'User',
+                  operation: 'deleteMany',
+                },
+              },
+              async () => {
+                for (const record of records) {
+                  await handlers.update({
+                    model: 'User',
+                    args: {
+                      where: { id: record.id },
+                      data: { name: `${record.name} Soft Deleted` },
+                    },
+                    query: jest.fn().mockResolvedValue({
+                      ...record,
+                      name: `${record.name} Soft Deleted`,
+                    }),
+                  });
+                }
+                return { count: records.length };
+              },
+            ),
+        }),
+      );
+
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(2);
+      expect(
+        txClient.$executeRaw.mock.calls.map((call: any[]) => call.slice(1)[4]),
+      ).toEqual(['User.softDeleted', 'User.softDeleted']);
+    });
+
+    it('removes only the failed token when matching lifecycle calls share an outer scope', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const lifecycleTarget = { id: 'u-lifecycle', name: 'Lifecycle' };
+      const deleteTarget = { id: 'u-delete', name: 'Delete' };
+      txClient.user.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(
+          where.id === lifecycleTarget.id ? lifecycleTarget : deleteTarget,
+        ),
+      );
+      const lifecycleError = new Error('second lifecycle failed');
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await handlers.delete({
+          model: 'User',
+          args: { where: { id: lifecycleTarget.id } },
+          query: async () => {
+            await clientMethods.withAuditLifecycle(
+              {
+                action: 'User.softDeleted',
+                suppressOuterOperation: { model: 'User', operation: 'delete' },
+              },
+              async () => lifecycleTarget,
+            );
+            await expect(
+              clientMethods.withAuditLifecycle(
+                {
+                  action: 'User.softDeleted',
+                  suppressOuterOperation: {
+                    model: 'User',
+                    operation: 'delete',
+                  },
+                },
+                async () => {
+                  throw lifecycleError;
+                },
+              ),
+            ).rejects.toBe(lifecycleError);
+            return lifecycleTarget;
+          },
+        });
+        await handlers.delete({
+          model: 'User',
+          args: { where: { id: deleteTarget.id } },
+          query: jest.fn().mockResolvedValue(deleteTarget),
+        });
+      });
+
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw.mock.calls[0].slice(1)[6]).toBe(
+        deleteTarget.id,
+      );
+    });
+
+    it('isolates a pending lifecycle suppression from a concurrent generic delete', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const lifecycleTarget = { id: 'u-lifecycle', name: 'Lifecycle' };
+      const deleteTarget = { id: 'u-delete', name: 'Delete' };
+      txClient.user.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(
+          where.id === lifecycleTarget.id ? lifecycleTarget : deleteTarget,
+        ),
+      );
+      let markLifecycleStarted!: () => void;
+      const lifecycleStarted = new Promise<void>((resolve) => {
+        markLifecycleStarted = resolve;
+      });
+      let releaseLifecycle!: () => void;
+      const holdLifecycle = new Promise<void>((resolve) => {
+        releaseLifecycle = resolve;
+      });
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        const lifecycleDelete = handlers.delete({
+          model: 'User',
+          args: { where: { id: lifecycleTarget.id } },
+          query: () =>
+            clientMethods.withAuditLifecycle(
+              {
+                action: 'User.softDeleted',
+                suppressOuterOperation: { model: 'User', operation: 'delete' },
+              },
+              async () => {
+                markLifecycleStarted();
+                await holdLifecycle;
+                return lifecycleTarget;
+              },
+            ),
+        });
+        await lifecycleStarted;
+        await handlers.delete({
+          model: 'User',
+          args: { where: { id: deleteTarget.id } },
+          query: jest.fn().mockResolvedValue(deleteTarget),
+        });
+        releaseLifecycle();
+        await lifecycleDelete;
+      });
+
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw.mock.calls[0].slice(1)[6]).toBe(
+        deleteTarget.id,
+      );
+    });
+
+    it('does not carry a successful unscoped suppression into a later delete', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const deleted = { id: 'u1', name: 'Alice' };
+      txClient.user.findFirst.mockResolvedValue(deleted);
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await clientMethods.withAuditLifecycle(
+          {
+            action: 'User.softDeleted',
+            suppressOuterOperation: { model: 'User', operation: 'delete' },
+          },
+          async () => undefined,
+        );
+        await handlers.delete({
+          model: 'User',
+          args: { where: { id: deleted.id } },
+          query: jest.fn().mockResolvedValue(deleted),
+        });
+      });
+
+      expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(txClient.$executeRaw.mock.calls[0].slice(1)[4]).toBe(
+        'User.deleted',
+      );
+    });
+
+    it('does not carry a model-mismatched suppression into a later delete', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User', 'Post'],
+      });
+      const txClient = buildMockClient();
+      const post = { id: 'p1', title: 'Post' };
+      const user = { id: 'u1', name: 'Alice' };
+      txClient.post.findFirst.mockResolvedValue(post);
+      txClient.user.findFirst.mockResolvedValue(user);
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await handlers.delete({
+          model: 'Post',
+          args: { where: { id: post.id } },
+          query: () =>
+            clientMethods.withAuditLifecycle(
+              {
+                action: 'User.softDeleted',
+                suppressOuterOperation: { model: 'User', operation: 'delete' },
+              },
+              async () => post,
+            ),
+        });
+        await handlers.delete({
+          model: 'User',
+          args: { where: { id: user.id } },
+          query: jest.fn().mockResolvedValue(user),
+        });
+      });
+
+      expect(
+        txClient.$executeRaw.mock.calls.map((call: any[]) => call.slice(1)[4]),
+      ).toEqual(['Post.deleted', 'User.deleted']);
+    });
+
+    it('does not carry an operation-mismatched suppression into a later delete', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+      const txClient = buildMockClient();
+      const batchRecord = { id: 'u-batch', name: 'Batch' };
+      const deleted = { id: 'u-delete', name: 'Delete' };
+      txClient.user.findMany.mockResolvedValue([batchRecord]);
+      txClient.user.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.id === batchRecord.id ? batchRecord : deleted),
+      );
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+
+      await clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await handlers.deleteMany({
+          model: 'User',
+          args: { where: { id: batchRecord.id } },
+          query: () =>
+            clientMethods.withAuditLifecycle(
+              {
+                action: 'User.softDeleted',
+                suppressOuterOperation: { model: 'User', operation: 'delete' },
+              },
+              async () => ({ count: 1 }),
+            ),
+        });
+        await handlers.delete({
+          model: 'User',
+          args: { where: { id: deleted.id } },
+          query: jest.fn().mockResolvedValue(deleted),
+        });
+      });
+
+      expect(
+        txClient.$executeRaw.mock.calls.map((call: any[]) => call.slice(1)[6]),
+      ).toEqual([batchRecord.id, deleted.id]);
+    });
+
     it('rejects lifecycle integration outside the transaction helper', async () => {
       const { clientMethods } = getHandlers({
         consistency: 'atomic-required',
