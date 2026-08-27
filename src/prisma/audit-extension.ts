@@ -29,6 +29,15 @@ let txAuditUnavailableWarned = false;
 export type AuditConsistency = 'atomic-required' | 'best-effort';
 export type AuditBatchOverflow = 'reject' | 'summary';
 
+export interface AuditCapabilities {
+  readonly consistency: AuditConsistency;
+  readonly atomicLifecycle: boolean;
+}
+
+export interface AuditCapabilityMethods {
+  getAuditCapabilities(): AuditCapabilities;
+}
+
 export interface AuditTransactionOptions {
   maxWait?: number;
   timeout?: number;
@@ -139,6 +148,8 @@ const NESTED_WRITE_ATOMIC_ERROR =
   '[@nestarc/audit-log] atomic-required does not support nested writes to tracked related models; run explicit related-model mutations inside withAuditTransaction()';
 const AUDIT_LIFECYCLE_CONTEXT_ERROR =
   '[@nestarc/audit-log] withAuditLifecycle() must run inside withAuditTransaction()';
+const AUDIT_LIFECYCLE_CONSISTENCY_ERROR =
+  '[@nestarc/audit-log] withAuditLifecycle() requires consistency: "atomic-required"';
 const DEFAULT_MAX_BATCH_RECORDS = 1000;
 
 export function modelDelegateName(model: string): string {
@@ -1044,11 +1055,18 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
     operation: 'delete' | 'deleteMany';
     successfulTokens: Set<symbol>;
   }>();
+  const auditCapabilities: AuditCapabilities = Object.freeze({
+    consistency: options.consistency,
+    atomicLifecycle: options.consistency === 'atomic-required',
+  });
 
   return Prisma.defineExtension((client: any) => {
     return client.$extends({
       name: '@nestarc/audit-log',
       client: {
+        getAuditCapabilities(): AuditCapabilities {
+          return auditCapabilities;
+        },
         async withAuditTransaction<TResult>(
           this: any,
           callback: (tx: any) => Promise<TResult>,
@@ -1069,6 +1087,9 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           input: AuditLifecycleInput,
           callback: (tx: any) => Promise<TResult>,
         ): Promise<TResult> {
+          if (!auditCapabilities.atomicLifecycle) {
+            throw new Error(AUDIT_LIFECYCLE_CONSISTENCY_ERROR);
+          }
           const tx = transactionContext.getStore();
           if (!tx) {
             throw new Error(AUDIT_LIFECYCLE_CONTEXT_ERROR);
@@ -1853,7 +1874,10 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
 export function createAuditedClient<TClient extends InteractiveTransactionHost>(
   client: TClient,
   options: AuditExtensionOptions,
-): TClient & AuditTransactionMethods<TransactionClientOf<TClient>> {
+): TClient &
+  AuditTransactionMethods<TransactionClientOf<TClient>> &
+  AuditCapabilityMethods {
   return client.$extends(createAuditExtension(options)) as TClient &
-    AuditTransactionMethods<TransactionClientOf<TClient>>;
+    AuditTransactionMethods<TransactionClientOf<TClient>> &
+    AuditCapabilityMethods;
 }

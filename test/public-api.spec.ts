@@ -12,6 +12,8 @@ import {
   PostgresAuditStreamStore,
 } from '../src';
 import type {
+  AuditCapabilities,
+  AuditCapabilityMethods,
   AuditDatabaseMapping,
   AuditCsvOptions,
   AuditGetByIdOptions,
@@ -172,7 +174,14 @@ describe('public API exports', () => {
     const id: string | undefined = await audited.withAuditTransaction(
       async (transaction) => (await transaction.user.findUnique())?.id,
     );
+    const capabilities: AuditCapabilities = audited.getAuditCapabilities();
+    const capabilityMethods: AuditCapabilityMethods = audited;
 
     expect(id).toBe('u1');
+    expect(capabilityMethods.getAuditCapabilities()).toBe(capabilities);
+    expect(capabilities).toEqual({
+      consistency: 'atomic-required',
+      atomicLifecycle: true,
+    });
   });
 });

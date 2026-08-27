@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-27
+
+### Added
+
+- `getAuditCapabilities()` so cross-package lifecycle integrations can fail closed unless the
+  client advertises `atomic-required` consistency and atomic lifecycle support.
+
+### Fixed
+
+- Scope lifecycle suppression to the matching outer delete operation and remove failed callback
+  tokens, preventing a caught lifecycle failure from suppressing a later physical delete audit.
+- Reject `withAuditLifecycle()` on best-effort clients before invoking the lifecycle callback.
+
 ## [0.4.0] - 2026-08-21
 
 ### Added

@@ -544,6 +544,9 @@ and result types, rejects nested helper calls, and uses no private Prisma API. `
 `maxWait`, when supplied, must be positive integers. In
 `atomic-required`, pre-read, post-read, audit INSERT, and audit context construction errors are
 fail-closed. A tracked mutation outside the helper throws before its business query runs.
+`withAuditLifecycle()` is available only when the extension uses `atomic-required`; best-effort
+clients reject before the lifecycle callback runs. Integrations can verify this contract through
+`getAuditCapabilities()`, which reports the configured consistency and atomic lifecycle support.
 Single-row update, delete, and upsert operations lock the target row and refresh the preimage before
 the mutation, so concurrent audited writers record the immediate committed before value. For Prisma
 clients that do not publicly expose DMMF mapping metadata, models using `@@map`, `@@schema`, or a

@@ -528,6 +528,46 @@ describe('createAuditExtension — query handlers', () => {
       ).rejects.toThrow('nested withAuditTransaction() calls are not supported');
     });
 
+    it('exposes immutable consistency capabilities and rejects best-effort lifecycle callbacks', async () => {
+      const { clientMethods } = getHandlers({
+        consistency: 'best-effort',
+        trackedModels: ['User'],
+      });
+      const capabilities = clientMethods.getAuditCapabilities();
+      const callback = jest.fn();
+      const transactionHost = {
+        $transaction: (transactionCallback: (tx: any) => Promise<any>) =>
+          transactionCallback(buildMockClient()),
+      };
+
+      expect(capabilities).toEqual({
+        consistency: 'best-effort',
+        atomicLifecycle: false,
+      });
+      expect(Object.isFrozen(capabilities)).toBe(true);
+      await expect(
+        clientMethods.withAuditTransaction.call(transactionHost, () =>
+          clientMethods.withAuditLifecycle(
+            { action: 'User.softDeleted' },
+            callback,
+          ),
+        ),
+      ).rejects.toThrow('requires consistency: "atomic-required"');
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('advertises atomic lifecycle support for atomic-required clients', () => {
+      const { clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+      });
+
+      expect(clientMethods.getAuditCapabilities()).toEqual({
+        consistency: 'atomic-required',
+        atomicLifecycle: true,
+      });
+    });
+
     it('runs lifecycle mutations on the bound tx with deterministic action and metadata', async () => {
       const { handlers, clientMethods } = getHandlers({
         consistency: 'atomic-required',
