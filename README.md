@@ -544,6 +544,9 @@ and result types, rejects nested helper calls, and uses no private Prisma API. `
 `maxWait`, when supplied, must be positive integers. In
 `atomic-required`, pre-read, post-read, audit INSERT, and audit context construction errors are
 fail-closed. A tracked mutation outside the helper throws before its business query runs.
+`withAuditLifecycle()` is available only when the extension uses `atomic-required`; best-effort
+clients reject before the lifecycle callback runs. Integrations can verify this contract through
+`getAuditCapabilities()`, which reports the configured consistency and atomic lifecycle support.
 Single-row update, delete, and upsert operations lock the target row and refresh the preimage before
 the mutation, so concurrent audited writers record the immediate committed before value. For Prisma
 clients that do not publicly expose DMMF mapping metadata, models using `@@map`, `@@schema`, or a
@@ -670,15 +673,25 @@ npm run build
 ### Run tests
 
 ```bash
+# Static quality gates
+npm run lint
+npm run typecheck
+
 # Unit tests
 npm test
 
-# E2E tests (starts Docker PostgreSQL automatically)
+# One-command E2E (waits for PostgreSQL and always runs teardown)
 npm run test:e2e:full
 
-# Cleanup
+# Manual lifecycle for keeping PostgreSQL running between commands
+npm run test:e2e:setup
+npm run test:e2e
 npm run test:e2e:teardown
 ```
+
+`test:e2e:full` runs teardown after success, test failure, or an interrupt. The individual
+setup, test, and teardown commands remain available for debugging;
+`test:e2e:setup` intentionally leaves PostgreSQL running until teardown.
 
 ## License
 

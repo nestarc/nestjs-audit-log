@@ -20,6 +20,8 @@ export {
 } from './prisma/audit-extension';
 export type {
   AuditBatchOverflow,
+  AuditCapabilities,
+  AuditCapabilityMethods,
   AuditConsistency,
   AuditDatabaseMapping,
   AuditExtensionOptions,

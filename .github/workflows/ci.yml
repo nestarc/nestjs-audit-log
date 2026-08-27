@@ -47,11 +47,24 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Lint
+        if: matrix.node-version == '24'
+        run: npm run lint
+
+      - name: Typecheck
+        if: matrix.node-version == '24'
+        run: npm run typecheck
+
       - name: Build
         run: npm run build
 
       - name: Unit tests
+        if: matrix.node-version != '24'
         run: npm test
+
+      - name: Unit tests with coverage
+        if: matrix.node-version == '24'
+        run: npm run test:cov -- --runInBand
 
       - name: Push test schema
         run: npx prisma db push

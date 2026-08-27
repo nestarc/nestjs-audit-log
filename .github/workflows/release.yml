@@ -34,6 +34,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release ref
+        run: |
+          node -e "const version = require('./package.json').version; if (process.env.GITHUB_REF_NAME !== 'v' + version) { console.error('tag/package version mismatch'); process.exit(1); }"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -48,17 +56,26 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Build
         run: npm run build
 
       - name: Unit tests
-        run: npm test
+        run: npm run test:cov -- --runInBand
 
       - name: Push test schema
         run: npx prisma db push
 
       - name: E2E tests
         run: npm run test:e2e
+
+      - name: Verify package contents
+        run: npm pack --dry-run
 
       - name: Publish to npm
         run: npm publish --access public

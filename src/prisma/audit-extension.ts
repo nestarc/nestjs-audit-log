@@ -29,6 +29,15 @@ let txAuditUnavailableWarned = false;
 export type AuditConsistency = 'atomic-required' | 'best-effort';
 export type AuditBatchOverflow = 'reject' | 'summary';
 
+export interface AuditCapabilities {
+  readonly consistency: AuditConsistency;
+  readonly atomicLifecycle: boolean;
+}
+
+export interface AuditCapabilityMethods {
+  getAuditCapabilities(): AuditCapabilities;
+}
+
 export interface AuditTransactionOptions {
   maxWait?: number;
   timeout?: number;
@@ -139,6 +148,8 @@ const NESTED_WRITE_ATOMIC_ERROR =
   '[@nestarc/audit-log] atomic-required does not support nested writes to tracked related models; run explicit related-model mutations inside withAuditTransaction()';
 const AUDIT_LIFECYCLE_CONTEXT_ERROR =
   '[@nestarc/audit-log] withAuditLifecycle() must run inside withAuditTransaction()';
+const AUDIT_LIFECYCLE_CONSISTENCY_ERROR =
+  '[@nestarc/audit-log] withAuditLifecycle() requires consistency: "atomic-required"';
 const DEFAULT_MAX_BATCH_RECORDS = 1000;
 
 export function modelDelegateName(model: string): string {
@@ -1039,27 +1050,23 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
   );
 
   const transactionContext = new AsyncLocalStorage<any>();
-  const lifecycleSuppressions = new AsyncLocalStorage<
-    Array<{ model: string; operation: 'delete' | 'deleteMany' }>
-  >();
-
-  const consumeLifecycleSuppression = (
-    model: string,
-    operation: 'delete' | 'deleteMany',
-  ): boolean => {
-    const suppressions = lifecycleSuppressions.getStore();
-    const index = suppressions?.findIndex(
-      (item) => item.model === model && item.operation === operation,
-    ) ?? -1;
-    if (!suppressions || index < 0) return false;
-    suppressions.splice(index, 1);
-    return true;
-  };
+  const lifecycleSuppressionScope = new AsyncLocalStorage<{
+    model: string;
+    operation: 'delete' | 'deleteMany';
+    successfulTokens: Set<symbol>;
+  }>();
+  const auditCapabilities: AuditCapabilities = Object.freeze({
+    consistency: options.consistency,
+    atomicLifecycle: options.consistency === 'atomic-required',
+  });
 
   return Prisma.defineExtension((client: any) => {
     return client.$extends({
       name: '@nestarc/audit-log',
       client: {
+        getAuditCapabilities(): AuditCapabilities {
+          return auditCapabilities;
+        },
         async withAuditTransaction<TResult>(
           this: any,
           callback: (tx: any) => Promise<TResult>,
@@ -1072,9 +1079,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           validatePositiveInteger(transactionOptions?.maxWait, 'maxWait');
           return this.$transaction(
             (tx: any) =>
-              transactionContext.run(tx, () =>
-                lifecycleSuppressions.run([], async () => await callback(tx)),
-              ),
+              transactionContext.run(tx, async () => await callback(tx)),
             transactionOptions,
           );
         },
@@ -1082,6 +1087,9 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           input: AuditLifecycleInput,
           callback: (tx: any) => Promise<TResult>,
         ): Promise<TResult> {
+          if (!auditCapabilities.atomicLifecycle) {
+            throw new Error(AUDIT_LIFECYCLE_CONSISTENCY_ERROR);
+          }
           const tx = transactionContext.getStore();
           if (!tx) {
             throw new Error(AUDIT_LIFECYCLE_CONTEXT_ERROR);
@@ -1091,24 +1099,47 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               '[@nestarc/audit-log] withAuditLifecycle() requires a non-empty action',
             );
           }
-          if (input.suppressOuterOperation) {
-            lifecycleSuppressions.getStore()?.push(input.suppressOuterOperation);
+          const suppressionScope = lifecycleSuppressionScope.getStore();
+          const matchingSuppressionScope =
+            input.suppressOuterOperation &&
+            suppressionScope?.model === input.suppressOuterOperation.model &&
+            suppressionScope.operation === input.suppressOuterOperation.operation
+              ? suppressionScope
+              : undefined;
+          const suppressionToken = matchingSuppressionScope
+            ? Symbol('audit-lifecycle-suppression')
+            : undefined;
+          if (matchingSuppressionScope && suppressionToken) {
+            matchingSuppressionScope.successfulTokens.add(suppressionToken);
           }
 
           const parent = AuditContext.getStore();
-          return AuditContext.run(
-            {
-              actor: parent?.actor ?? null,
-              noAudit: parent?.noAudit ?? false,
-              actionOverride: input.action,
-              metadata: {
-                ...(parent?.metadata ?? {}),
-                ...(input.metadata ?? {}),
+          let callbackSucceeded = false;
+          try {
+            const result = await AuditContext.run(
+              {
+                actor: parent?.actor ?? null,
+                noAudit: parent?.noAudit ?? false,
+                actionOverride: input.action,
+                metadata: {
+                  ...(parent?.metadata ?? {}),
+                  ...(input.metadata ?? {}),
+                },
+                ...(parent?.reason !== undefined ? { reason: parent.reason } : {}),
               },
-              ...(parent?.reason !== undefined ? { reason: parent.reason } : {}),
-            },
-            async () => await callback(tx),
-          );
+              async () => await callback(tx),
+            );
+            callbackSucceeded = true;
+            return result;
+          } finally {
+            if (
+              matchingSuppressionScope &&
+              suppressionToken &&
+              !callbackSucceeded
+            ) {
+              matchingSuppressionScope.successfulTokens.delete(suppressionToken);
+            }
+          }
         },
       },
       query: {
@@ -1359,8 +1390,16 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             }
 
             let result: any;
+            const suppressionScope = {
+              model,
+              operation: 'delete' as const,
+              successfulTokens: new Set<symbol>(),
+            };
             try {
-              result = await query(args);
+              result = await lifecycleSuppressionScope.run(
+                suppressionScope,
+                async () => await query(args),
+              );
             } catch (error) {
               await tryLogFailure(auditClient, options, {
                 model,
@@ -1373,7 +1412,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               throw error;
             }
 
-            if (consumeLifecycleSuppression(model, 'delete')) {
+            if (suppressionScope.successfulTokens.size > 0) {
               return result;
             }
 
@@ -1723,8 +1762,16 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             }
 
             let result: any;
+            const suppressionScope = {
+              model,
+              operation: 'deleteMany' as const,
+              successfulTokens: new Set<symbol>(),
+            };
             try {
-              result = await query(args);
+              result = await lifecycleSuppressionScope.run(
+                suppressionScope,
+                async () => await query(args),
+              );
             } catch (error) {
               await tryLogFailure(auditClient, options, {
                 model,
@@ -1736,7 +1783,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               throw error;
             }
 
-            if (consumeLifecycleSuppression(model, 'deleteMany')) {
+            if (suppressionScope.successfulTokens.size > 0) {
               return result;
             }
 
@@ -1827,7 +1874,10 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
 export function createAuditedClient<TClient extends InteractiveTransactionHost>(
   client: TClient,
   options: AuditExtensionOptions,
-): TClient & AuditTransactionMethods<TransactionClientOf<TClient>> {
+): TClient &
+  AuditTransactionMethods<TransactionClientOf<TClient>> &
+  AuditCapabilityMethods {
   return client.$extends(createAuditExtension(options)) as TClient &
-    AuditTransactionMethods<TransactionClientOf<TClient>>;
+    AuditTransactionMethods<TransactionClientOf<TClient>> &
+    AuditCapabilityMethods;
 }

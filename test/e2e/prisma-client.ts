@@ -44,7 +44,6 @@ export function createTestPrismaClient(
     }) as PrismaClient;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { PrismaPg } = require('@prisma/adapter-pg');
   return new generatedModule.PrismaClient({
     adapter: new PrismaPg({ connectionString: DATABASE_URL }),

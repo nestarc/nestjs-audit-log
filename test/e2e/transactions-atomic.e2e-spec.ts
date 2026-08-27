@@ -192,6 +192,189 @@ describe('atomic-required transaction E2E', () => {
     expect(logs[0].changes.name).toEqual({ before: 'Atomic Delete' });
   });
 
+  it('commits a generic delete after a rewritten lifecycle callback fails', async () => {
+    const lifecycleTarget = await seedUser(basePrisma, {
+      name: 'Failed Lifecycle Target',
+      email: 'failed-lifecycle-target@test.com',
+    });
+    const deleteTarget = await seedUser(basePrisma, {
+      name: 'Delete After Lifecycle Failure',
+      email: 'delete-after-lifecycle-failure@test.com',
+    });
+    const lifecycleError = new Error('lifecycle failed before mutation');
+    const lifecycleClient = createLifecycleDeleteRewrite(
+      audited,
+      lifecycleTarget.id,
+      async () => {
+        throw lifecycleError;
+      },
+    );
+
+    await lifecycleClient.withAuditTransaction(async (tx: any) => {
+      await expect(
+        tx.user.delete({ where: { id: lifecycleTarget.id } }),
+      ).rejects.toThrow(lifecycleError.message);
+      await tx.user.delete({ where: { id: deleteTarget.id } });
+    });
+
+    expect(await userCount(basePrisma, lifecycleTarget.email)).toBe(1);
+    expect(await userCount(basePrisma, deleteTarget.email)).toBe(0);
+    const logs = await auditLogs(basePrisma, 'User.deleted');
+    expect(logs).toHaveLength(1);
+    expect(logs[0].target_id).toBe(deleteTarget.id);
+  });
+
+  it('commits generic deleteMany evidence after a rewritten lifecycle callback fails', async () => {
+    const lifecycleTarget = await seedUser(basePrisma, {
+      name: 'Failed Bulk Lifecycle Target',
+      email: 'failed-bulk-lifecycle-target@test.com',
+    });
+    const deleteTargets = await Promise.all([
+      seedUser(basePrisma, {
+        name: 'Bulk Delete One',
+        email: 'bulk-delete-one-after-lifecycle-failure@test.com',
+      }),
+      seedUser(basePrisma, {
+        name: 'Bulk Delete Two',
+        email: 'bulk-delete-two-after-lifecycle-failure@test.com',
+      }),
+    ]);
+    const lifecycleError = new Error('bulk lifecycle failed before mutation');
+    const lifecycleClient = createLifecycleDeleteManyRewrite(
+      audited,
+      [lifecycleTarget.id],
+      async () => {
+        throw lifecycleError;
+      },
+    );
+
+    await lifecycleClient.withAuditTransaction(async (tx: any) => {
+      await expect(
+        tx.user.deleteMany({
+          where: { id: { in: [lifecycleTarget.id] } },
+        }),
+      ).rejects.toThrow(lifecycleError.message);
+      await tx.user.deleteMany({
+        where: { id: { in: deleteTargets.map((target) => target.id) } },
+      });
+    });
+
+    expect(await userCount(basePrisma, lifecycleTarget.email)).toBe(1);
+    expect(await userCount(basePrisma, deleteTargets[0].email)).toBe(0);
+    expect(await userCount(basePrisma, deleteTargets[1].email)).toBe(0);
+    const logs = await auditLogs(basePrisma, 'User.deleted');
+    expect(logs).toHaveLength(2);
+    expect(logs.map((log) => log.target_id).sort()).toEqual(
+      deleteTargets.map((target) => target.id).sort(),
+    );
+  });
+
+  it('commits lifecycle rows and suppresses the rewritten outer deleteMany audit', async () => {
+    const users = await Promise.all([
+      seedUser(basePrisma, {
+        name: 'Bulk Lifecycle One Before',
+        email: 'bulk-lifecycle-one@test.com',
+      }),
+      seedUser(basePrisma, {
+        name: 'Bulk Lifecycle Two Before',
+        email: 'bulk-lifecycle-two@test.com',
+      }),
+    ]);
+    const lifecycleClient = createLifecycleDeleteManyRewrite(
+      audited,
+      users.map((user) => user.id),
+      async (tx) => {
+        for (const [index, user] of users.entries()) {
+          await tx.user.update({
+            where: { id: user.id },
+            data: { name: `Bulk Lifecycle ${index + 1} After` },
+          });
+        }
+        return { count: users.length };
+      },
+    );
+
+    await lifecycleClient.withAuditTransaction((tx: any) =>
+      tx.user.deleteMany({
+        where: { id: { in: users.map((user) => user.id) } },
+      }),
+    );
+
+    expect(await userName(basePrisma, users[0].email)).toBe(
+      'Bulk Lifecycle 1 After',
+    );
+    expect(await userName(basePrisma, users[1].email)).toBe(
+      'Bulk Lifecycle 2 After',
+    );
+    const logs = await basePrisma.$queryRaw<any[]>`
+      SELECT * FROM audit_logs ORDER BY created_at, id
+    `;
+    expect(logs).toHaveLength(2);
+    expect(logs.map((log) => log.action)).toEqual([
+      'User.softDeleted',
+      'User.softDeleted',
+    ]);
+    expect(logs.map((log) => log.target_id).sort()).toEqual(
+      users.map((user) => user.id).sort(),
+    );
+  });
+
+  it('commits one lifecycle audit and suppresses the rewritten outer delete audit', async () => {
+    const user = await seedUser(basePrisma, {
+      name: 'Lifecycle Before',
+      email: 'lifecycle-success@test.com',
+    });
+    const lifecycleClient = createLifecycleDeleteRewrite(
+      audited,
+      user.id,
+      (tx) =>
+        tx.user.update({
+          where: { id: user.id },
+          data: { name: 'Lifecycle After' },
+        }),
+    );
+
+    await lifecycleClient.withAuditTransaction((tx: any) =>
+      tx.user.delete({ where: { id: user.id } }),
+    );
+
+    expect(await userName(basePrisma, user.email)).toBe('Lifecycle After');
+    const logs = await basePrisma.$queryRaw<any[]>`
+      SELECT * FROM audit_logs ORDER BY created_at, id
+    `;
+    expect(logs).toHaveLength(1);
+    expect(logs[0].action).toBe('User.softDeleted');
+    expect(logs[0].target_id).toBe(user.id);
+  });
+
+  it('rolls back a successful lifecycle rewrite and its audit together', async () => {
+    const user = await seedUser(basePrisma, {
+      name: 'Lifecycle Rollback Before',
+      email: 'lifecycle-rollback@test.com',
+    });
+    const lifecycleClient = createLifecycleDeleteRewrite(
+      audited,
+      user.id,
+      (tx) =>
+        tx.user.update({
+          where: { id: user.id },
+          data: { name: 'Lifecycle Rollback After' },
+        }),
+    );
+
+    await expect(
+      lifecycleClient.withAuditTransaction(async (tx: any) => {
+        await tx.user.delete({ where: { id: user.id } });
+        throw new Error('force lifecycle rollback');
+      }),
+    ).rejects.toThrow('force lifecycle rollback');
+
+    expect(await userName(basePrisma, user.email)).toBe(
+      'Lifecycle Rollback Before',
+    );
+    expect(await totalAuditCount(basePrisma)).toBe(0);
+  });
+
   it('rolls back the business row and automatic audit row together', async () => {
     await expect(
       audited.withAuditTransaction(async (tx: any) => {
@@ -455,6 +638,78 @@ function createFaultInjectedAuditedClient(
     logger: silentLogger,
     prismaModule,
   });
+}
+
+function createLifecycleDeleteRewrite(
+  client: any,
+  targetId: string,
+  callback: (tx: any) => Promise<any>,
+): any {
+  const lifecycleClient: any = client.$extends({
+    name: '@nestarc/audit-log-e2e-delete-lifecycle-rewrite',
+    query: {
+      user: {
+        delete({ args, query }: any) {
+          if (args.where?.id !== targetId) {
+            return query(args);
+          }
+          return lifecycleClient.withAuditLifecycle(
+            {
+              action: 'User.softDeleted',
+              metadata: {
+                auditKind: 'record',
+                lifecycle: 'soft-delete',
+                lifecycleOperation: 'delete',
+              },
+              suppressOuterOperation: { model: 'User', operation: 'delete' },
+            },
+            callback,
+          );
+        },
+      },
+    },
+  });
+  return lifecycleClient;
+}
+
+function createLifecycleDeleteManyRewrite(
+  client: any,
+  targetIds: string[],
+  callback: (tx: any) => Promise<any>,
+): any {
+  const lifecycleClient: any = client.$extends({
+    name: '@nestarc/audit-log-e2e-delete-many-lifecycle-rewrite',
+    query: {
+      user: {
+        deleteMany({ args, query }: any) {
+          const ids = args.where?.id?.in;
+          if (
+            !Array.isArray(ids) ||
+            ids.length !== targetIds.length ||
+            !targetIds.every((targetId) => ids.includes(targetId))
+          ) {
+            return query(args);
+          }
+          return lifecycleClient.withAuditLifecycle(
+            {
+              action: 'User.softDeleted',
+              metadata: {
+                auditKind: 'record',
+                lifecycle: 'soft-delete',
+                lifecycleOperation: 'deleteMany',
+              },
+              suppressOuterOperation: {
+                model: 'User',
+                operation: 'deleteMany',
+              },
+            },
+            callback,
+          );
+        },
+      },
+    },
+  });
+  return lifecycleClient;
 }
 
 async function waitForBlockedRowLock(prisma: PrismaClient): Promise<void> {
