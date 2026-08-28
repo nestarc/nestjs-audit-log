@@ -98,6 +98,17 @@ describe('documentation gates', () => {
     expect(ci).toContain('npm run test:e2e');
   });
 
+  it('checks the full peer graph for published and packed ecosystem packages', () => {
+    const fixture = JSON.parse(
+      read('fixtures/published-ecosystem/package.json'),
+    ) as { scripts: Record<string, string> };
+    const peerGraphCheck =
+      'npm ls @nestarc/tenancy @nestarc/audit-log @nestarc/soft-delete --all';
+
+    expect(fixture.scripts['verify:published']).toContain(peerGraphCheck);
+    expect(fixture.scripts['verify:candidate']).toContain(peerGraphCheck);
+  });
+
   it('keeps NestJS 12 support aligned across peers, docs, and CI', () => {
     const packageJson = JSON.parse(read('package.json')) as {
       peerDependencies: Record<string, string>;

@@ -5,8 +5,8 @@
   "description": "Consumer-owned release gate for the published Nestarc tenancy, audit-log, and soft-delete packages",
   "scripts": {
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
-    "verify:published": "node scripts/verify-packages.cjs && npm ls @nestarc/tenancy @nestarc/audit-log @nestarc/soft-delete --depth=0",
-    "verify:candidate": "node scripts/verify-packages.cjs",
+    "verify:published": "node scripts/verify-packages.cjs && npm ls @nestarc/tenancy @nestarc/audit-log @nestarc/soft-delete --all",
+    "verify:candidate": "node scripts/verify-packages.cjs && npm ls @nestarc/tenancy @nestarc/audit-log @nestarc/soft-delete --all",
     "test:e2e": "npm run prisma:generate && node --import tsx test/ecosystem.e2e.cjs",
     "test": "npm run verify:published && npm run test:e2e"
   },
