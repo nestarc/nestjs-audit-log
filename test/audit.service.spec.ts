@@ -874,14 +874,85 @@ describe('AuditService', () => {
     });
 
     it('rejects retention ahead of the slowest required stream checkpoint', async () => {
+      const slowCheckpoint = encodeAuditCursor(
+        '2026-01-01T00:00:00.000000Z',
+        uuid1,
+      );
+      const advancedCheckpoint = encodeAuditCursor(
+        '2026-03-01T00:00:00.000000Z',
+        uuid2,
+      );
+      for (const requiredCheckpoints of [
+        [advancedCheckpoint, slowCheckpoint],
+        [slowCheckpoint, advancedCheckpoint],
+      ]) {
+        await expect(service.prune({
+          olderThan: new Date('2026-02-01T00:00:00.000Z'),
+          requiredCheckpoints,
+        })).rejects.toMatchObject({
+          name: 'Error',
+          message:
+            '[@nestarc/audit-log] retention cutoff is ahead of a required stream checkpoint. ' +
+            'Advance the slow stream or use an externally managed detach-first archive procedure.',
+        });
+      }
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-array required checkpoint collection before querying', async () => {
+      await expect(
+        service.prune({
+          olderThan: new Date('2026-01-01T00:00:00.000Z'),
+          requiredCheckpoints: 'checkpoint' as any,
+        }),
+      ).rejects.toMatchObject({
+        name: 'TypeError',
+        message:
+          '[@nestarc/audit-log] requiredCheckpoints must be an array of scan checkpoints.',
+      });
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('allows a retention cutoff exactly at every required checkpoint', async () => {
       const checkpoint = encodeAuditCursor(
         '2026-01-01T00:00:00.000000Z',
         uuid1,
       );
-      await expect(service.prune({
-        olderThan: new Date('2026-02-01T00:00:00.000Z'),
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([{ relkind: 'r' }])
+        .mockResolvedValueOnce([{ count: 0n }]);
+
+      const result = await service.prune({
+        olderThan: new Date('2026-01-01T00:00:00.000Z'),
         requiredCheckpoints: [checkpoint],
-      })).rejects.toThrow('retention cutoff is ahead of a required stream checkpoint');
+        dryRun: true,
+      });
+
+      expect(result).toEqual({
+        layout: 'flat',
+        mode: 'delete',
+        prunedPartitions: [],
+        deletedRows: 0,
+        dryRun: true,
+      });
+    });
+
+    it('uses a per-call maintenance client without consulting the module client', async () => {
+      const client = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ relkind: 'r' }])
+          .mockResolvedValueOnce([{ count: 2n }]),
+      };
+
+      const result = await service.prune({
+        olderThan: new Date('2026-01-01T00:00:00.000Z'),
+        client,
+        dryRun: true,
+      });
+
+      expect(result.deletedRows).toBe(2);
+      expect(client.$queryRaw).toHaveBeenCalledTimes(2);
       expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
     });
 
@@ -941,7 +1012,11 @@ describe('AuditService', () => {
 
       await expect(
         service.prune({ olderThan: new Date('2026-01-01T00:00:00.000Z') }),
-      ).rejects.toThrow('audit table');
+      ).rejects.toMatchObject({
+        name: 'Error',
+        message:
+          "[@nestarc/audit-log] audit table 'audit_logs' does not exist or is not a supported table.",
+      });
     });
 
     it('dry-runs partitioned pruning using only partitions whose upper bound is old enough', async () => {

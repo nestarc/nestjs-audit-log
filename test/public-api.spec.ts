@@ -122,11 +122,15 @@ describe('public API exports', () => {
       deletedRows: 0,
       dryRun: true,
     };
+    const prune: (
+      options: AuditPruneOptions,
+    ) => Promise<AuditPruneResult> = AuditService.prototype.prune;
 
     expect(ddlOptions.tableName).toBe('audit_logs');
     expect(partitionOptions.ahead).toBe(1);
     expect(pruneOptions.dryRun).toBe(true);
     expect(pruneResult.mode).toBe('delete');
+    expect(prune.length).toBe(1);
     expect(typeof ensurePartitions).toBe('function');
   });
 
