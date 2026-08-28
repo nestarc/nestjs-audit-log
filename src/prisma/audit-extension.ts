@@ -24,7 +24,6 @@ const NO_CONTEXT_WARNING_MESSAGE =
   '[@nestarc/audit-log] audited write executed without an audit context store — actorId will be null. Wrap background work in AuditContext.runAs(actor, fn). (warned once per process)';
 
 let noContextWarningReported = false;
-let txAuditUnavailableWarned = false;
 
 export type AuditConsistency = 'atomic-required' | 'best-effort';
 export type AuditBatchOverflow = 'reject' | 'summary';
@@ -95,10 +94,6 @@ export function _resetNoContextWarning(): void {
   noContextWarningReported = false;
 }
 
-export function _resetTxAuditWarning(): void {
-  txAuditUnavailableWarned = false;
-}
-
 export interface AuditExtensionOptions extends AuditSharedOptions {
   /**
    * `atomic-required` rejects tracked writes outside withAuditTransaction().
@@ -129,19 +124,12 @@ export interface AuditExtensionOptions extends AuditSharedOptions {
   logFailures?: boolean;
   ignoreTimestampOnlyUpdates?: boolean;
   prismaModule?: PrismaModuleLike;
-  /**
-   * EXPERIMENTAL — no semver guarantee. Reserved for transaction-aware audit
-   * routing when Prisma exposes a compatible internal transaction capability.
-   * Default behavior remains best-effort outside the caller transaction.
-   * @deprecated Use consistency: 'atomic-required' with withAuditTransaction().
-   */
-  experimentalTxAudit?: boolean;
 }
 
 const ATOMIC_CONTEXT_ERROR =
   '[@nestarc/audit-log] atomic-required tracked write must run inside withAuditTransaction()';
-const ATOMIC_ARRAY_TRANSACTION_ERROR =
-  '[@nestarc/audit-log] atomic-required does not support array $transaction([...]); use sequential mutations inside withAuditTransaction()';
+const EXPERIMENTAL_TX_AUDIT_REMOVED_ERROR =
+  '[@nestarc/audit-log] experimentalTxAudit was removed in v0.5.0; use consistency: "atomic-required" with withAuditTransaction(), or remove experimentalTxAudit and keep explicit consistency: "best-effort"';
 const NESTED_TRANSACTION_ERROR =
   '[@nestarc/audit-log] nested withAuditTransaction() calls are not supported';
 const NESTED_WRITE_ATOMIC_ERROR =
@@ -425,61 +413,19 @@ function reportAuditError(
   }
 }
 
-function warnTxAuditUnavailable(
-  options: AuditExtensionOptions,
-  error?: unknown,
-): void {
-  if (txAuditUnavailableWarned) {
-    return;
-  }
-  txAuditUnavailableWarned = true;
-
-  const suffix = error ? `: ${errorMessage(error)}` : '';
-  try {
-    (options.logger ?? console).warn(
-      `[@nestarc/audit-log] tx-aware audit unavailable on this Prisma version, falling back to best-effort${suffix}`,
-    );
-  } catch {
-    // Reporting must never affect the caller's mutation.
-  }
-}
-
 function resolveAuditClient(
   client: any,
   options: AuditExtensionOptions,
   transactionClient: any,
-  internalParams?: { transaction?: { kind?: string } },
 ): any {
   if (options.consistency === 'atomic-required') {
     if (!transactionClient) {
-      if (internalParams?.transaction?.kind === 'batch') {
-        throw new Error(ATOMIC_ARRAY_TRANSACTION_ERROR);
-      }
       throw new Error(ATOMIC_CONTEXT_ERROR);
     }
     return transactionClient;
   }
 
-  if (!options.experimentalTxAudit) {
-    return client;
-  }
-
-  const transaction = internalParams?.transaction;
-  if (!transaction || transaction.kind !== 'itx') {
-    return client;
-  }
-
-  if (typeof client?._createItxClient !== 'function') {
-    warnTxAuditUnavailable(options);
-    return client;
-  }
-
-  try {
-    return client._createItxClient(transaction);
-  } catch (error) {
-    warnTxAuditUnavailable(options, error);
-    return client;
-  }
+  return client;
 }
 
 function batchSummaryMetadata(
@@ -998,17 +944,15 @@ function warnForTrackingConfiguration(
 }
 
 export function createAuditExtension(options: AuditExtensionOptions): any {
+  if (Object.prototype.hasOwnProperty.call(options, 'experimentalTxAudit')) {
+    throw new Error(EXPERIMENTAL_TX_AUDIT_REMOVED_ERROR);
+  }
   if (
     options.consistency !== 'atomic-required' &&
     options.consistency !== 'best-effort'
   ) {
     throw new Error(
       '[@nestarc/audit-log] consistency must be explicitly set to "atomic-required" or "best-effort"',
-    );
-  }
-  if (options.consistency === 'atomic-required' && options.experimentalTxAudit) {
-    throw new Error(
-      '[@nestarc/audit-log] experimentalTxAudit cannot be combined with atomic-required; use withAuditTransaction()',
     );
   }
   if (
@@ -1144,7 +1088,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
       },
       query: {
         $allModels: {
-          async create({ model, args, query, __internalParams }: any) {
+          async create({ model, args, query }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
@@ -1153,7 +1097,6 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               client,
               options,
               transactionContext.getStore(),
-              __internalParams,
             );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
@@ -1229,7 +1172,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async update({ model, args, query, __internalParams }: any) {
+          async update({ model, args, query }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
@@ -1238,7 +1181,6 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               client,
               options,
               transactionContext.getStore(),
-              __internalParams,
             );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
@@ -1355,7 +1297,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async delete({ model, args, query, __internalParams }: any) {
+          async delete({ model, args, query }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
@@ -1364,7 +1306,6 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               client,
               options,
               transactionContext.getStore(),
-              __internalParams,
             );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
@@ -1453,7 +1394,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async upsert({ model, args, query, __internalParams }: any) {
+          async upsert({ model, args, query }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
@@ -1462,7 +1403,6 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               client,
               options,
               transactionContext.getStore(),
-              __internalParams,
             );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);
@@ -1593,7 +1533,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async createMany({ model, args, query, __internalParams }: any) {
+          async createMany({ model, args, query }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
@@ -1604,7 +1544,6 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               client,
               options,
               transactionContext.getStore(),
-              __internalParams,
             );
             let result: any;
             try {
@@ -1647,7 +1586,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async updateMany({ model, args, query, __internalParams }: any) {
+          async updateMany({ model, args, query }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
@@ -1658,7 +1597,6 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               client,
               options,
               transactionContext.getStore(),
-              __internalParams,
             );
             let result: any;
             try {
@@ -1701,7 +1639,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
             return result;
           },
 
-          async deleteMany({ model, args, query, __internalParams }: any) {
+          async deleteMany({ model, args, query }: any) {
             if (shouldSkip(model, trackedModels, ignoredModels)) {
               return query(args);
             }
@@ -1710,7 +1648,6 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
               client,
               options,
               transactionContext.getStore(),
-              __internalParams,
             );
             const pkField = getPkField(model, options);
             const delegateName = modelDelegateName(model);

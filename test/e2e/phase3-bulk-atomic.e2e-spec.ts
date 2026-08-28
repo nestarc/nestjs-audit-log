@@ -36,7 +36,7 @@ describe('phase 3 array transaction and bulk atomic contracts E2E', () => {
           data: { name: 'Array Two', email: 'array@test.com', password: 'pw' },
         }),
       ]),
-    ).rejects.toThrow('does not support array $transaction([...])');
+    ).rejects.toThrow('must run inside withAuditTransaction()');
 
     expect(await counts(basePrisma)).toEqual({ users: 0, logs: 0 });
   });

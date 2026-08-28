@@ -16,7 +16,9 @@ describe('documentation gates', () => {
     expect(readme).toContain('rejects tracked writes outside');
     expect(readme).toContain('orphan success rows');
     expect(readme).toContain('AuditService.log(input, tx)');
-    expect(readme).toContain('experimentalTxAudit');
+    expect(readme).toContain('`experimentalTxAudit` was removed in v0.5.0');
+    expect(readme).toContain('including `false`, fail');
+    expect(readme).not.toContain('| `experimentalTxAudit` |');
     expect(readme).toContain('databaseMapping');
     expect(readme).toContain('lock the target row and refresh the preimage');
     expect(readme).toContain(
@@ -33,12 +35,11 @@ describe('documentation gates', () => {
     expect(adr).toContain("consistency: 'atomic-required'");
     expect(adr).toContain("consistency: 'best-effort'");
     expect(adr).toContain('AuditService.log(input, tx)');
-    expect(adr).toContain('_createItxClient()');
-    expect(adr).toContain('__internalParams');
     expect(adr).toContain('runtime tombstone');
     expect(changelog).toContain(
       'Remove the deprecated `AuditExtensionOptions.experimentalTxAudit`',
     );
+    expect(changelog).toContain('including `false`, fail fast');
   });
 
   it('marks pre-release v0.2 planning documents as historical', () => {
@@ -132,14 +133,18 @@ describe('documentation gates', () => {
 
   it('documents v0.2.0 release notes in CHANGELOG', () => {
     const changelog = read('CHANGELOG.md');
+    const v020Start = changelog.indexOf('## [0.2.0]');
+    const v020End = changelog.indexOf('## [0.1.0]', v020Start);
+    const v020 = changelog.slice(v020Start, v020End);
 
-    expect(changelog).toContain('## [0.2.0]');
-    expect(changelog).toContain('Tracking default changed');
-    expect(changelog).toContain('AuditService.query(): keyset cursor pagination');
-    expect(changelog).toContain('append-only default enforcement changed');
-    expect(changelog).toContain('AuditService.prune');
-    expect(changelog).toContain('experimentalTxAudit');
-    expect(changelog).toMatch(
+    expect(v020Start).toBeGreaterThanOrEqual(0);
+    expect(v020End).toBeGreaterThan(v020Start);
+    expect(v020).toContain('Tracking default changed');
+    expect(v020).toContain('AuditService.query(): keyset cursor pagination');
+    expect(v020).toContain('append-only default enforcement changed');
+    expect(v020).toContain('AuditService.prune');
+    expect(v020).toContain('experimentalTxAudit');
+    expect(v020).toMatch(
       /they\s+do not establish transaction-atomic automatic auditing/,
     );
   });
@@ -181,7 +186,8 @@ describe('documentation gates', () => {
     expect(readme).toContain('tenantId and allTenants are mutually exclusive');
     expect(readme).toContain('No trackedModels/ignoredModels configured');
     expect(readme).toContain('uses no private Prisma API');
-    expect(readme).toContain('experimentalTxAudit` is deprecated');
+    expect(readme).toContain('generic public helper guard');
+    expect(readme).not.toContain('`experimentalTxAudit` is deprecated');
     expect(readme).not.toContain('reserved for future transaction-aware routing');
   });
 

@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Remove the deprecated `AuditExtensionOptions.experimentalTxAudit` private Prisma transaction
   routing in 0.5.0. Version 0.4.1 is the last release accepting the option. Migrate authoritative
   automatic tracking to `atomic-required` plus `withAuditTransaction()`, or remove the option and
-  retain explicit non-atomic `best-effort`; see the
+  retain explicit non-atomic `best-effort`. During 0.5.x, JavaScript or untyped options that retain
+  their own legacy key, including `false`, fail fast instead of silently downgrading; see the
   [removal ADR](docs/2026-08-28-experimental-tx-audit-removal-adr.md).
 - Drop Node.js 20 after its end of life and require Node.js 22.13+ within the 22.x line,
   or Node.js 24.x. Version 0.4.1 remains the final Node.js 20-compatible release; this

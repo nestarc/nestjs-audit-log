@@ -274,7 +274,6 @@ Apply to individual handlers or entire controllers:
 | `logFailures` | `boolean` | `false` | Record best-effort failure audit rows for business write errors |
 | `ignoreTimestampOnlyUpdates` | `boolean` | `false` | Suppress `@updatedAt`-only update entries |
 | `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
-| `experimentalTxAudit` | `boolean` | `false` | Deprecated legacy compatibility path for `best-effort`; uses private Prisma internals and may silently fall back |
 
 When neither `trackedModels` nor `ignoredModels` is configured, `createAuditExtension()` audits all Prisma models and emits a one-time `No trackedModels/ignoredModels configured` warning. Set `trackedModels` as an allowlist or `ignoredModels` as a denylist to narrow scope.
 
@@ -560,10 +559,21 @@ can be empty or stale because its reads use the base client.
 
 The same best-effort rule applies to array transactions (`$transaction([...])`). When a later operation rolls back the batch, Prisma 7 may have already allowed an earlier operation's extension callback to write an orphan success audit row. Do not rely on automatic auditing for atomic batch audit semantics.
 
-Array transactions remain outside the atomic contract. In `atomic-required`, a detected array
-`$transaction([...])` fails before the business query with an error directing callers to sequential
-operations inside `withAuditTransaction()`. `experimentalTxAudit` is deprecated and cannot be
-combined with `atomic-required`. `AuditService.log(input, tx)` remains the stable manual event path.
+Array transactions remain outside the atomic contract. In `atomic-required`, tracked operations
+created outside `withAuditTransaction()` fail at the generic public helper guard before the business
+query. Use sequential mutations inside `withAuditTransaction()` instead.
+`AuditService.log(input, tx)` remains the stable manual event path.
+
+#### Migrating from `experimentalTxAudit` in v0.5.0
+
+`experimentalTxAudit` was removed in v0.5.0; v0.4.1 is the last release that accepts the option.
+For authoritative automatic records, switch to `consistency: 'atomic-required'` and execute tracked
+mutations through `withAuditTransaction()`. If non-atomic automatic records are intentional, remove
+the legacy key and keep `consistency: 'best-effort'` explicit. During the v0.5.x migration window,
+JavaScript or `any` options that retain their own `experimentalTxAudit` key, including `false`, fail
+fast instead of silently downgrading. See the
+[removal ADR](https://github.com/nestarc/nestjs-audit-log/blob/main/docs/2026-08-28-experimental-tx-audit-removal-adr.md)
+for before-and-after examples and the manual transaction alternative.
 
 ### Bulk mutation contract
 

@@ -135,13 +135,12 @@ describe('public API exports', () => {
     expect(typeof PostgresAuditStreamStore).toBe('function');
   });
 
-  it('exports experimental transaction audit option type', () => {
-    const options: AuditExtensionOptions = {
-      consistency: 'best-effort',
-      experimentalTxAudit: true,
-    };
+  it('excludes the removed experimental transaction option from the public type', () => {
+    type ExperimentalTxAuditIsRemoved =
+      'experimentalTxAudit' extends keyof AuditExtensionOptions ? false : true;
+    const isRemoved: ExperimentalTxAuditIsRemoved = true;
 
-    expect(options.experimentalTxAudit).toBe(true);
+    expect(isRemoved).toBe(true);
   });
 
   it('preserves transaction callback and result types for createAuditedClient', async () => {
