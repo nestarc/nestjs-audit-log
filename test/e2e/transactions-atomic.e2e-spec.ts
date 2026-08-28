@@ -116,6 +116,43 @@ describe('atomic-required transaction E2E', () => {
     });
   });
 
+  it('commits atomic upsert create and update branches with exact diffs', async () => {
+    await audited.withAuditTransaction(async (tx: any) => {
+      await tx.user.upsert({
+        where: { email: 'atomic-upsert@test.com' },
+        create: {
+          name: 'Atomic Upsert Created',
+          email: 'atomic-upsert@test.com',
+          password: 'pw',
+        },
+        update: { name: 'Unused' },
+      });
+      await tx.user.upsert({
+        where: { email: 'atomic-upsert@test.com' },
+        create: {
+          name: 'Unused',
+          email: 'atomic-upsert@test.com',
+          password: 'pw',
+        },
+        update: { name: 'Atomic Upsert Updated' },
+      });
+    });
+
+    const logs = await basePrisma.$queryRaw<any[]>`
+      SELECT action, changes FROM audit_logs
+    `;
+    expect(logs).toHaveLength(2);
+    const createdLog = logs.find((log) => log.action === 'User.created');
+    const updatedLog = logs.find((log) => log.action === 'User.updated');
+    expect(createdLog?.changes.name).toEqual({
+      after: 'Atomic Upsert Created',
+    });
+    expect(updatedLog?.changes.name).toEqual({
+      before: 'Atomic Upsert Created',
+      after: 'Atomic Upsert Updated',
+    });
+  });
+
   it('records transaction-local create then update diffs from the same tx', async () => {
     await audited.withAuditTransaction(async (tx: any) => {
       const user = await tx.user.create({
