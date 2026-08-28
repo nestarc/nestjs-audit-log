@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-28
+
 ### Breaking Changes
 
 - Remove the deprecated `AuditExtensionOptions.experimentalTxAudit` private Prisma transaction
@@ -30,12 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Promote `atomic-required` automatic tracking from Preview to Supported after exact-tip CI and the
+  coordinated tenancy `0.15.0` / audit-log `0.5.0` candidate / soft-delete `0.7.1` PostgreSQL
+  release gate. Explicit `best-effort` remains intentionally non-atomic and is outside this atomic
+  support claim.
 - Upgrade the repository lint gate from EOL ESLint 9 to ESLint 10.
 - Move CI and release workflows to Node.js 24-based `actions/checkout@v7`,
   `actions/setup-node@v7`, and `softprops/action-gh-release@v3`.
 
 ### Fixed
 
+- Isolate `AuditStreamRunner` observability hooks from delivery control flow: synchronous throws,
+  rejected thenables, and mutation of reported errors no longer alter retry, DLQ, or checkpoint
+  semantics; completed retry backoffs also remove their abort listeners.
 - Resolve the installed NestJS major without importing the private `@nestjs/core/package.json`
   subpath, which is unavailable under NestJS 12 package exports.
 - Preserve the original database failure as the error `cause` when partition pruning fails.

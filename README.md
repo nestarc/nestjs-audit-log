@@ -8,9 +8,10 @@
 
 Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage.
 
-> **Preview — choose the automatic tracking consistency explicitly.** The new
-> `atomic-required` mode commits and rolls back business mutations and automatic audit rows
-> together through `withAuditTransaction()`. Legacy `best-effort` mode is not transaction-atomic:
+> **Supported — use `atomic-required` for authoritative automatic tracking.** Business mutations
+> and automatic audit rows commit or roll back together when tracked writes run through
+> `withAuditTransaction()`, and writes outside the helper fail before execution. Explicit
+> `best-effort` remains an intentionally non-atomic compatibility mode:
 > rollback can leave orphan success rows and transaction-local diffs can be stale.
 
 ## Requirements
@@ -646,7 +647,7 @@ last-known-good tuple through package public APIs:
 |-----------|--------------------|
 | `@nestarc/tenancy` | `0.15.0` |
 | `@nestarc/audit-log` | `0.4.1` |
-| `@nestarc/soft-delete` | `0.7.0` |
+| `@nestarc/soft-delete` | `0.7.1` |
 | Runtime lane | Node 24, NestJS 11.1.18, Prisma 7.9.1, PostgreSQL 16 |
 
 This table records the coordinated release gate, not the full peer-support matrix. The fixture owns

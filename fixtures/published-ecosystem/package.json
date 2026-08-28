@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@nestarc/audit-log": "0.4.1",
-    "@nestarc/soft-delete": "0.7.0",
+    "@nestarc/soft-delete": "0.7.1",
     "@nestarc/tenancy": "0.15.0",
     "@nestjs/common": "11.1.18",
     "@nestjs/core": "11.1.18",

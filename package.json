@@ -1,6 +1,6 @@
 {
   "name": "@nestarc/audit-log",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

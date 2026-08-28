@@ -22,6 +22,9 @@ describe('documentation gates', () => {
     expect(readme).toContain('databaseMapping');
     expect(readme).toContain('lock the target row and refresh the preimage');
     expect(readme).toContain(
+      'Supported — use `atomic-required` for authoritative automatic tracking',
+    );
+    expect(readme).not.toContain(
       'Preview — choose the automatic tracking consistency explicitly',
     );
   });
@@ -107,6 +110,51 @@ describe('documentation gates', () => {
 
     expect(fixture.scripts['verify:published']).toContain(peerGraphCheck);
     expect(fixture.scripts['verify:candidate']).toContain(peerGraphCheck);
+  });
+
+  it('keeps the v0.5.0 release metadata and pre-publish ecosystem tuple aligned', () => {
+    const packageJson = JSON.parse(read('package.json')) as { version: string };
+    const packageLock = JSON.parse(read('package-lock.json')) as {
+      version: string;
+      packages: Record<string, { version?: string }>;
+    };
+    const fixture = JSON.parse(
+      read('fixtures/published-ecosystem/package.json'),
+    ) as { dependencies: Record<string, string> };
+    const fixtureLock = JSON.parse(
+      read('fixtures/published-ecosystem/package-lock.json'),
+    ) as {
+      packages: Record<
+        string,
+        { version?: string; dependencies?: Record<string, string> }
+      >;
+    };
+    const readme = read('README.md');
+    const changelog = read('CHANGELOG.md');
+
+    expect(packageJson.version).toBe('0.5.0');
+    expect(packageLock.version).toBe('0.5.0');
+    expect(packageLock.packages['']?.version).toBe('0.5.0');
+    expect(changelog).toContain('## [0.5.0] - 2026-08-28');
+    expect(changelog).toContain('rejected thenables');
+    expect(fixture.dependencies['@nestarc/tenancy']).toBe('0.15.0');
+    expect(fixture.dependencies['@nestarc/audit-log']).toBe('0.4.1');
+    expect(fixture.dependencies['@nestarc/soft-delete']).toBe('0.7.1');
+
+    for (const packageName of [
+      '@nestarc/tenancy',
+      '@nestarc/audit-log',
+      '@nestarc/soft-delete',
+    ]) {
+      const expected = fixture.dependencies[packageName];
+      expect(fixtureLock.packages['']?.dependencies?.[packageName]).toBe(
+        expected,
+      );
+      expect(
+        fixtureLock.packages[`node_modules/${packageName}`]?.version,
+      ).toBe(expected);
+      expect(readme).toContain(`| \`${packageName}\` | \`${expected}\` |`);
+    }
   });
 
   it('keeps NestJS 12 support aligned across peers, docs, and CI', () => {
