@@ -275,17 +275,22 @@ export class AuditStreamRunner {
 
   private emitMetric(metric: AuditStreamMetric): void {
     try {
-      this.options.onMetric?.(metric);
+      const result: unknown = this.options.onMetric?.(metric);
+      ignoreRejectedHook(result);
     } catch {
-      // Observability hooks must not change delivery/checkpoint semantics.
+      // Synchronous hook failures must not change delivery/checkpoint semantics.
     }
   }
 
-  private emitError(error: unknown, context: AuditStreamErrorContext): void {
+  private emitError(
+    error: AuditStreamDeliveryError,
+    context: AuditStreamErrorContext,
+  ): void {
     try {
-      this.options.onError?.(error, context);
+      const result: unknown = this.options.onError?.(cloneDeliveryError(error), context);
+      ignoreRejectedHook(result);
     } catch {
-      // Error hooks are observational and must never interrupt retries or DLQ.
+      // Synchronous hook failures must never interrupt retries or DLQ.
     }
   }
 
@@ -324,6 +329,23 @@ function cloneEntry(entry: AuditEntry): AuditEntry {
   };
 }
 
+function cloneDeliveryError(error: AuditStreamDeliveryError): AuditStreamDeliveryError {
+  return Object.create(
+    Object.getPrototypeOf(error) as object,
+    Object.getOwnPropertyDescriptors(error),
+  ) as AuditStreamDeliveryError;
+}
+
+function ignoreRejectedHook(result: unknown): void {
+  if (
+    result !== null &&
+    (typeof result === 'object' || typeof result === 'function') &&
+    typeof (result as { then?: unknown }).then === 'function'
+  ) {
+    void Promise.resolve(result).catch(() => undefined);
+  }
+}
+
 async function sleepWithSignal(delayMs: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     const error = new Error('[@nestarc/audit-log] audit stream run aborted.');
@@ -331,16 +353,17 @@ async function sleepWithSignal(delayMs: number, signal?: AbortSignal): Promise<v
     throw error;
   }
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, delayMs);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        const error = new Error('[@nestarc/audit-log] audit stream run aborted.');
-        error.name = 'AbortError';
-        reject(error);
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      const error = new Error('[@nestarc/audit-log] audit stream run aborted.');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }

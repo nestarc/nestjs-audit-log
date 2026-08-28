@@ -4,8 +4,7 @@ import {
   AuditStreamRunner,
   AuditStreamSink,
 } from '../src';
-import type { AuditEntry, AuditScanPage } from '../src';
-import type { AuditStreamState } from '../src';
+import type { AuditEntry, AuditScanPage, AuditStreamMetric, AuditStreamState } from '../src';
 
 const ids = [
   '00000000-0000-0000-0000-000000000001',
@@ -141,6 +140,229 @@ describe('AuditStreamRunner', () => {
     ]));
   });
 
+  it('does not let failing observability hooks interrupt a successful retry', async () => {
+    const state = memoryStore();
+    const sink = {
+      deliver: jest.fn()
+        .mockRejectedValueOnce(new AuditStreamDeliveryError('busy', { terminal: false }))
+        .mockResolvedValueOnce(undefined),
+    };
+    const observedMetrics: string[] = [];
+    const onMetric = jest.fn((metric: AuditStreamMetric) => {
+      observedMetrics.push(metric.name);
+      throw new Error('metric hook failed');
+    });
+    const onError = jest.fn(() => {
+      throw new Error('error hook failed');
+    });
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { tenantId: 'tenant-1' }, sink,
+        checkpointStore: state.store, sleep: async () => undefined,
+        onMetric, onError,
+      },
+    ).runOnce()).resolves.toMatchObject({
+      status: 'delivered', deliveredEntries: 1, checkpoint: 'wm',
+    });
+    expect(sink.deliver).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(observedMetrics).toEqual(['batch_retried', 'batch_delivered']);
+    expect(state.getState()).toEqual({ checkpoint: 'wm', highWatermark: null });
+  });
+
+  it('does not expose rejected observability hook promises as unhandled failures', async () => {
+    const state = memoryStore();
+    const sink = {
+      deliver: jest.fn()
+        .mockRejectedValueOnce(new AuditStreamDeliveryError('busy', { terminal: false }))
+        .mockResolvedValueOnce(undefined),
+    };
+    const onMetric = jest.fn((async () => {
+      throw new Error('async metric hook failed');
+    }) as () => void);
+    const onError = jest.fn((async () => {
+      throw new Error('async error hook failed');
+    }) as () => void);
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { tenantId: 'tenant-1' }, sink,
+        checkpointStore: state.store, sleep: async () => undefined,
+        onMetric, onError,
+      },
+    ).runOnce()).resolves.toMatchObject({
+      status: 'delivered', deliveredEntries: 1, checkpoint: 'wm',
+    });
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onMetric).toHaveBeenCalledTimes(2);
+    expect(state.getState()).toEqual({ checkpoint: 'wm', highWatermark: null });
+  });
+
+  it('isolates retry and DLQ control flow from error hook mutation', async () => {
+    const state = memoryStore();
+    const transientError = new AuditStreamDeliveryError('busy', {
+      terminal: false, status: 503, retryAfterMs: 1200,
+    });
+    const terminalError = new AuditStreamDeliveryError('bad request', {
+      terminal: true, status: 400,
+    });
+    const sink = {
+      deliver: jest.fn()
+        .mockRejectedValueOnce(transientError)
+        .mockRejectedValueOnce(terminalError),
+    };
+    const sleeps: number[] = [];
+    const deadLetterStore = { write: jest.fn(async () => undefined) };
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { allTenants: true }, sink,
+        checkpointStore: state.store, deadLetterStore,
+        sleep: async (delay) => { sleeps.push(delay); },
+        onError: (error) => {
+          const observed = error as { terminal: boolean; retryAfterMs?: number };
+          observed.terminal = !observed.terminal;
+          observed.retryAfterMs = 1;
+        },
+      },
+    ).runOnce()).resolves.toMatchObject({
+      deliveredEntries: 0, deadLetteredEntries: 1, checkpoint: 'wm',
+    });
+    expect(sink.deliver).toHaveBeenCalledTimes(2);
+    expect(sleeps).toEqual([1200]);
+    expect(deadLetterStore.write).toHaveBeenCalledWith(expect.objectContaining({
+      error: terminalError,
+    }));
+    expect(transientError).toMatchObject({ terminal: false, retryAfterMs: 1200 });
+    expect(terminalError).toMatchObject({ terminal: true, retryAfterMs: undefined });
+  });
+
+  it('normalizes unknown failures and stops after the configured retry budget', async () => {
+    const state = memoryStore();
+    const transportError = new Error('transport unavailable');
+    const sink = {
+      deliver: jest.fn()
+        .mockRejectedValueOnce('socket closed')
+        .mockRejectedValueOnce(transportError),
+    };
+    const sleep = jest.fn(async () => undefined);
+    const metrics: string[] = [];
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { allTenants: true }, sink,
+        checkpointStore: state.store, maxRetries: 1, sleep,
+        onMetric: (metric) => metrics.push(metric.name),
+      },
+    ).runOnce()).rejects.toMatchObject({
+      message: expect.stringContaining('transport unavailable'),
+      terminal: false,
+      cause: transportError,
+    });
+    expect(sink.deliver).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(250, undefined);
+    expect(metrics).toEqual(['batch_retried', 'run_failed']);
+    expect(state.getState()).toEqual({ checkpoint: null, highWatermark: 'wm' });
+  });
+
+  it('aborts before loading state without touching delivery or checkpoints', async () => {
+    const controller = new AbortController();
+    const reason = new Error('stop before run');
+    controller.abort(reason);
+    const state = memoryStore();
+    const sink: AuditStreamSink = { deliver: jest.fn(async () => undefined) };
+
+    await expect(new AuditStreamRunner(serviceFor([]) as any, {
+      streamId: 'stream-a', scan: { allTenants: true }, sink,
+      checkpointStore: state.store,
+    }).runOnce({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError', cause: reason,
+    });
+    expect(state.store.load).not.toHaveBeenCalled();
+    expect(state.store.save).not.toHaveBeenCalled();
+    expect(sink.deliver).not.toHaveBeenCalled();
+  });
+
+  it('aborts before entering backoff without advancing the ACK checkpoint', async () => {
+    const controller = new AbortController();
+    const state = memoryStore();
+    const sink = {
+      deliver: jest.fn(async () => {
+        throw new AuditStreamDeliveryError('busy', { terminal: false });
+      }),
+    };
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { allTenants: true }, sink,
+        checkpointStore: state.store,
+        onMetric: (metric) => {
+          if (metric.name === 'batch_retried') controller.abort('before backoff');
+        },
+      },
+    ).runOnce({ signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(sink.deliver).toHaveBeenCalledTimes(1);
+    expect(state.store.save).toHaveBeenCalledTimes(1);
+    expect(state.getState()).toEqual({ checkpoint: null, highWatermark: 'wm' });
+  });
+
+  it('aborts during the default backoff without retrying or advancing the checkpoint', async () => {
+    const controller = new AbortController();
+    const state = memoryStore();
+    const sink = {
+      deliver: jest.fn(async () => {
+        throw new AuditStreamDeliveryError('busy', { terminal: false });
+      }),
+    };
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { allTenants: true }, sink,
+        checkpointStore: state.store, initialBackoffMs: 10_000,
+        onMetric: (metric) => {
+          if (metric.name === 'batch_retried') {
+            queueMicrotask(() => controller.abort('during backoff'));
+          }
+        },
+      },
+    ).runOnce({ signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(sink.deliver).toHaveBeenCalledTimes(1);
+    expect(state.store.save).toHaveBeenCalledTimes(1);
+    expect(state.getState()).toEqual({ checkpoint: null, highWatermark: 'wm' });
+  });
+
+  it('removes the abort listener after a successful default backoff', async () => {
+    const controller = new AbortController();
+    const state = memoryStore();
+    const sink = {
+      deliver: jest.fn()
+        .mockRejectedValueOnce(new AuditStreamDeliveryError('busy', { terminal: false }))
+        .mockResolvedValueOnce(undefined),
+    };
+    const addListener = jest.spyOn(controller.signal, 'addEventListener');
+    const removeListener = jest.spyOn(controller.signal, 'removeEventListener');
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { allTenants: true }, sink,
+        checkpointStore: state.store, initialBackoffMs: 1,
+      },
+    ).runOnce({ signal: controller.signal })).resolves.toMatchObject({
+      status: 'delivered', checkpoint: 'wm',
+    });
+    const abortListener = addListener.mock.calls.find(([type]) => type === 'abort')?.[1];
+    expect(abortListener).toBeDefined();
+    expect(removeListener).toHaveBeenCalledWith('abort', abortListener);
+  });
+
   it('writes terminal 4xx to the DLQ before advancing the checkpoint', async () => {
     const order: string[] = [];
     const state = memoryStore();
@@ -169,6 +391,28 @@ describe('AuditStreamRunner', () => {
     }));
   });
 
+  it('surfaces a DLQ write failure without advancing the checkpoint', async () => {
+    const state = memoryStore();
+    const dlqError = new Error('DLQ unavailable');
+    const deadLetterStore = { write: jest.fn(async () => { throw dlqError; }) };
+    const sink = {
+      deliver: jest.fn(async () => {
+        throw new AuditStreamDeliveryError('bad request', { terminal: true, status: 400 });
+      }),
+    };
+
+    await expect(new AuditStreamRunner(
+      serviceFor([{ entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' }]) as any,
+      {
+        streamId: 'stream-a', scan: { allTenants: true }, sink,
+        checkpointStore: state.store, deadLetterStore,
+      },
+    ).runOnce()).rejects.toBe(dlqError);
+    expect(deadLetterStore.write).toHaveBeenCalledTimes(1);
+    expect(state.store.save).toHaveBeenCalledTimes(1);
+    expect(state.getState()).toEqual({ checkpoint: null, highWatermark: 'wm' });
+  });
+
   it('does not advance a terminal failure when no DLQ is configured', async () => {
     const state = memoryStore();
     const sink = {
@@ -184,6 +428,41 @@ describe('AuditStreamRunner', () => {
     expect((state.store.save as jest.Mock).mock.calls[0][1]).toEqual({
       checkpoint: null, highWatermark: 'wm',
     });
+  });
+
+  it('redelivers the same batch ID when checkpoint persistence fails after ACK', async () => {
+    let persisted: AuditStreamState = { checkpoint: null, highWatermark: null };
+    let rejectNextCheckpoint = true;
+    const checkpointStore: AuditStreamCheckpointStore = {
+      load: jest.fn(async () => persisted),
+      save: jest.fn(async (_streamId, next) => {
+        if (next.checkpoint !== null && rejectNextCheckpoint) {
+          rejectNextCheckpoint = false;
+          throw new Error('checkpoint unavailable');
+        }
+        persisted = next;
+      }),
+    };
+    const seenOptions: unknown[] = [];
+    const page = { entries: [entry(0)], checkpoint: 'wm', highWatermark: 'wm' };
+    const contexts: unknown[] = [];
+    const sink: AuditStreamSink = {
+      deliver: jest.fn(async (_entries, context) => { contexts.push(context); }),
+    };
+    const runner = new AuditStreamRunner(serviceFor([page], seenOptions) as any, {
+      streamId: 'stream-a', scan: { allTenants: true }, sink, checkpointStore,
+    });
+
+    await expect(runner.runOnce()).rejects.toThrow('checkpoint unavailable');
+    await expect(runner.runOnce()).resolves.toMatchObject({
+      deliveredEntries: 1, checkpoint: 'wm',
+    });
+    expect(contexts).toEqual([
+      expect.objectContaining({ batchId: `${ids[0]}:${ids[0]}`, attempt: 1 }),
+      expect.objectContaining({ batchId: `${ids[0]}:${ids[0]}`, attempt: 1 }),
+    ]);
+    expect(seenOptions[1]).toMatchObject({ until: 'wm' });
+    expect(persisted).toEqual({ checkpoint: 'wm', highWatermark: null });
   });
 
   it('redacts a cloned payload and refuses to alter the idempotency ID', async () => {
