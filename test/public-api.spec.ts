@@ -4,6 +4,7 @@ import {
   AuditInterceptor,
   AuditReason,
   AUDIT_REASON_KEY,
+  AuditService,
   ensurePartitions,
   createAuditedClient,
   mergeContextMetadata,
@@ -36,8 +37,24 @@ import type {
   AuditInsertInput,
   AuditInsertParams,
 } from '../src/prisma/audit-extension';
+import { AuditService as DeepAuditService } from '../src/services/audit.service';
 
 describe('public API exports', () => {
+  it('preserves the AuditService facade identity, constructor, and methods', () => {
+    expect(AuditService).toBe(DeepAuditService);
+    expect(AuditService.length).toBe(1);
+    expect(Object.getOwnPropertyNames(AuditService.prototype)).toEqual(
+      expect.arrayContaining([
+        'log',
+        'query',
+        'getById',
+        'scan',
+        'exportCsv',
+        'prune',
+      ]),
+    );
+  });
+
   it('preserves audit extension deep-import helper types', () => {
     const input: AuditInsertInput = {
       action: 'User.created',

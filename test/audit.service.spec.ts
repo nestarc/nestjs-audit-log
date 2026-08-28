@@ -752,6 +752,32 @@ describe('AuditService', () => {
       expect(csv).toContain("'=formula");
       expect(csv.endsWith('\r\n')).toBe(true);
     });
+
+    it('resolves the facade scan method lazily when exporting CSV', async () => {
+      const options = { allTenants: true as const };
+      const scan = jest.spyOn(service, 'scan').mockImplementation(async function* () {
+        yield {
+          entries: [],
+          checkpoint: null,
+          highWatermark: encodeAuditCursor(
+            '2026-06-11T03:14:15.000001Z',
+            uuid1,
+          ),
+        };
+      });
+
+      const stream = service.exportCsv(options);
+
+      expect(scan).not.toHaveBeenCalled();
+      let chunkCount = 0;
+      for await (const chunk of stream) {
+        expect(chunk).toBeDefined();
+        chunkCount += 1;
+      }
+      expect(chunkCount).toBeGreaterThan(0);
+      expect(scan).toHaveBeenCalledTimes(1);
+      expect(scan).toHaveBeenCalledWith(options);
+    });
   });
 
   describe('getById()', () => {
