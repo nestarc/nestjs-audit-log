@@ -24,6 +24,23 @@ describe('documentation gates', () => {
     );
   });
 
+  it('records the v0.5.0 experimental transaction routing removal policy', () => {
+    const adr = read('docs/2026-08-28-experimental-tx-audit-removal-adr.md');
+    const changelog = read('CHANGELOG.md');
+
+    expect(adr).toContain('Status: Accepted');
+    expect(adr).toContain('Target release: `0.5.0`');
+    expect(adr).toContain("consistency: 'atomic-required'");
+    expect(adr).toContain("consistency: 'best-effort'");
+    expect(adr).toContain('AuditService.log(input, tx)');
+    expect(adr).toContain('_createItxClient()');
+    expect(adr).toContain('__internalParams');
+    expect(adr).toContain('runtime tombstone');
+    expect(changelog).toContain(
+      'Remove the deprecated `AuditExtensionOptions.experimentalTxAudit`',
+    );
+  });
+
   it('marks pre-release v0.2 planning documents as historical', () => {
     const roadmap = read('docs/2026-06-11-v0.2.0-roadmap.md');
     const overview = read('docs/specs/v0.2.0/00-overview.md');
