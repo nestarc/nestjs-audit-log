@@ -623,6 +623,31 @@ record-level and identify `cascadeDelete` or `cascadeRestore` in `metadata.lifec
 exceeded. Lifecycle events remain notifications, not authoritative audit integration. Purge does not
 invent cascade semantics; configured database foreign-key behavior still applies.
 
+#### Published ecosystem release gate
+
+The consumer-owned PostgreSQL gate in `fixtures/published-ecosystem` verifies this exact
+last-known-good tuple through package public APIs:
+
+| Component | Exact gate version |
+|-----------|--------------------|
+| `@nestarc/tenancy` | `0.15.0` |
+| `@nestarc/audit-log` | `0.4.1` |
+| `@nestarc/soft-delete` | `0.7.0` |
+| Runtime lane | Node 24, NestJS 11.1.18, Prisma 7.9.1, PostgreSQL 16 |
+
+This table records the coordinated release gate, not the full peer-support matrix. The fixture owns
+an independent manifest and lockfile, uses exact versions only, and prints each registry URL and
+SHA-512 integrity before testing transaction commit/rollback, soft-delete, restore, purge, and
+cascade evidence. The runner copies the fixture outside the repository and performs a fresh
+`npm ci`, so root or sibling dependencies cannot satisfy a missing package. CI first runs the
+published tuple, then replaces only audit-log with the current checkout's real `npm pack --json`
+tarball and repeats the same tests. Tag publishing cannot start until that candidate gate passes.
+
+Do not make this fixture follow `latest`, a semver range, a workspace, or a sibling checkout. After
+one of the three packages is published, update the manifest, lockfile, this table, and registry
+integrity evidence together in a dedicated tuple-bump PR. A coordinated unreleased package may be
+substituted only as an explicitly supplied packed tarball.
+
 ## Multi-Tenancy
 
 Tenant resolution uses this order: explicit `tenantResolver`, optional `@nestarc/tenancy`, then `null`.
@@ -687,6 +712,12 @@ npm run test:e2e:full
 npm run test:e2e:setup
 npm run test:e2e
 npm run test:e2e:teardown
+
+# Published ecosystem tuple and current packed audit-log candidate
+npm run docker:up -- --wait --wait-timeout 60
+npm run test:e2e:ecosystem
+npm run test:e2e:ecosystem:candidate
+npm run docker:down
 ```
 
 `test:e2e:full` runs teardown after success, test failure, or an interrupt. The individual

@@ -72,6 +72,51 @@ jobs:
       - name: E2E tests
         run: npm run test:e2e
 
+  ecosystem-release-gate:
+    name: Ecosystem release gate
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: audit_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d audit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/audit_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            fixtures/published-ecosystem/package-lock.json
+
+      - name: Install audit-log dependencies
+        run: npm ci
+
+      - name: Test exact published tuple
+        run: npm run test:e2e:ecosystem
+
+      - name: Test packed audit-log candidate
+        run: npm run test:e2e:ecosystem:candidate
+
   peer-matrix:
     runs-on: ubuntu-latest
     needs: test

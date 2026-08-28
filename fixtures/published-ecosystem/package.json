@@ -1,0 +1,35 @@
+{
+  "name": "@nestarc/audit-log-published-ecosystem-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Consumer-owned release gate for the published Nestarc tenancy, audit-log, and soft-delete packages",
+  "scripts": {
+    "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
+    "verify:published": "node scripts/verify-packages.cjs && npm ls @nestarc/tenancy @nestarc/audit-log @nestarc/soft-delete --depth=0",
+    "verify:candidate": "node scripts/verify-packages.cjs",
+    "test:e2e": "npm run prisma:generate && node --import tsx test/ecosystem.e2e.cjs",
+    "test": "npm run verify:published && npm run test:e2e"
+  },
+  "engines": {
+    "node": "^24.0.0"
+  },
+  "dependencies": {
+    "@nestarc/audit-log": "0.4.1",
+    "@nestarc/soft-delete": "0.7.0",
+    "@nestarc/tenancy": "0.15.0",
+    "@nestjs/common": "11.1.18",
+    "@nestjs/core": "11.1.18",
+    "@nestjs/testing": "11.1.18",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "pg": "8.22.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@prisma/internals": "7.9.1",
+    "prisma": "7.9.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

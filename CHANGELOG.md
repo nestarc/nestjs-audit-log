@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A consumer-owned PostgreSQL ecosystem release gate that installs the exact published
+  `@nestarc/tenancy`, `@nestarc/audit-log`, and `@nestarc/soft-delete` tuple, logs registry
+  integrity, and repeats the atomic lifecycle suite with the current packed audit-log candidate
+  before tag publishing.
+
 ## [0.4.1] - 2026-08-27
 
 ### Added

@@ -37,6 +37,8 @@
     "test": "jest",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config test/e2e/jest-e2e.config.ts --runInBand",
+    "test:e2e:ecosystem": "node scripts/run-ecosystem-e2e.cjs --published",
+    "test:e2e:ecosystem:candidate": "npm run build && node scripts/run-ecosystem-e2e.cjs --candidate",
     "prisma:test:generate": "dotenv -e .env.test -- prisma generate",
     "prisma:test:push": "dotenv -e .env.test -- prisma db push",
     "docker:up": "docker compose -f test/e2e/docker-compose.yml up -d",
