@@ -91,10 +91,31 @@ describe('documentation gates', () => {
     expect(ci).toContain('peer-matrix');
     expect(ci).toContain('nest: 10');
     expect(ci).toContain('nest: 11');
+    expect(ci).toContain('nest: 12');
     expect(ci).toContain('prisma: 5');
     expect(ci).toContain('prisma: 6');
     expect(ci).toContain('prisma: 7');
     expect(ci).toContain('npm run test:e2e');
+  });
+
+  it('keeps NestJS 12 support aligned across peers, docs, and CI', () => {
+    const packageJson = JSON.parse(read('package.json')) as {
+      peerDependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    const readme = read('README.md');
+    const ci = read('.github/workflows/ci.yml');
+
+    expect(packageJson.peerDependencies['@nestjs/common']).toBe(
+      '^10.0.0 || ^11.0.0 || ^12.0.1',
+    );
+    expect(packageJson.peerDependencies['@nestjs/core']).toBe(
+      '^10.0.0 || ^11.0.0 || ^12.0.1',
+    );
+    expect(packageJson.devDependencies['@nestjs/core']).toBe('^12.0.1');
+    expect(readme).toContain('NestJS 10, 11, or 12.0.1+');
+    expect(ci).toContain('Verify NestJS 12 CommonJS runtime');
+    expect(ci).toContain('Verify NestJS 12 packed peer install');
   });
 
   it('keeps the supported Node and Actions runtime policy aligned', () => {

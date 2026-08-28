@@ -15,10 +15,14 @@ Audit logging module for NestJS with automatic Prisma change tracking and append
 
 ## Requirements
 
-- NestJS 10 or 11
+- NestJS 10, 11, or 12.0.1+
 - Prisma 7 (primary), with Prisma 5/6 legacy peer compatibility
 - PostgreSQL
 - Node.js 22.13+ within the 22.x line, or Node.js 24.x
+
+NestJS 12's core packages are ESM-only. This package remains CommonJS-compatible on the supported
+Node.js versions through Node's `require(esm)` interoperability. NestJS 12.0.0 is excluded because
+its published framework peer metadata was corrected in 12.0.1.
 
 ## Features
 

@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Support NestJS 12.0.1+ while retaining NestJS 10/11 compatibility, with NestJS 12 × Prisma 5/6/7
+  peer-matrix coverage and a CommonJS runtime smoke test.
 - A consumer-owned PostgreSQL ecosystem release gate that installs the exact published
   `@nestarc/tenancy`, `@nestarc/audit-log`, and `@nestarc/soft-delete` tuple, logs registry
   integrity, and repeats the atomic lifecycle suite with the current packed audit-log candidate
@@ -34,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Resolve the installed NestJS major without importing the private `@nestjs/core/package.json`
+  subpath, which is unavailable under NestJS 12 package exports.
 - Preserve the original database failure as the error `cause` when partition pruning fails.
 
 ## [0.4.1] - 2026-08-27

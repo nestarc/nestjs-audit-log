@@ -1,6 +1,8 @@
 import { Module, RequestMethod } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   AuditLogModule,
   resolveMiddlewareWildcard,
@@ -179,6 +181,19 @@ describe('AuditLogModule', () => {
   });
 
   describe('resolveMiddlewareWildcard', () => {
+    it('resolves the installed Nest version without a package.json subpath import', () => {
+      const packagePath = join(
+        dirname(require.resolve('@nestjs/core')),
+        'package.json',
+      );
+      const { version } = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+        version: string;
+      };
+      const expected = Number(version.split('.')[0]) >= 11 ? '{*splat}' : '*';
+
+      expect(resolveMiddlewareWildcard()).toBe(expected);
+    });
+
     it('uses the Nest 11 compatible wildcard for v11 and newer', () => {
       expect(resolveMiddlewareWildcard('11.0.0')).toBe('{*splat}');
       expect(resolveMiddlewareWildcard('12.1.0')).toBe('{*splat}');

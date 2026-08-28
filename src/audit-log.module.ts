@@ -6,7 +6,9 @@ import {
   NestModule,
 } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
-import nestCorePackage from '@nestjs/core/package.json';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { AUDIT_LOG_OPTIONS } from './audit-log.constants';
 import {
   AuditLogModuleOptions,
@@ -87,9 +89,28 @@ const passThroughInterceptor = {
 
 export function resolveMiddlewareWildcard(nestCoreVersion?: string): string {
   const version =
-    arguments.length === 0 ? nestCorePackage.version : nestCoreVersion;
+    arguments.length === 0 ? resolveNestCoreVersion() : nestCoreVersion;
   const major =
     typeof version === 'string' ? Number(version.split('.')[0]) : Number.NaN;
 
   return Number.isFinite(major) && major >= 11 ? '{*splat}' : '*';
+}
+
+function resolveNestCoreVersion(): string | undefined {
+  try {
+    const requireFromHere = createRequire(__filename);
+    const packagePath = join(
+      dirname(requireFromHere.resolve('@nestjs/core')),
+      'package.json',
+    );
+    const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+      version?: unknown;
+    };
+
+    return typeof packageJson.version === 'string'
+      ? packageJson.version
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }

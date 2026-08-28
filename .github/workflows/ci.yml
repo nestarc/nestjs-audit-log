@@ -131,6 +131,9 @@ jobs:
           - { nest: 11, prisma: 5, express: 5, client: legacy }
           - { nest: 11, prisma: 6, express: 5, client: legacy }
           - { nest: 11, prisma: 7, express: 5, client: generated }
+          - { nest: 12, prisma: 5, express: 5, client: legacy }
+          - { nest: 12, prisma: 6, express: 5, client: legacy }
+          - { nest: 12, prisma: 7, express: 5, client: generated }
 
     services:
       postgres:
@@ -185,6 +188,14 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Verify NestJS 12 CommonJS runtime
+        if: matrix.nest == 12
+        run: node -e "const auditLog = require('./dist'); if (typeof auditLog.AuditLogModule !== 'function') process.exit(1)"
+
+      - name: Verify NestJS 12 packed peer install
+        if: matrix.nest == 12 && matrix.prisma == 7
+        run: npm run test:compat:nest12
 
       - name: Unit tests
         run: npm test
