@@ -32,8 +32,35 @@ import type {
   AuditStreamCheckpointStore,
   AuditStreamSink,
 } from '../src';
+import type {
+  AuditInsertInput,
+  AuditInsertParams,
+} from '../src/prisma/audit-extension';
 
 describe('public API exports', () => {
+  it('preserves audit extension deep-import helper types', () => {
+    const input: AuditInsertInput = {
+      action: 'User.created',
+      targetType: 'User',
+      targetId: 'user-1',
+      changes: { name: { after: 'Alice' } },
+    };
+    const params: AuditInsertParams = {
+      tenantId: null,
+      actorId: null,
+      actorType: 'system',
+      actorIp: null,
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      source: 'auto',
+      changes: input.changes,
+      result: 'success',
+    };
+
+    expect(params.targetId).toBe('user-1');
+  });
+
   it('exports shared audit option types', () => {
     const databaseMapping: AuditDatabaseMapping = {
       tableName: 'users',
