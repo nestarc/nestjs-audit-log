@@ -646,7 +646,7 @@ last-known-good tuple through package public APIs:
 | Component | Exact gate version |
 |-----------|--------------------|
 | `@nestarc/tenancy` | `0.15.0` |
-| `@nestarc/audit-log` | `0.4.1` |
+| `@nestarc/audit-log` | `0.5.0` |
 | `@nestarc/soft-delete` | `0.7.1` |
 | Runtime lane | Node 24, NestJS 11.1.18, Prisma 7.9.1, PostgreSQL 16 |
 

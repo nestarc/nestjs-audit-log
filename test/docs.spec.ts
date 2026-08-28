@@ -112,7 +112,7 @@ describe('documentation gates', () => {
     expect(fixture.scripts['verify:candidate']).toContain(peerGraphCheck);
   });
 
-  it('keeps the v0.5.0 release metadata and pre-publish ecosystem tuple aligned', () => {
+  it('keeps the v0.5.0 release metadata and published ecosystem tuple aligned', () => {
     const packageJson = JSON.parse(read('package.json')) as { version: string };
     const packageLock = JSON.parse(read('package-lock.json')) as {
       version: string;
@@ -138,7 +138,7 @@ describe('documentation gates', () => {
     expect(changelog).toContain('## [0.5.0] - 2026-08-28');
     expect(changelog).toContain('rejected thenables');
     expect(fixture.dependencies['@nestarc/tenancy']).toBe('0.15.0');
-    expect(fixture.dependencies['@nestarc/audit-log']).toBe('0.4.1');
+    expect(fixture.dependencies['@nestarc/audit-log']).toBe('0.5.0');
     expect(fixture.dependencies['@nestarc/soft-delete']).toBe('0.7.1');
 
     for (const packageName of [
