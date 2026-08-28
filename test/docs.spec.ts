@@ -79,6 +79,30 @@ describe('documentation gates', () => {
     expect(ci).toContain('npm run test:e2e');
   });
 
+  it('keeps the supported Node and Actions runtime policy aligned', () => {
+    const packageJson = JSON.parse(read('package.json')) as {
+      engines: { node: string };
+    };
+    const readme = read('README.md');
+    const changelog = read('CHANGELOG.md');
+    const ci = read('.github/workflows/ci.yml');
+    const release = read('.github/workflows/release.yml');
+
+    expect(packageJson.engines.node).toBe('^22.13.0 || ^24.0.0');
+    expect(readme).toContain(
+      'Node.js 22.13+ within the 22.x line, or Node.js 24.x',
+    );
+    expect(changelog).toContain('final Node.js 20-compatible release');
+    expect(ci).toContain("node-version: ['22.13', '24']");
+    expect(ci).not.toContain("node-version: '20.19'");
+    expect(`${ci}\n${release}`).not.toMatch(
+      /actions\/(?:checkout|setup-node)@v[1-6]\b/,
+    );
+    expect(`${ci}\n${release}`).toContain('actions/checkout@v7');
+    expect(`${ci}\n${release}`).toContain('actions/setup-node@v7');
+    expect(release).toContain('softprops/action-gh-release@v3');
+  });
+
   it('documents Prisma 7 generator, adapter, and namespace injection setup', () => {
     const readme = read('README.md');
 

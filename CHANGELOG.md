@@ -7,12 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Drop Node.js 20 after its end of life and require Node.js 22.13+ within the 22.x line,
+  or Node.js 24.x. Version 0.4.1 remains the final Node.js 20-compatible release; this
+  contract change is reserved for 0.5.0.
+
 ### Added
 
 - A consumer-owned PostgreSQL ecosystem release gate that installs the exact published
   `@nestarc/tenancy`, `@nestarc/audit-log`, and `@nestarc/soft-delete` tuple, logs registry
   integrity, and repeats the atomic lifecycle suite with the current packed audit-log candidate
   before tag publishing.
+
+### Changed
+
+- Upgrade the repository lint gate from EOL ESLint 9 to ESLint 10.
+- Move CI and release workflows to Node.js 24-based `actions/checkout@v7`,
+  `actions/setup-node@v7`, and `softprops/action-gh-release@v3`.
+
+### Fixed
+
+- Preserve the original database failure as the error `cause` when partition pruning fails.
 
 ## [0.4.1] - 2026-08-27
 

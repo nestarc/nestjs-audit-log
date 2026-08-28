@@ -1003,16 +1003,22 @@ describe('AuditService', () => {
             upperBound: '2026-01-01 00:00:00+00',
           },
         ]);
+      const cause = new Error('locked');
       mockPrisma.$executeRawUnsafe = jest
         .fn()
         .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('locked'));
+        .mockRejectedValueOnce(cause);
 
       await expect(
         service.prune({
           olderThan: new Date('2026-02-01T00:00:00.000Z'),
         }),
-      ).rejects.toThrow('already pruned: audit_logs_y2025m11');
+      ).rejects.toMatchObject({
+        message: expect.stringContaining(
+          'already pruned: audit_logs_y2025m11',
+        ),
+        cause,
+      });
     });
 
     it('temporarily drops and recreates legacy delete RULEs on flat tables', async () => {

@@ -83,7 +83,7 @@ export class AuditService {
   async log(input: ManualAuditLogInput, tx?: any): Promise<void> {
     const client = tx ?? this.options.prisma;
     const actor = AuditContext.getActor();
-    let tenantId: string | null = null;
+    let tenantId: string | null;
     try {
       tenantId = resolveTenantId({
         tenantResolver: this.options.tenantResolver,
@@ -694,9 +694,10 @@ export class AuditService {
         }
         succeeded.push(partition);
       } catch (error) {
-        throw new Error(
+        throw this.errorWithCause(
           `[@nestarc/audit-log] failed to prune partition '${partition}': ${this.errorMessage(error)}; ` +
             `already pruned: ${succeeded.length > 0 ? succeeded.join(', ') : '(none)'}`,
+          error,
         );
       }
     }
@@ -889,7 +890,7 @@ export class AuditService {
       return null;
     }
 
-    let tenantId: string | null = null;
+    let tenantId: string | null;
     try {
       tenantId = resolveTenantId({
         tenantResolver: this.options.tenantResolver,
