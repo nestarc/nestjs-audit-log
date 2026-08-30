@@ -109,7 +109,22 @@ describe('documentation gates', () => {
       'npm ls @nestarc/tenancy @nestarc/audit-log @nestarc/soft-delete --all';
 
     expect(fixture.scripts['verify:published']).toContain(peerGraphCheck);
-    expect(fixture.scripts['verify:candidate']).toContain(peerGraphCheck);
+    expect(fixture.scripts['verify:audit-log-candidate']).toContain(
+      peerGraphCheck,
+    );
+    expect(fixture.scripts['verify:tenancy-candidate']).toContain(
+      peerGraphCheck,
+    );
+
+    const packageJson = JSON.parse(read('package.json')) as {
+      scripts: Record<string, string>;
+    };
+    expect(packageJson.scripts['test:e2e:ecosystem:candidate']).toContain(
+      '--audit-log-candidate',
+    );
+    expect(
+      packageJson.scripts['test:e2e:ecosystem:tenancy-candidate'],
+    ).toContain('--tenancy-candidate');
   });
 
   it('keeps the v0.5.0 release metadata and published ecosystem tuple aligned', () => {
@@ -139,7 +154,7 @@ describe('documentation gates', () => {
     expect(changelog).toContain('rejected thenables');
     expect(fixture.dependencies['@nestarc/tenancy']).toBe('0.15.0');
     expect(fixture.dependencies['@nestarc/audit-log']).toBe('0.5.0');
-    expect(fixture.dependencies['@nestarc/soft-delete']).toBe('0.7.1');
+    expect(fixture.dependencies['@nestarc/soft-delete']).toBe('0.7.2');
 
     for (const packageName of [
       '@nestarc/tenancy',

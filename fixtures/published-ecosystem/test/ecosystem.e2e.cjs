@@ -20,6 +20,7 @@ const {
 const {
   createPrismaTenancyExtension,
   TenancyContext,
+  TenancyService,
 } = require('@nestarc/tenancy');
 const { Prisma, PrismaClient } = require('../generated/prisma/client.ts');
 
@@ -65,10 +66,7 @@ async function main() {
       datamodel: fs.readFileSync(schemaPath, 'utf8'),
     });
     const tenancyContext = new TenancyContext();
-    const tenancyService = {
-      getCurrentTenant: () => tenancyContext.getTenantId(),
-      isTenantBypassed: () => tenancyContext.isBypassed(),
-    };
+    const tenancyService = new TenancyService(tenancyContext);
     const softDeleteOptions = {
       softDeleteModels: trackedModels,
       deletedAtField: 'deletedAt',

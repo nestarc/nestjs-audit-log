@@ -1,0 +1,74 @@
+name: Tenancy Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenancy-ref:
+        description: Exact nestjs-tenancy commit SHA to pack as 0.16.0 candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: Packed tenancy candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: audit_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d audit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/audit_test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out exact tenancy candidate
+        uses: actions/checkout@v7
+        with:
+          repository: nestarc/nestjs-tenancy
+          ref: ${{ inputs.tenancy-ref }}
+          path: .tenancy-candidate
+
+      - name: Verify exact tenancy commit
+        working-directory: .tenancy-candidate
+        run: |
+          node -e "if (!/^[0-9a-f]{40}$/.test(process.env.EXPECTED_SHA)) process.exit(1)"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        env:
+          EXPECTED_SHA: ${{ inputs.tenancy-ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: .tenancy-candidate/package-lock.json
+
+      - name: Pack tenancy 0.16.0 candidate
+        id: tenancy
+        working-directory: .tenancy-candidate
+        run: |
+          npm ci
+          npm version 0.16.0 --no-git-tag-version --allow-same-version --ignore-scripts
+          npm pack --pack-destination "$RUNNER_TEMP"
+          echo "tarball=$RUNNER_TEMP/nestarc-tenancy-0.16.0.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: Test strict packed tenancy candidate tuple
+        run: >-
+          npm run test:e2e:ecosystem:tenancy-candidate --
+          --tenancy-tarball "${{ steps.tenancy.outputs.tarball }}"

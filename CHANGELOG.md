@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add an explicit packed tenancy `0.16.x` candidate mode to the consumer-owned PostgreSQL
+  ecosystem gate. Published, audit-log candidate, and tenancy candidate modes now use strict peer
+  installation and assert tenancy/audit-log/soft-delete version, source, and integrity separately.
+
 ## [0.5.0] - 2026-08-28
 
 ### Breaking Changes
