@@ -1,7 +1,7 @@
 # Using audit-log from an AI-assisted workflow
 
 This guide is for agents integrating `@nestarc/audit-log` into a consuming application. It describes
-the current checkout, prepared as 0.6.0 and not yet published to npm; inspect the installed version
+the current checkout, version 0.6.0; inspect the installed version
 before choosing examples.
 
 ## Choose the matching contract

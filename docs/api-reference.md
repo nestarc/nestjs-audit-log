@@ -1,7 +1,7 @@
 # Audit log API reference
 
-Applies to the current checkout (`0.6.0` release preparation). Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for version changes. This version is not yet published to npm.
+Applies to the current checkout (`0.6.0`). Start with the [README](../README.md);
+see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## Entry points
 

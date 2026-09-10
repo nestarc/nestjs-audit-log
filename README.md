@@ -9,8 +9,8 @@ Record who changed a Prisma model, what changed, and when in a NestJS applicatio
 before/after diffs and manual business events in an append-only PostgreSQL audit trail, then query,
 export, or deliver the records to an external service.
 
-This README describes the **current checkout**, prepared as version **0.6.0** and not yet published
-to npm. See [CHANGELOG](CHANGELOG.md) for version changes and
+This README describes the **current checkout**, version **0.6.0**.
+See [CHANGELOG](CHANGELOG.md) for version changes and
 [the v0.5.0 README](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md) when using
 that published version. The runnable example builds and installs this checkout.
 
@@ -58,7 +58,7 @@ The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that m
 ### 1. Install and generate Prisma
 
 These steps use a tarball built from the current checkout, including the actor option added in 0.6.0.
-For the registry release, follow the [v0.5.0 guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md)
+For applications using v0.5.0, follow the [v0.5.0 guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md)
 instead. Build the tarball in this repository:
 
 ```bash
