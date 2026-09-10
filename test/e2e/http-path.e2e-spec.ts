@@ -1,8 +1,12 @@
 import {
+  CanActivate,
   Controller,
+  ExecutionContext,
   INestApplication,
+  Injectable,
   Module,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
@@ -36,7 +40,18 @@ describe('HTTP path E2E', () => {
       }),
     );
 
+    @Injectable()
+    class AuthenticationGuard implements CanActivate {
+      async canActivate(context: ExecutionContext): Promise<boolean> {
+        const req = context.switchToHttp().getRequest();
+        await Promise.resolve();
+        req.user = { id: req.headers['x-user-id'] };
+        return true;
+      }
+    }
+
     @Controller('http-audit')
+    @UseGuards(AuthenticationGuard)
     class HttpAuditController {
       @Post('users')
       async createUser() {
@@ -98,8 +113,9 @@ describe('HTTP path E2E', () => {
       imports: [
         AuditLogModule.forRoot({
           prisma: basePrisma,
+          actorExtractionStage: 'interceptor',
           actorExtractor: async (req: any) => ({
-            id: req.headers?.['x-user-id'] ?? null,
+            id: req.user?.id ?? null,
             type: 'user' as const,
             ip: req.ip,
           }),
@@ -130,7 +146,7 @@ describe('HTTP path E2E', () => {
     await app.close();
   });
 
-  it('records actor and correlationId from a real HTTP request', async () => {
+  it('records the authenticated actor after guards and correlationId from a real HTTP request', async () => {
     await request(httpServer)
       .post('/http-audit/users')
       .set('x-user-id', 'http-actor')

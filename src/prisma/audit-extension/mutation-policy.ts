@@ -143,16 +143,51 @@ function hasNestedWriteOperator(value: unknown): boolean {
   );
 }
 
+function nestedMutationData(operation: string, payload: unknown): unknown[] {
+  const entries = Array.isArray(payload) ? payload : [payload];
+  return entries.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const envelope = entry as Record<string, unknown>;
+    switch (operation) {
+      case 'create':
+        return [entry];
+      case 'upsert':
+        return [envelope.create, envelope.update];
+      case 'connectOrCreate':
+        return [envelope.create];
+      case 'update':
+        // To-one updates accept both direct fields and a data envelope.
+        // Inspect both so a model field named data cannot hide sibling writes.
+        return [entry, envelope.data];
+      case 'createMany':
+      case 'updateMany':
+        return [envelope.data];
+      default:
+        return [];
+    }
+  });
+}
+
 function nestedWriteRelationsInData(
   model: string,
   data: unknown,
   options: AuditExtensionOptions,
   Prisma: PrismaModuleLike['Prisma'],
+  ancestors = new Set<object>(),
 ): string[] {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+  if (!data || typeof data !== 'object' || ancestors.has(data)) {
     return [];
   }
+  if (Array.isArray(data)) {
+    ancestors.add(data);
+    const relations = data.flatMap((entry) =>
+      nestedWriteRelationsInData(model, entry, options, Prisma, ancestors),
+    );
+    ancestors.delete(data);
+    return relations;
+  }
 
+  ancestors.add(data);
   const relationFields = relationFieldsFor(model, Prisma);
   const relations: string[] = [];
   for (const [field, value] of Object.entries(data as Record<string, unknown>)) {
@@ -171,10 +206,20 @@ function nestedWriteRelationsInData(
         options.ignoredModels,
       )
     ) {
+      // An excluded relation may contain writes to a tracked descendant.
+      // Follow mutation payloads, using model metadata to identify relations.
+      for (const [operation, payload] of Object.entries(value as Record<string, unknown>)) {
+        for (const childData of nestedMutationData(operation, payload)) {
+          relations.push(...nestedWriteRelationsInData(
+            relatedModel, childData, options, Prisma, ancestors,
+          ));
+        }
+      }
       continue;
     }
     relations.push(`${model}.${field}`);
   }
+  ancestors.delete(data);
   return relations;
 }
 
@@ -185,6 +230,7 @@ export function enforceNestedWriteContract(
   options: AuditExtensionOptions,
   Prisma: PrismaModuleLike['Prisma'],
 ): void {
+  if (AuditContext.isNoAudit() || options.trackedModels?.length === 0) return;
   try {
     const relations = operation === 'upsert'
       ? [
@@ -206,7 +252,7 @@ export function enforceNestedWriteContract(
       nestedWriteWarnings.add(key);
       (options.logger ?? console).warn(
         `[@nestarc/audit-log] nested write on ${key} is not audited — ` +
-          `only the top-level ${model} mutation is recorded. ` +
+          'Only explicitly tracked top-level model mutations receive audit rows. ' +
           'Use explicit related-model mutations inside withAuditTransaction() for authoritative records.',
       );
     }

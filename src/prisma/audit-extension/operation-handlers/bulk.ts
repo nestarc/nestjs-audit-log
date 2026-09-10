@@ -291,9 +291,9 @@ export function createDeleteManyHandler(
         options.consistency === 'atomic-required' &&
         (result as any).count !== records.length
       ) {
-        throw new Error(
+        reportAuditError(options, new Error(
           `[@nestarc/audit-log] ${model}.deleteMany affected ${(result as any).count} records but captured ${records.length} preimages; the transaction was rolled back to avoid incomplete audit evidence`,
-        );
+        ), { phase: 'post-read', model, operation: 'deleteMany' });
       }
       for (const record of records) {
         try {

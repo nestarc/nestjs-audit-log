@@ -4,9 +4,9 @@ Date: 2026-06-12
 Status: Historical implementation specification — v0.2.0 released; not the current package contract
 Source: [../2026-06-11-v0.2.0-roadmap.md](../../2026-06-11-v0.2.0-roadmap.md)
 
-> These specifications preserve the v0.2.0 design and review record. Shipped behavior is described
-> by `README.md` and `CHANGELOG.md`; unresolved transaction-integrity work is tracked in
-> `docs/2026-08-20-audit-log-integrity-improvement-plan.md`.
+> These specifications preserve the v0.2.0 design and review record. Current behavior and later
+> transaction-integrity fixes are described by the [README](../../../README.md) and
+> [CHANGELOG](../../../CHANGELOG.md), not by the historical plans linked from this specification.
 
 ## Purpose
 

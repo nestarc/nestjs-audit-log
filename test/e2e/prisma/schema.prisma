@@ -36,3 +36,21 @@ model AuditLog {
 
   @@map("audit_logs")
 }
+
+model AuditGuardRoot {
+  id       String             @id @default(uuid())
+  branches AuditGuardBranch[]
+}
+
+model AuditGuardBranch {
+  id     String           @id @default(uuid())
+  rootId String
+  root   AuditGuardRoot   @relation(fields: [rootId], references: [id])
+  leaves AuditGuardLeaf[]
+}
+
+model AuditGuardLeaf {
+  id       String           @id @default(uuid())
+  branchId String
+  branch   AuditGuardBranch @relation(fields: [branchId], references: [id])
+}

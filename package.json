@@ -4,12 +4,29 @@
   "description": "Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "homepage": "https://nestarc.dev/packages/audit-log/",
+  "bugs": {
+    "url": "https://github.com/nestarc/nestjs-audit-log/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nestarc/nestjs-audit-log.git"
   },
   "files": [
-    "dist"
+    "dist",
+    "llms.txt",
+    "CHANGELOG.md",
+    "docs/agent-guide.md",
+    "docs/api-reference.md",
+    "docs/transactions.md",
+    "docs/context-and-tenancy.md",
+    "docs/storage-and-retention.md",
+    "docs/export-and-streams.md",
+    "docs/benchmarks.md",
+    "docs/benchmarks",
+    "docs/maintaining.md",
+    "docs/2026-08-28-experimental-tx-audit-removal-adr.md",
+    "examples/quick-start"
   ],
   "keywords": [
     "nestjs",
@@ -20,8 +37,6 @@
     "prisma-extension",
     "postgresql",
     "before-after-diff",
-    "soc2",
-    "compliance",
     "nestjs-module",
     "saas"
   ],
@@ -32,12 +47,13 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.build.json",
-    "lint": "eslint src test --max-warnings 0",
+    "lint": "eslint src test benchmarks --max-warnings 0",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "jest",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config test/e2e/jest-e2e.config.ts --runInBand",
     "test:compat:nest12": "node scripts/verify-nest12-consumer.cjs",
+    "test:docs:consumer": "npm run build && node scripts/verify-docs-consumer.cjs",
     "test:e2e:ecosystem": "node scripts/run-ecosystem-e2e.cjs --published",
     "test:e2e:ecosystem:candidate": "npm run build && node scripts/run-ecosystem-e2e.cjs --audit-log-candidate",
     "test:e2e:ecosystem:tenancy-candidate": "node scripts/run-ecosystem-e2e.cjs --tenancy-candidate",

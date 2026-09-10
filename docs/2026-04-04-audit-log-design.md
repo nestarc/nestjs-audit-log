@@ -1,7 +1,12 @@
 # @nestarc/audit-log — Design Spec
 
+> **Historical design — archived 2026-09-10.** Scope: v0.1.0 planning, with v0.2.0 amendments.
+> This file preserves the decisions, findings, and instructions from that period; it is not the
+> current package contract or a task to execute. Start with the [current README](../README.md) and
+> [CHANGELOG](../CHANGELOG.md) for supported usage and release differences.
+
 Date: 2026-04-04
-Status: Approved
+Status: Historical design — approved at the time of the original proposal
 
 ## Goal
 
@@ -9,7 +14,7 @@ NestJS + Prisma + PostgreSQL 환경을 위한 감사 로그 모듈. Prisma exten
 
 ## Market Gap
 
-NestJS 생태계에 audit-log 패키지는 여럿 있지만, 모두 한 가지 방식(HTTP interceptor-only, ORM subscriber-only, exporter-only)에 국한된다. 세 계층(HTTP 컨텍스트 + 엔티티 diff + 저장)을 결합하면서 멀티테넌트를 지원하는 패키지는 0개.
+초기 기획에서는 HTTP 컨텍스트, 엔티티 diff, 저장, 멀티테넌트를 함께 제공하는 흐름을 제품 가설로 삼았다. 당시 경쟁 제품의 기능 범위와 개수를 검증한 비교 자료는 이 문서에 없으므로, 독점성이나 경쟁 제품의 기능 부재를 주장하는 근거로 사용하지 않는다.
 
 핵심 pain points:
 1. ORM subscriber에서 "누가 이 변경을 했는지" 알 수 없음 (DI 접근 불가)

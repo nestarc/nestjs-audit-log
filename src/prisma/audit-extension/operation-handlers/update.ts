@@ -40,6 +40,7 @@ export function createUpdateHandler(
   } = dependencies;
 
   return async function update({ model, args, query }: any) {
+    enforceNestedWriteContract(model, 'update', args, options, Prisma);
     if (shouldSkip(model, trackedModels, ignoredModels)) {
       return query(args);
     }
@@ -52,7 +53,6 @@ export function createUpdateHandler(
     const pkField = getPkField(model, options);
     const delegateName = modelDelegateName(model);
     const delegate = (auditClient as any)[delegateName];
-    enforceNestedWriteContract(model, 'update', args, options, Prisma);
     const pkInjected = tryInjectPk(args, pkField, options, {
       model,
       operation: 'update',

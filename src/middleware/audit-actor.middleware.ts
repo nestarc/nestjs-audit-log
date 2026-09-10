@@ -1,9 +1,22 @@
 import { Inject, Injectable, NestMiddleware } from '@nestjs/common';
 import { AUDIT_LOG_OPTIONS } from '../audit-log.constants';
 import { AuditLogModuleOptions } from '../interfaces/audit-log-options.interface';
-import { AuditContext } from '../services/audit-context';
-import { AuditActor } from '../interfaces/actor.interface';
+import {
+  AuditContext,
+  AuditContextStore,
+} from '../services/audit-context';
 import { AuditErrorContext } from '../interfaces/audit-shared-options.interface';
+
+// Keep the request and extractor out of the public context store. Weak keys let
+// rejected requests and routes without an interceptor be collected normally.
+const deferredActors = new WeakMap<AuditContextStore, () => Promise<void>>();
+
+/** @internal Called by AuditInterceptor after Nest's guards have completed. */
+export function resolveDeferredActor(
+  store: AuditContextStore,
+): Promise<void> | undefined {
+  return deferredActors.get(store)?.();
+}
 
 @Injectable()
 export class AuditActorMiddleware implements NestMiddleware {
@@ -13,16 +26,24 @@ export class AuditActorMiddleware implements NestMiddleware {
   ) {}
 
   async use(req: any, _res: any, next: () => void): Promise<void> {
-    let actor: AuditActor | null = null;
+    const store: AuditContextStore = { actor: null, noAudit: false };
+    const extractActor = async () => {
+      try {
+        store.actor = await this.options.actorExtractor(req);
+      } catch (error) {
+        this.reportContextError(error);
+      }
+    };
 
-    try {
-      actor = await this.options.actorExtractor(req);
-    } catch (error) {
-      this.reportContextError(error);
+    if (this.options.actorExtractionStage === 'interceptor') {
+      let extraction: Promise<void> | undefined;
+      deferredActors.set(store, () => (extraction ??= extractActor()));
+    } else {
+      await extractActor();
     }
 
-    const metadata = this.getCorrelationMetadata(req);
-    AuditContext.run({ actor, noAudit: false, metadata }, next);
+    store.metadata = this.getCorrelationMetadata(req);
+    AuditContext.run(store, next);
   }
 
   private getCorrelationMetadata(

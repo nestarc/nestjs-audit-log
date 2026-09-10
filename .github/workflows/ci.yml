@@ -72,6 +72,10 @@ jobs:
       - name: E2E tests
         run: npm run test:e2e
 
+      - name: Verify packed documentation example
+        if: matrix.node-version == '24'
+        run: npm run test:docs:consumer
+
   ecosystem-release-gate:
     name: Ecosystem release gate
     runs-on: ubuntu-latest

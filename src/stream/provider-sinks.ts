@@ -136,8 +136,9 @@ export class ObjectStorageAuditStreamSink implements AuditStreamSink {
         },
       });
     } catch (error) {
-      // A conditional-create conflict proves that this deterministic batch was
-      // already ACKed before a checkpoint-store failure.
+      // A conditional-create conflict ACKs an existing object under this key.
+      // Timestamp scans do not provide immutable batch membership; use a stable
+      // source snapshot or reconcile late commits when completeness is required.
       if (this.options.isAlreadyExists?.(error)) return;
       throw error;
     }

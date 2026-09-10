@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add opt-in `actorExtractionStage: 'interceptor'` so authenticated actor extraction can run
+  once after Nest Guards, while retaining middleware extraction as the default.
+- Add a runnable Prisma 7/NestJS Quick Start, isolated packed-consumer documentation checks,
+  a version-scoped agent guide, and an `llms.txt` documentation index.
+
+### Fixed
+
+- Validate nested tracked writes through untracked parent models and intermediate relations.
+- Remember atomic audit failures and reject transaction completion even when the caller
+  catches the audit error inside `withAuditTransaction()`.
+- Treat equal scan checkpoints (`after === until`) as a completed range without replay.
+- Replace obsolete benchmark claims with an executable per-mode benchmark, correct query
+  examples and retention lock descriptions, and document timestamp-tail late-commit limits.
+
+### Documentation
+
+- Separate current usage guides from historical plans and maintainer procedures, and include
+  current usage documentation and examples in package artifacts. These changes remain
+  unreleased; the published 0.5.0 package does not include the new actor option or fixes above.
+
+### Release tooling
+
 - Add an explicit packed tenancy `0.16.x` candidate mode to the consumer-owned PostgreSQL
   ecosystem gate. Published, audit-log candidate, and tenancy candidate modes now use strict peer
   installation and assert tenancy/audit-log/soft-delete version, source, and integrity separately.

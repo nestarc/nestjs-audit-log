@@ -43,6 +43,7 @@ export function createUpsertHandler(
   } = dependencies;
 
   return async function upsert({ model, args, query }: any) {
+    enforceNestedWriteContract(model, 'upsert', args, options, Prisma);
     if (shouldSkip(model, trackedModels, ignoredModels)) {
       return query(args);
     }
@@ -55,7 +56,6 @@ export function createUpsertHandler(
     const pkField = getPkField(model, options);
     const delegateName = modelDelegateName(model);
     const delegate = (auditClient as any)[delegateName];
-    enforceNestedWriteContract(model, 'upsert', args, options, Prisma);
     const pkInjected = tryInjectPk(args, pkField, options, {
       model,
       operation: 'upsert',

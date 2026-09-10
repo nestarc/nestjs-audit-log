@@ -7,7 +7,7 @@ export default defineConfig(
     ignores: ['coverage/**', 'dist/**', 'test/e2e/generated/**'],
   },
   {
-    files: ['src/**/*.ts', 'test/**/*.ts'],
+    files: ['src/**/*.ts', 'test/**/*.ts', 'benchmarks/**/*.ts'],
     extends: [eslint.configs.recommended, tseslint.configs.recommended],
     languageOptions: {
       parserOptions: {

@@ -136,8 +136,8 @@ export class AuditStreamRunner {
       if (page.entries.length === 0 || !page.checkpoint) continue;
       if (state.highWatermark === null) {
         // Persist the bounded run before its first delivery. This does not
-        // advance the ACK checkpoint, but it keeps retry batch boundaries
-        // stable if the process stops after the sink ACK and before save().
+        // advance the ACK checkpoint. It preserves the upper tuple boundary
+        // across restarts, but late commits can still change batch membership.
         state = {
           checkpoint: state.checkpoint,
           highWatermark: page.highWatermark,

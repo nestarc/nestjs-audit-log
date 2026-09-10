@@ -545,6 +545,53 @@ describe('atomic-required transaction E2E', () => {
     expect(await totalAuditCount(basePrisma)).toBe(0);
   });
 
+  it.each(['tenant', 'post-read', 'serialization'] as const)(
+    'rolls back when the callback catches a JavaScript %s audit failure',
+    async (failureKind) => {
+      const client = failureKind === 'post-read'
+        ? createFaultInjectedAuditedClient(basePrisma, 'caught post-read failure')
+        : createAuditedClient(basePrisma, {
+          consistency: 'atomic-required',
+          trackedModels: ['User'],
+          tenantRequired: failureKind === 'tenant',
+          tenantResolver: () => null,
+          logger: silentLogger,
+          prismaModule,
+        });
+      const email = `caught-${failureKind}@test.com`;
+      let caught: unknown;
+
+      await expect(AuditContext.run({
+        actor: { id: 'caught-failure-user', type: 'user' },
+        noAudit: false,
+        metadata: failureKind === 'serialization' ? { counter: BigInt(1) } : undefined,
+      }, () => client.withAuditTransaction(async (tx: any) => {
+        try {
+          await tx.user.create({ data: { name: 'Must Roll Back', email, password: 'pw' } });
+        } catch (error) {
+          caught = error;
+        }
+        // These are JavaScript failures, so PostgreSQL itself still permits reads.
+        expect(await tx.user.count({ where: { email } })).toBe(1);
+        return 'handled';
+      }))).rejects.toBeInstanceOf(Error);
+
+      expect(caught).toBeInstanceOf(Error);
+      expect(await userCount(basePrisma, email)).toBe(0);
+      expect(await totalAuditCount(basePrisma)).toBe(0);
+    },
+  );
+
+  it('can recover from a pre-query business validation error inside the helper', async () => {
+    const email = 'recovered-business-validation@test.com';
+    await audited.withAuditTransaction(async (tx: any) => {
+      await expect(tx.user.create({ data: {} })).rejects.toThrow();
+      await tx.user.create({ data: { name: 'Recovered', email, password: 'pw' } });
+    });
+    expect(await userCount(basePrisma, email)).toBe(1);
+    expect(await totalAuditCount(basePrisma)).toBe(1);
+  });
+
   it('serializes same-row writers and records each exact immediate preimage', async () => {
     const user = await seedUser(basePrisma, {
       name: 'Concurrent Initial',

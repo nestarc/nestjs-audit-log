@@ -2,6 +2,9 @@
 
 Date: 2026-06-11
 Status: Historical v0.2.0 implementation specification — released; not the current package contract
+
+> Current usage: [README](../../../README.md) and [CHANGELOG](../../../CHANGELOG.md).
+> This specification describes v0.2.0 history; later contracts may differ.
 Roadmap items: #7 (연계: #4의 `query()` 테넌트 플래그 — spec 03과 한 PR 권장)
 
 ## Goal

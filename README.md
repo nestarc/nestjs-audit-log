@@ -1,62 +1,90 @@
-# @nestarc/audit-log
+# NestJS audit logging with Prisma and PostgreSQL — @nestarc/audit-log
 
 [![npm version](https://img.shields.io/npm/v/@nestarc/audit-log.svg)](https://www.npmjs.com/package/@nestarc/audit-log)
 [![npm downloads](https://img.shields.io/npm/dm/@nestarc/audit-log.svg)](https://www.npmjs.com/package/@nestarc/audit-log)
 [![CI](https://github.com/nestarc/nestjs-audit-log/actions/workflows/ci.yml/badge.svg)](https://github.com/nestarc/nestjs-audit-log/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/docs-nestarc.dev-blue.svg)](https://nestarc.dev/packages/audit-log/)
 
-Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage.
+Record who changed a Prisma model, what changed, and when in a NestJS application. Store automatic
+before/after diffs and manual business events in an append-only PostgreSQL audit trail, then query,
+export, or deliver the records to an external service.
 
-> **Supported — use `atomic-required` for authoritative automatic tracking.** Business mutations
-> and automatic audit rows commit or roll back together when tracked writes run through
-> `withAuditTransaction()`, and writes outside the helper fail before execution. Explicit
-> `best-effort` remains an intentionally non-atomic compatibility mode:
-> rollback can leave orphan success rows and transaction-local diffs can be stale.
+This README describes the **current checkout**. See [CHANGELOG](CHANGELOG.md) for unreleased changes
+and [the v0.5.0 README](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md) when using
+that published version. The runnable example builds and installs this checkout.
+
+**Choose `atomic-required` for automatic tracking:** supported tracked writes and their audit rows
+commit or roll back together inside `withAuditTransaction()`. Supported tracked writes outside the helper
+are rejected. Explicit `best-effort` is non-atomic: rollback can leave orphan success rows and
+transaction-local diffs can be stale. Coverage is limited to supported operations through the
+audited client; see [tracking boundaries](docs/transactions.md).
+
+## Contents
+
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Read and write audit records](#read-and-write-audit-records)
+- [Configuration and context](#configuration-and-context)
+- [Tracking and storage boundaries](#tracking-and-storage-boundaries)
+- [Guides and API reference](#guides-and-api-reference)
+- [Tested ecosystem versions](#tested-ecosystem-versions)
+- [Performance and development](#performance-and-development)
 
 ## Requirements
 
-- NestJS 10, 11, or 12.0.1+
+- An existing NestJS application using NestJS 10, 11, or 12.0.1+
 - Prisma 7 (primary), with Prisma 5/6 legacy peer compatibility
 - PostgreSQL
 - Node.js 22.13+ within the 22.x line, or Node.js 24.x
 
 NestJS 12's core packages are ESM-only. This package remains CommonJS-compatible on the supported
 Node.js versions through Node's `require(esm)` interoperability. NestJS 12.0.0 is excluded because
-its published framework peer metadata was corrected in 12.0.1.
-
-## Features
-
-- **Automatic CUD tracking** via Prisma `$extends` — create, update, delete, upsert, and batch operations
-- **Transaction-first automatic tracking** — `atomic-required` binds business writes, audit reads, and audit inserts to one official Prisma interactive transaction
-- **Before/after diffs** with deep comparison for JSON fields
-- **Sensitive field masking** — configurable `[REDACTED]` replacement
-- **Manual logging API** — `AuditService.log()` for business events (with optional transaction support)
-- **Query API v2** — `AuditService.query()` with keyset cursors, wildcard filters, and optional totals
-- **Decorators** — `@NoAudit()` / `@AuditAction()` on handlers or controllers
-- **Custom primary keys** — configurable per-model PK field (defaults to `id`)
-- **Multi-tenant** — optional `@nestarc/tenancy` integration with explicit tenant scoping
-- **Append-only** — trigger enforcement blocks UPDATE/DELETE on audit records by default
+its published framework peer metadata was corrected in 12.0.1. The example below uses CommonJS
+Prisma output; match `moduleFormat` to your application's module system.
 
 ## Quick Start
 
-### 1. Install
+For a complete application with schema, migrations, authentication Guard, and a smoke test, use
+[examples/quick-start](examples/quick-start/README.md). Its README covers database configuration and
+`npm ci && npm run build` at the repository root, then `npm install --install-links`,
+`npm run db:setup`, `npm run smoke`, and `npm start` in the example directory.
+
+The integration below assumes NestJS is already installed, `DATABASE_URL` points to your PostgreSQL
+database, and your Prisma schema contains a `User` model with `id`, `name`, `email`, and `password`, mapped
+to the `users` table.
+The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that model.
+
+### 1. Install and generate Prisma
+
+These steps use a tarball built from the current checkout, including the unreleased actor option.
+For the registry release, follow the [v0.5.0 guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md)
+instead. Build the tarball in this repository:
 
 ```bash
-npm install @nestarc/audit-log @prisma/client @prisma/adapter-pg pg
-npm install --save-dev prisma dotenv
+npm ci
+npm run build
+npm pack --pack-destination /tmp
 ```
 
-### 2. Configure Prisma 7
+Then, in your consuming NestJS application, install the tarball emitted by that command (the current
+package version is `0.5.0`) and its Prisma 7 runtime dependencies:
 
-Prisma 7 uses the `prisma-client` generator with an explicit output path and reads the
-CLI datasource URL from `prisma.config.ts`:
+```bash
+npm install /tmp/nestarc-audit-log-0.5.0.tgz @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
+npm install --save-dev prisma@7
+```
+
+```dotenv
+# .env — replace with your local database credentials
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/audit_demo
+```
 
 ```prisma
-// prisma/schema.prisma
+// prisma/schema.prisma — keep your application's model definitions below these blocks
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {
@@ -75,56 +103,54 @@ export default defineConfig({
 });
 ```
 
-### 3. Create the audit_logs table
+After adding or updating your application models:
 
-```typescript
-import { applyAuditTableSchema } from '@nestarc/audit-log';
-
-// In a migration or setup script, after creating the Prisma client:
-await applyAuditTableSchema(prisma);
+```bash
+npx prisma migrate dev --name init
+npx prisma generate
 ```
 
-Or use `getAuditTableSQL()` to get the raw SQL string for your migration tool.
+Prisma 7 reads the CLI datasource URL from `prisma.config.ts`. Import the generated `Prisma`
+namespace from the configured output and pass `{ Prisma }` to this package. Prisma 5/6 applications
+using `prisma-client-js` can keep their existing generation/connection setup and import from
+`@prisma/client`; the audit APIs are the same.
 
-### 4. Complete NestJS Integration
+### 2. Provide the base and audited client views
 
-The library requires two Prisma clients with distinct roles:
-
-- **Base client** — used by `AuditService` for writing/querying audit logs
-- **Extended client** — used by your application code for business writes (CUD tracking fires here)
+The base Prisma client stores and queries audit rows. The extended view intercepts your application's
+business writes. Both views share the underlying Prisma client; do not create another connection
+pool solely for the extension.
 
 ```typescript
 // prisma.service.ts
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { Prisma, PrismaClient } from './generated/prisma/client';
+import 'dotenv/config';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createAuditedClient } from '@nestarc/audit-log';
+import { Prisma, PrismaClient } from './generated/prisma/client';
 
 export const prismaModule = { Prisma };
-
-const auditExtensionOptions = {
-  consistency: 'atomic-required' as const,
-  trackedModels: ['User', 'Invoice', 'Document'],
+export const sharedAuditOptions = {
+  tableName: 'audit_logs',
   sensitiveFields: ['password', 'ssn'],
   prismaModule,
-  // primaryKey: { Order: 'orderNumber' }, // for non-id PKs
 };
 
 @Injectable()
-export class PrismaService implements OnModuleInit {
-  /** Base client — for audit storage (log/query) */
+export class PrismaService implements OnModuleInit, OnModuleDestroy {
   readonly base = new PrismaClient({
-    adapter: new PrismaPg({
-      connectionString: process.env.DATABASE_URL!,
-    }),
+    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
   });
 
-  /** Extended client — use this for all application queries */
-  readonly client = createAuditedClient(this.base, auditExtensionOptions);
+  readonly client = createAuditedClient(this.base, {
+    ...sharedAuditOptions,
+    consistency: 'atomic-required',
+    trackedModels: ['User'],
+    databaseMapping: { User: { tableName: 'users' } },
+  });
 
-  async onModuleInit() {
-    await this.base.$connect();
-  }
+  async onModuleInit() { await this.base.$connect(); }
+  async onModuleDestroy() { await this.base.$disconnect(); }
 }
 ```
 
@@ -134,19 +160,30 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 
 @Global()
-@Module({
-  providers: [PrismaService],
-  exports: [PrismaService],
-})
+@Module({ providers: [PrismaService], exports: [PrismaService] })
 export class PrismaModule {}
 ```
+
+Create the audit table through a migration or setup script using the **base** client:
+
+```typescript
+import { applyAuditTableSchema } from '@nestarc/audit-log';
+
+await applyAuditTableSchema(prismaService.base, { tableName: 'audit_logs' });
+```
+
+`getAuditTableSQL({ tableName: 'audit_logs' })` provides the SQL for your migration tool. The runnable
+example includes this setup; production deployments should apply it through their migration process.
+See [storage setup](docs/storage-and-retention.md) for partitions and database permissions.
+
+### 3. Register the NestJS module
 
 ```typescript
 // app.module.ts
 import { Module } from '@nestjs/common';
 import { AuditLogModule } from '@nestarc/audit-log';
 import { PrismaModule } from './prisma.module';
-import { PrismaService, prismaModule } from './prisma.service';
+import { PrismaService, sharedAuditOptions } from './prisma.service';
 
 @Module({
   imports: [
@@ -154,14 +191,14 @@ import { PrismaService, prismaModule } from './prisma.service';
     AuditLogModule.forRootAsync({
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) => ({
+        ...sharedAuditOptions,
         prisma: prisma.base,
-        prismaModule,
+        actorExtractionStage: 'interceptor',
         actorExtractor: (req) => ({
           id: req.user?.id ?? null,
           type: req.user ? 'user' : 'system',
           ip: req.ip,
         }),
-        // tenantRequired: true, // fail-closed for manual log/query APIs
       }),
     }),
   ],
@@ -169,581 +206,172 @@ import { PrismaService, prismaModule } from './prisma.service';
 export class AppModule {}
 ```
 
+`actorExtractionStage: 'interceptor'` reads the actor after authentication Guards populate `req.user`
+and before the route handler runs. **This option is an unreleased checkout addition.** Published
+v0.5.0 extracts in middleware: authenticate before that middleware or provide an extractor that can
+resolve identity there. The default remains `'middleware'` for compatibility. Writes inside Guards
+precede interceptor extraction; use earlier authentication middleware if those writes need an actor.
+See [actor context](docs/context-and-tenancy.md) for manual interceptor binding and background jobs.
+
+Module and extension options are **independent**. The shared object above configures both automatic
+field masking and manual metadata masking. Pass matching `tableName`, tenant options, and error
+reporting options to both paths when they should share behavior; schema utilities also need the same
+table name. Module options do not configure the extension automatically.
+
+## Read and write audit records
+
+Use supported model writes inside `withAuditTransaction()`. For example, in an injectable service
+with `PrismaService` and `AuditService` in its constructor:
+
 ```typescript
-// user.service.ts — use prisma.client (extended) for all business writes
+import { Injectable } from '@nestjs/common';
+import { AuditService } from '@nestarc/audit-log';
+import { PrismaService } from './prisma.service';
+
 @Injectable()
 export class UserService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
-      async createUser(data: CreateUserDto) {
-        return this.prisma.client.withAuditTransaction((tx) =>
-          tx.user.create({ data }),
-        );
-      }
+  async createUser(data: { name: string; email: string; password: string }) {
+    const user = await this.prisma.client.withAuditTransaction((tx) =>
+      tx.user.create({ data }),
+    );
+    const page = await this.audit.query({
+      targetType: 'User',
+      targetId: user.id,
+      action: 'User.*',
+      source: 'auto',
+      includeTotal: false,
+    });
+    return { userId: user.id, audit: page.entries };
+  }
 }
 ```
 
-## API
+Register `UserService` in its Nest module's `providers` when using this service fragment. The runnable
+example demonstrates the same flow in its `UserController`. For an authenticated creation, the
+audit entry includes fields such as:
 
-### AuditLogModule.forRoot(options) / forRootAsync(options)
+```json
+{
+  "actorId": "demo-user",
+  "actorType": "user",
+  "action": "User.created",
+  "targetType": "User",
+  "source": "auto",
+  "changes": {
+    "name": { "after": "Alice" },
+    "password": { "after": "[REDACTED]" }
+  },
+  "result": "success"
+}
+```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
-| `actorExtractor` | `(req) => AuditActor \| Promise<AuditActor>` | *required* | Extracts actor from HTTP request |
-| `tenantRequired` | `boolean` | `false` | When `true`, module-side `log()` and ambient `query()`/`getById()` require tenant context unless `tenantId` or `allTenants` is explicit |
-| `excludeRoutes` | `RouteInfo[]` | `[]` | Routes excluded from `AuditActorMiddleware` |
-| `registerGlobalInterceptor` | `boolean` | `true` | Set `false` to bind `AuditInterceptor` manually |
-| `correlationIdHeader` | `string` | `x-request-id` | Header copied into `metadata.correlationId` |
-| `correlationIdGetter` | `(req) => string \| undefined` | — | Custom correlation ID source |
-| `tableName` | `string` | `audit_logs` | Audit table name used by module-side log/query/prune APIs |
-| `tenantResolver` | `() => string \| null` | — | Custom tenant lookup before the optional `@nestarc/tenancy` fallback |
-| `sensitiveFields` | `string[]` | `[]` | Metadata keys redacted recursively in objects and arrays for manual logs |
-| `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Model-specific metadata redaction keys |
-| `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
+This shows selected fields; IDs, timestamps, and other model fields are also present. Action names
+preserve Prisma model casing: `User.created`, `User.updated`, `User.deleted`. Wildcard matching is
+case-sensitive, so `user.*` does not match `User.created`.
 
-### AuditService
+Manual events use the action name you supply and have `source: 'manual'`:
 
 ```typescript
-// Manual logging
 await auditService.log({
   action: 'invoice.approved',
-  targetId: 'inv-123',
   targetType: 'Invoice',
+  targetId: 'inv-123',
   metadata: { amount: 5000, currency: 'USD' },
 });
 
-// Manual logging inside a transaction
-await prisma.base.$transaction(async (tx) => {
-  await tx.invoice.update({ where: { id }, data: { status: 'approved' } });
-  await auditService.log({ action: 'invoice.approved', targetId: id }, tx);
-  // Both roll back together if anything fails
-});
-
-// Querying
-const result = await auditService.query({
-  actorId: 'user-123',
-  action: 'invoice.*',     // wildcard support
-  targetType: 'Invoice',
-  source: 'auto',
-  result: 'success',
-  from: new Date('2026-01-01'),
-  to: new Date('2026-04-01'),
-  limit: 50,
-  includeTotal: false,
-});
-// -> { entries: AuditEntry[], nextCursor: string | null, hasMore: boolean }
-
-if (result.nextCursor) {
+const filters = { action: 'invoice.*', source: 'manual' as const };
+const page = await auditService.query({ ...filters, limit: 50, includeTotal: false });
+if (page.nextCursor) {
   await auditService.query({
-    actorId: 'user-123',
-    action: 'invoice.*',
-    targetType: 'Invoice',
-    source: 'auto',
-    result: 'success',
-    from: new Date('2026-01-01'),
-    to: new Date('2026-04-01'),
-    cursor: result.nextCursor,
+    ...filters,
+    cursor: page.nextCursor,
     limit: 50,
     includeTotal: false,
   });
 }
 ```
 
-### Decorators
-
-Apply to individual handlers or entire controllers:
-
-```typescript
-@NoAudit()      // Skip audit tracking for this route or controller
-@AuditAction('user.role.changed')  // Override auto-generated action name
-```
-
-### createAuditExtension(options)
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `consistency` | `'atomic-required' \| 'best-effort'` | required | `atomic-required` rejects tracked writes outside `withAuditTransaction()` and fails closed; `best-effort` preserves legacy non-atomic behavior |
-| `trackedModels` | `string[]` | all models when omitted | Allowlist of Prisma model names to track. `trackedModels: []` means no models are audited |
-| `ignoredModels` | `string[]` | `[]` | Denylist used only when `trackedModels` is not set |
-| `sensitiveFields` | `string[]` | `[]` | Keys to mask recursively as `[REDACTED]` in scalar and nested JSON diffs |
-| `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Per-model fields unioned with `sensitiveFields` |
-| `primaryKey` | `Record<string, string>` | `{ *: 'id' }` | Map of model name to primary key field name |
-| `databaseMapping` | `Record<string, { tableName: string; schema?: string; primaryKeyColumn?: string }>` | `{}` | PostgreSQL identifiers for atomic row locks; configure mapped models when public Prisma DMMF mapping metadata is unavailable |
-| `maxBatchRecords` | `number` | `1000` | Maximum records audited individually by `deleteMany`; a positive integer |
-| `batchOverflow` | `'reject' \| 'summary'` | `'reject'` | Behavior when `deleteMany` exceeds the cap; `'summary'` is explicit best-effort-only fallback |
-| `tableName` | `string` | `audit_logs` | Audit table used by automatic inserts |
-| `tenantRequired` | `boolean` | `false` | Missing tenant fails closed in `atomic-required`; `best-effort` reports `audit entry skipped` and returns the business mutation |
-| `tenantResolver` | `() => string \| null` | — | Custom tenant lookup |
-| `onAuditError` | `(error, ctx) => void` | — | Structured audit failure callback |
-| `logFailures` | `boolean` | `false` | Record best-effort failure audit rows for business write errors |
-| `ignoreTimestampOnlyUpdates` | `boolean` | `false` | Suppress `@updatedAt`-only update entries |
-| `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
-
-When neither `trackedModels` nor `ignoredModels` is configured, `createAuditExtension()` audits all Prisma models and emits a one-time `No trackedModels/ignoredModels configured` warning. Set `trackedModels` as an allowlist or `ignoredModels` as a denylist to narrow scope.
-
-### Schema Utilities
-
-| Function | Description |
-|----------|-------------|
-| `getAuditTableSQL(options?)` | Returns raw SQL string for creating audit tables, trigger enforcement, optional partitions, and indexes |
-| `getAuditTableStatements()` | Returns SQL split into individual executable statements |
-| `applyAuditTableSchema(prisma)` | Executes the schema SQL statement by statement via Prisma |
-| `ensurePartitions(prisma, options?)` | Creates missing monthly partitions for partitioned audit tables |
-
-### Retention & Partitioning
-
-`getAuditTableSQL({ partitioned: true })` creates a monthly `PARTITION BY RANGE (created_at)` layout with trigger enforcement and initial UTC month partitions. Keep future partitions available from application bootstrap or a daily maintenance job:
-
-```typescript
-import { ensurePartitions } from '@nestarc/audit-log';
-
-await ensurePartitions(maintenancePrisma, { ahead: 1 });
-```
-
-Retention is explicit. `AuditService.prune({ olderThan })` deletes old rows on flat tables and drops fully expired monthly partitions on partitioned tables. Use `dryRun: true` to inspect targets first, and pass `client` when retention runs through a privileged maintenance connection:
-
-```typescript
-await auditService.prune({
-  olderThan: new Date(Date.now() - 90 * 24 * 3600 * 1000),
-  client: maintenancePrisma,
-});
-```
-
-Flat pruning temporarily disables the delete trigger, or drops and recreates the legacy delete RULE, inside one interactive transaction. Partitioned pruning never deletes partial months; it only drops or detaches partitions whose upper bound is at or before `olderThan`.
-
-`olderThan` must be a valid `Date`. `timeoutMs` and `maxWaitMs`, when supplied for flat pruning,
-must be positive integers. Flat pruning takes an `ACCESS EXCLUSIVE` lock while enforcement is
-temporarily changed; prefer partitioning for large audit tables.
-
-### Database hardening
-
-The generated row triggers block `UPDATE` and `DELETE`, but PostgreSQL `TRUNCATE` does not run row
-triggers. A table owner or superuser can also alter/disable triggers, drop the table, or otherwise
-bypass append-only enforcement. Treat trigger enforcement as detection and accident prevention,
-not as a privilege boundary.
-
-Use separate runtime and maintenance identities. The application identity should not own the table
-and should receive only `SELECT` and `INSERT`; keep the owner-capable maintenance connection outside
-the application process and pass it explicitly to `prune({ client })`:
-
-```sql
-CREATE ROLE audit_owner NOLOGIN;
--- Create/login-role provisioning is environment-specific.
-
-ALTER TABLE audit_logs OWNER TO audit_owner;
-ALTER FUNCTION audit_logs_block_mutation() OWNER TO audit_owner;
-
-REVOKE ALL ON TABLE audit_logs FROM PUBLIC;
-REVOKE ALL ON TABLE audit_logs FROM app_runtime;
-GRANT SELECT, INSERT ON TABLE audit_logs TO app_runtime;
-REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM app_runtime;
-```
-
-Do not grant `audit_owner` membership, database superuser, or schema `CREATE` privileges to the
-runtime role. Restrict who can obtain the maintenance credential, alert on `ALTER TABLE`,
-`DROP TABLE`, `TRUNCATE`, and changes to audit triggers, and test the grants after migrations. An
-optional `BEFORE TRUNCATE FOR EACH STATEMENT` trigger can make accidental owner-side truncation
-fail loudly, but it is still owner-disableable; `REVOKE TRUNCATE` plus owner separation is the
-authoritative control.
-
-### Query API v2
-
-`AuditService.query()` returns deterministic newest-first pages ordered by `(created_at, id)`. Prefer cursor pagination for feeds:
-
-```typescript
-const page = await auditService.query({
-  tenantId: 'tenant-1',
-  action: 'invoice.*',
-  actorType: 'user',
-  source: 'auto',
-  result: 'success',
-  limit: 50,
-  includeTotal: false,
-});
-
-if (page.hasMore) {
-  await auditService.query({
-    tenantId: 'tenant-1',
-    action: 'invoice.*',
-    actorType: 'user',
-    source: 'auto',
-    result: 'success',
-    cursor: page.nextCursor!,
-    limit: 50,
-    includeTotal: false,
-  });
-}
-```
-
-`includeTotal: false` skips the `COUNT(*)` query and omits `total` from the result. Cursors do not encode filters; keep the same filter set on each page unless you intentionally want a new filtered scan below the cursor boundary. `getById(id, { tenantId })` returns one audit row within the same tenant scoping rules; use `allTenants: true` only for deliberately authorized cross-tenant admin reads.
-
-### Streaming export and CSV
-
-Use `scan()` for forward, checkpointed export rather than adapting the newest-first `query()` API.
-Export never uses ambient tenant context: pass exactly one of `tenantId` or the deliberately
-cross-tenant `allTenants: true`. The scan runs no `COUNT(*)` query.
-
-```typescript
-let checkpoint: string | undefined;
-
-for await (const page of auditService.scan({
-  tenantId: 'tenant-1',
-  action: 'invoice.*',
-  from: new Date('2026-08-01T00:00:00.000Z'),
-  batchSize: 500,
-  after: checkpoint,
-  signal: abortController.signal,
-})) {
-  await deliver(page.entries);
-  checkpoint = page.checkpoint ?? checkpoint; // persist only after delivery is acknowledged
-  await saveCheckpoint(checkpoint, page.highWatermark);
-}
-```
-
-Entries are ordered by `(created_at, id)` ascending. At scan start, `highWatermark` is fixed to the
-greatest matching row, so newer rows do not extend an in-progress export. To resume the exact same
-bounded run, pass the saved `checkpoint` as `after` and the saved high-watermark as `until`. Keep the
-same filters when resuming; checkpoints intentionally do not encode filters. `batchSize` defaults to
-500 and must be between 1 and 10,000. An empty scan yields one empty page with a null checkpoint.
-
-`exportCsv()` consumes the same scan primitive and returns a backpressure-aware Node.js `Readable`:
-
-```typescript
-const csv = auditService.exportCsv({
-  tenantId: 'tenant-1',
-  columns: 'v1',
-  includeBom: true, // optional; useful for some spreadsheet clients
-  batchSize: 500,
-});
-
-csv.pipe(httpResponse);
-```
-
-CSV `v1` columns are exported by `AUDIT_CSV_COLUMNS_V1` and begin with a `schemaVersion` field. Rows
-use RFC 4180 quoting and CRLF delimiters; `changes` and `metadata` use recursively key-sorted
-canonical JSON. Text cells beginning with an Excel formula marker (`=`, `+`, `-`, or `@`, including
-leading whitespace) receive an apostrophe prefix. HTTP authorization, file response headers, and
-export-job scheduling remain host-application responsibilities.
-
-### Durable log streams
-
-`AuditStreamRunner` tails only committed rows through `scan()` and performs one bounded run. Invoke
-it from the host application's cron, BullMQ worker, or another scheduler; the package does not start
-background timers. The PostgreSQL store persists both the last ACKed checkpoint and an in-progress
-high-watermark, so a restart resumes the same bounded range.
-
-```typescript
-import {
-  applyAuditStreamStoreSchema,
-  AuditStreamRunner,
-  HttpAuditStreamSink,
-  PostgresAuditStreamStore,
-} from '@nestarc/audit-log';
-
-await applyAuditStreamStoreSchema(prisma); // run through migrations in production
-
-const streamStore = new PostgresAuditStreamStore({ prisma, prismaModule });
-const runner = new AuditStreamRunner(auditService, {
-  streamId: 'tenant-1-primary-siem',
-  scan: {
-    tenantId: 'tenant-1', // or intentional allTenants: true
-    action: 'invoice.*',
-    batchSize: 500,
-  },
-  sink: new HttpAuditStreamSink({
-    url: process.env.SIEM_URL!,
-    format: 'ndjson', // or json
-    headers: { authorization: `Bearer ${process.env.SIEM_TOKEN}` },
-  }),
-  checkpointStore: streamStore,
-  deadLetterStore: streamStore,
-  maxRetries: 5,
-  onMetric: (metric) => metrics.record(metric),
-  onError: (error, context) => logger.error({ error, context }),
-});
-
-await runner.runOnce({ signal: abortController.signal });
-```
-
-Delivery is at least once. A batch is ACKed only by a successful sink call (or an idempotent DLQ
-write for a terminal batch), and its checkpoint is saved afterward. If checkpoint persistence
-fails, the same audit entry IDs are sent again. Generic HTTP requests publish their deterministic
-`firstEntryId:lastEntryId` batch ID as `Idempotency-Key`; receivers must deduplicate by batch or
-entry ID. Pages are delivered sequentially for backpressure. Network failures, HTTP 408/425/429,
-and 5xx responses retry with bounded exponential backoff; `Retry-After` is honored up to
-`maxBackoffMs`. Other 4xx responses are terminal: with a DLQ store they are durably recorded before
-the checkpoint advances, and without one the run fails without advancing. Metrics and error hooks
-are observational and cannot change delivery state.
-
-`ObjectStorageAuditStreamSink` writes deterministic NDJSON objects with conditional create
-(`If-None-Match: *` semantics) through a provider-neutral client; adapt an AWS S3/GCS client to its
-small `putObject()` interface. `DatadogAuditStreamSink` maps a batch to the Datadog HTTP Logs array
-contract, while `SplunkAuditStreamSink` emits newline-delimited HEC event envelopes. Both accept an
-explicit endpoint so region and deployment selection stays with the host. Configure only one
-active runner for a given `streamId`; overlapping runs can redeliver but entry IDs remain stable.
-
-Stream-specific redaction can be applied with `redact(entry)`. The runner clones each entry before
-calling it and rejects a redactor that changes the entry ID. Export scope remains explicit and
-never uses ambient tenancy.
-
-Retention must not pass the slowest required stream. Load every required stream state and pass its
-non-null checkpoint to `prune()`:
-
-```typescript
-await auditService.prune({
-  olderThan: cutoff,
-  requiredCheckpoints: requiredStates
-    .map((state) => state.checkpoint)
-    .filter((value): value is string => value !== null),
-});
-```
-
-The prune call fails before database maintenance when the cutoff is newer than any supplied
-checkpoint. A required stream with no checkpoint must block prune at the host policy layer. For
-partition archives that must move sooner, use an externally managed detach-first procedure and
-tail the detached storage before dropping it.
-
-### Nested writes
-
-Nested relation mutations are not synthesized into child audit rows. In `atomic-required`, a nested
-`create`, `connect`, `disconnect`, `update`, `upsert`, `delete`, `set`, or corresponding `*Many`
-operation targeting a tracked related model is rejected before the business query. Express it as
-explicit related-model mutations inside `withAuditTransaction()` so each record receives an atomic
-audit row. Relations whose target model is intentionally outside the tracking configuration do not
-trigger this guard when Prisma exposes the relation metadata. If that metadata is unavailable, the
-atomic path fails conservatively. `best-effort` preserves the top-level mutation and emits one
-warning per model/relation, so it is not authoritative evidence for the nested changes.
-
-### Transaction Model
-
-| Path | Business write | Audit insert |
-|------|----------------|--------------|
-| `atomic-required` + `withAuditTransaction()` | Same official Prisma interactive `tx` | Same `tx`; audit read/insert failure rolls back the business mutation |
-| `atomic-required` outside the helper | Rejected before execution | Not attempted |
-| Explicit `best-effort` | Uses Prisma's `query(args)`, so the business write remains in the caller `$transaction` | Independent base-client insert; does not join the caller transaction |
-| Manual logging with `AuditService.log(input, tx)` | Caller-controlled | Participates in the provided transaction |
-| Manual logging with `AuditService.log(input)` | Caller-controlled | Independent write via the base client |
-
-Use the transaction-first API for authoritative automatic records:
-
-```typescript
-const prisma = createAuditedClient(basePrisma, {
-  consistency: 'atomic-required',
-  trackedModels: ['User', 'Invoice'],
-  prismaModule,
-});
-
-await prisma.withAuditTransaction(
-  async (tx) => {
-    await tx.user.update({ where: { id }, data: { name: 'After' } });
-    await tx.invoice.create({ data: invoice });
-  },
-  { timeout: 10_000, maxWait: 5_000, isolationLevel: 'Serializable' },
-);
-```
-
-The helper forwards `timeout`, `maxWait`, and `isolationLevel`, preserves the transaction callback
-and result types, rejects nested helper calls, and uses no private Prisma API. `timeout` and
-`maxWait`, when supplied, must be positive integers. In
-`atomic-required`, pre-read, post-read, audit INSERT, and audit context construction errors are
-fail-closed. A tracked mutation outside the helper throws before its business query runs.
-`withAuditLifecycle()` is available only when the extension uses `atomic-required`; best-effort
-clients reject before the lifecycle callback runs. Integrations can verify this contract through
-`getAuditCapabilities()`, which reports the configured consistency and atomic lifecycle support.
-Single-row update, delete, and upsert operations lock the target row and refresh the preimage before
-the mutation, so concurrent audited writers record the immediate committed before value. For Prisma
-clients that do not publicly expose DMMF mapping metadata, models using `@@map`, `@@schema`, or a
-mapped primary-key column must declare `databaseMapping` (for example,
-`{ User: { tableName: 'users' } }`). A missing or incorrect mapping fails closed before the business
-mutation.
-
-`best-effort` must be selected explicitly. If its caller transaction rolls back, the business row
-rolls back but the automatic audit row can remain as an orphan row. Transaction-local update diffs
-can be empty or stale because its reads use the base client.
-
-The same best-effort rule applies to array transactions (`$transaction([...])`). When a later operation rolls back the batch, Prisma 7 may have already allowed an earlier operation's extension callback to write an orphan success audit row. Do not rely on automatic auditing for atomic batch audit semantics.
-
-Array transactions remain outside the atomic contract. In `atomic-required`, tracked operations
-created outside `withAuditTransaction()` fail at the generic public helper guard before the business
-query. Use sequential mutations inside `withAuditTransaction()` instead.
-`AuditService.log(input, tx)` remains the stable manual event path.
-
-#### Migrating from `experimentalTxAudit` in v0.5.0
-
-`experimentalTxAudit` was removed in v0.5.0; v0.4.1 is the last release that accepts the option.
-For authoritative automatic records, switch to `consistency: 'atomic-required'` and execute tracked
-mutations through `withAuditTransaction()`. If non-atomic automatic records are intentional, remove
-the legacy key and keep `consistency: 'best-effort'` explicit. During the v0.5.x migration window,
-JavaScript or `any` options that retain their own `experimentalTxAudit` key, including `false`, fail
-fast instead of silently downgrading. See the
-[removal ADR](https://github.com/nestarc/nestjs-audit-log/blob/main/docs/2026-08-28-experimental-tx-audit-removal-adr.md)
-for before-and-after examples and the manual transaction alternative.
-
-### Bulk mutation contract
-
-| Operation | `atomic-required` | `best-effort` |
-|-----------|-------------------|---------------|
-| `createMany` | Rejected before mutation because Prisma only returns count-level evidence | One `Model.createdMany` summary row |
-| `updateMany` | Rejected before mutation because exact record before/after diffs are unavailable | One `Model.updatedMany` summary row |
-| `deleteMany` | Locks and refreshes at most `maxBatchRecords` preimages, then writes one `Model.deleted` row per deleted record in the same transaction | Writes record rows up to the cap; overflow rejects unless `batchOverflow: 'summary'` is explicitly selected |
-| `createManyAndReturn` / `updateManyAndReturn` | Not supported | Not supported or intercepted; do not use them for tracked models |
-
-Summary rows are deliberately not shaped like record evidence: `targetId` is `null`, `changes` is
-empty, and metadata contains `auditKind: 'summary'`, the exact `operation`, `recordCount`, and
-`recordsAudited: false`. Per-record `deleteMany` rows keep the singular `Model.deleted` action and
-include `auditKind: 'record'`, `operation: 'deleteMany'`, and `batchSize` metadata.
-
-The default overflow policy is fail-closed. Best-effort callers that explicitly choose summary
-overflow receive one `Model.deletedMany` row with `overflow: true` and `maxBatchRecords`; it is a
-batch activity marker, not evidence of which rows were deleted. In atomic mode, a cap overflow,
-preimage/affected-count mismatch, or any audit insert failure rolls back the entire `deleteMany`.
-
-### Atomic soft-delete lifecycle integration
-
-`@nestarc/soft-delete` can route rewritten lifecycle mutations through the same official transaction.
-Apply extensions in the fixed order tenancy → audit-log → soft-delete:
-
-```typescript
-const prisma = basePrisma
-  .$extends(createPrismaTenancyExtension(tenancyService))
-  .$extends(createAuditExtension({
-    consistency: 'atomic-required',
-    trackedModels: ['User', 'Post', 'Comment'],
-    databaseMapping: {
-      User: { tableName: 'users' },
-      Post: { tableName: 'posts' },
-      Comment: { tableName: 'comments' },
-    },
-    prismaModule,
-  }))
-  .$extends(createPrismaSoftDeleteExtension({
-    softDeleteModels: ['User', 'Post', 'Comment'],
-    auditLifecycle: 'atomic-required',
-    auditMaxBatchRecords: 1000,
-    cascade: { User: ['Post'], Post: ['Comment'] },
-    dmmf: prismaDmmf,
-  }));
-
-await prisma.withAuditTransaction((tx) =>
-  tx.user.delete({ where: { id } }),
-);
-```
-
-The bridge covers soft-delete, restore, force-delete/purge, cascade, and supported bulk lifecycle
-mutations. Actions are `Model.softDeleted`, `Model.restored`, and `Model.purged`; cascade rows are
-record-level and identify `cascadeDelete` or `cascadeRestore` in `metadata.lifecycleOperation`.
-`deleteMany` and
-`restoreMany` become record-level mutations and fail before mutation when `auditMaxBatchRecords` is
-exceeded. Lifecycle events remain notifications, not authoritative audit integration. Purge does not
-invent cascade semantics; configured database foreign-key behavior still applies.
-
-#### Published ecosystem release gate
-
-The consumer-owned PostgreSQL gate in `fixtures/published-ecosystem` verifies this exact
-last-known-good tuple through package public APIs:
+`query()` returns `{ entries, nextCursor, hasMore }` and, by default, `total`. Setting
+`includeTotal: false` skips `COUNT(*)` and omits `total`. Keep the same filters on every cursor page;
+cursors contain a position, not filters. For atomic manual events, pass the same transaction client
+to `AuditService.log(input, tx)` as your business write. See the
+[API reference](docs/api-reference.md) for query options, result types, and manual transaction examples.
+
+## Configuration and context
+
+- `trackedModels` is an allowlist of Prisma model names; `[]` audits no models. When omitted,
+  `ignoredModels` is a denylist. Omitting both tracks all models and emits a one-time warning.
+- `@NoAudit()` suppresses automatic tracking; `@AuditAction()` overrides automatic action names.
+  `@AuditReason()` adds a reason to context metadata. They apply to handlers or controllers.
+- `AuditContext.runAs(actor, callback)` supplies an actor for worker/cron code. HTTP extraction does
+  not run in background jobs. [Context examples](docs/context-and-tenancy.md) cover actor, metadata,
+  reason, and tenant setup.
+- Tenant scope is explicit where needed: `query()`/`getById()` accept `tenantId` or deliberately
+  authorized `allTenants: true`; `scan()`/`exportCsv()` require exactly one of them. A custom
+  `tenantResolver` replaces the optional `@nestarc/tenancy` lookup, including when it returns `null`.
+
+## Tracking and storage boundaries
+
+| Capability | Contract |
+|---|---|
+| Automatic single-record tracking | `create`, `update`, `delete`, and `upsert` through the audited client; supported operations use the helper's transaction |
+| Bulk writes | Atomic `deleteMany` records individual rows within `maxBatchRecords`; atomic `createMany`/`updateMany` are rejected; see the [bulk matrix](docs/transactions.md#bulk-mutation-contract) |
+| Nested writes | Use explicit related-model writes inside the helper for tracked relations; see [nested writes](docs/transactions.md#nested-writes) |
+| Other writes | Base-client writes, raw SQL, unsupported operations, and database-side cascades/triggers are outside automatic record coverage |
+| Append-only storage | Default row triggers block `UPDATE`/`DELETE`; runtime permissions and a separate owner are required to prevent privileged bypasses or `TRUNCATE` |
+| Export and delivery | CSV and checkpointed streams scan rows by `(created_at, id)`; this is not a commit-ordered change feed, and late commits can be missed behind a checkpoint |
+
+These boundaries matter when deciding whether the records meet your application's audit requirements.
+See [transactions](docs/transactions.md), [database hardening](docs/storage-and-retention.md#database-hardening),
+and [export guarantees](docs/export-and-streams.md).
+
+## Guides and API reference
+
+| Task | Reference |
+|---|---|
+| Run a complete integration | [Quick Start application](examples/quick-start/README.md) |
+| Configure the module, extension, queries, and manual logging | [API reference](docs/api-reference.md) |
+| Understand transactions, bulk operations, soft-delete, and the v0.5 migration | [Tracking contracts](docs/transactions.md) |
+| Set actors, reasons, correlation metadata, and tenant scope | [Context and tenancy](docs/context-and-tenancy.md) |
+| Create tables, manage partitions, prune, and configure privileges | [Storage and retention](docs/storage-and-retention.md) |
+| Export CSV or deliver logs to HTTP, object storage, Datadog, or Splunk | [Export and streams](docs/export-and-streams.md) |
+| Use the package from an AI-assisted workflow | [Agent guide](docs/agent-guide.md) |
+| Check release changes | [CHANGELOG](CHANGELOG.md) |
+
+AI agents can start with [the agent guide](docs/agent-guide.md), [llms.txt](llms.txt), the runnable example,
+and the public TypeScript exports
+in `@nestarc/audit-log`. Historical plans under `docs/` preserve earlier designs and are marked as
+historical; use the guides above for current behavior.
+
+## Tested ecosystem versions
+
+The independent PostgreSQL release fixture verifies this last-known-good published tuple:
 
 | Component | Exact gate version |
-|-----------|--------------------|
+|---|---|
 | `@nestarc/tenancy` | `0.15.0` |
 | `@nestarc/audit-log` | `0.5.0` |
 | `@nestarc/soft-delete` | `0.7.2` |
 | Runtime lane | Node 24, NestJS 11.1.18, Prisma 7.9.1, PostgreSQL 16 |
 
-This table records the coordinated release gate, not the full peer-support matrix. The fixture owns
-an independent manifest and lockfile, uses exact versions only, and prints each registry URL and
-SHA-512 integrity before testing transaction commit/rollback, soft-delete, restore, purge, and
-cascade evidence. The runner copies the fixture outside the repository and performs a fresh
-`npm ci`, so root or sibling dependencies cannot satisfy a missing package. CI first runs the
-published tuple, then replaces only audit-log with the current checkout's real `npm pack --json`
-tarball and repeats the same tests. A separate explicit tenancy-candidate mode replaces only tenancy
-with a caller-supplied `0.16.x` `.tgz`; audit-log and soft-delete remain registry artifacts. All
-three modes use strict peer installation and assert each package's installed version, source, and
-SHA-512 integrity. Tag publishing cannot start until the audit-log candidate gate passes.
+This is a coordinated integration test tuple, not the full peer-support matrix. The candidate gate
+also tests the current audit-log checkout as a packed package. See
+[maintaining and releasing](docs/maintaining.md) for fixture integrity checks and release procedures.
 
-Do not make this fixture follow `latest`, a semver range, a workspace, or a sibling checkout. After
-one of the three packages is published, update the manifest, lockfile, this table, and registry
-integrity evidence together in a dedicated tuple-bump PR. A coordinated unreleased package may be
-substituted only as an explicitly supplied packed tarball.
+## Performance and development
 
-## Multi-Tenancy
+Performance depends on operation, consistency mode, transaction overhead, schema, and workload.
+Use the [reproducible benchmark](docs/benchmarks.md) to compare direct writes, plain transactions,
+`atomic-required`, and explicit `best-effort`. No single latency number represents every mode.
 
-Tenant resolution uses this order: explicit `tenantResolver`, optional `@nestarc/tenancy`, then `null`.
-`atomic-required` treats resolution failures as transaction failures; `best-effort` reports and isolates
-them from the business mutation.
-
-| Path | Missing tenant behavior |
-|------|-------------------------|
-| Automatic tracking, `tenantRequired: false` | Writes an audit row with `tenant_id = null` |
-| Automatic tracking, `tenantRequired: true` | `atomic-required`: throws and rolls back; `best-effort`: skips the audit row, reports `audit entry skipped`, and returns the business mutation |
-| `AuditService.log()` with `tenantRequired: true` | Throws unless tenant context is available |
-| `query()` / `getById()` with explicit `tenantId` | Scopes to that tenant |
-| `query()` / `getById()` with `allTenants: true` | Omits tenant filtering for authorized cross-tenant reads |
-| `query()` / `getById()` with `tenantRequired: true` and no tenant | Throws unless `tenantId` or `allTenants` is explicit |
-| `scan()` / `exportCsv()` | Never uses ambient scope; requires exactly one of explicit `tenantId` or `allTenants: true` |
-
-`tenantId` and `allTenants` are mutually exclusive; the thrown error includes `tenantId and allTenants are mutually exclusive`. Without `tenantRequired`, an ambient query with no tenant context is allowed but logs a one-time warning because it is unscoped.
-
-## Performance
-
-Measured with PostgreSQL 16, Prisma 7.9.1, 300 iterations on Apple Silicon:
-
-| Scenario | Avg | P50 | P95 | P99 |
-|----------|-----|-----|-----|-----|
-| create — no audit (baseline) | 0.70ms | 0.62ms | 0.98ms | 1.57ms |
-| **create — with audit** | **1.80ms** | **1.73ms** | **2.48ms** | **3.43ms** |
-| **update — with audit + diff** | **2.11ms** | **2.05ms** | **2.82ms** | **3.28ms** |
-| **delete — with audit** | **1.52ms** | **1.49ms** | **1.98ms** | **2.57ms** |
-
-Create overhead: **+1.10ms** per write. Update is slowest due to before/after diff calculation.
-
-> Reproduce: `docker compose -f test/e2e/docker-compose.yml up -d && npx ts-node benchmarks/audit-overhead.ts`
-
-## Development
-
-### Prerequisites
-
-- Node.js 22.13+ within the 22.x line, or Node.js 24.x
-- Docker (for E2E tests)
-
-### Setup
-
-```bash
-npm install
-npm run build
-```
-
-### Run tests
-
-```bash
-# Static quality gates
-npm run lint
-npm run typecheck
-
-# Unit tests
-npm test
-
-# One-command E2E (waits for PostgreSQL and always runs teardown)
-npm run test:e2e:full
-
-# Manual lifecycle for keeping PostgreSQL running between commands
-npm run test:e2e:setup
-npm run test:e2e
-npm run test:e2e:teardown
-
-# Published ecosystem tuple and explicit packed candidates
-npm run docker:up -- --wait --wait-timeout 60
-npm run test:e2e:ecosystem
-npm run test:e2e:ecosystem:candidate
-npm run test:e2e:ecosystem:tenancy-candidate -- \
-  --tenancy-tarball /absolute/path/to/nestarc-tenancy-0.16.0.tgz
-npm run docker:down
-```
-
-`test:e2e:full` runs teardown after success, test failure, or an interrupt. The individual
-setup, test, and teardown commands remain available for debugging;
-`test:e2e:setup` intentionally leaves PostgreSQL running until teardown.
+For repository setup and lint, typecheck, unit, PostgreSQL E2E, and ecosystem tests, see
+[development commands](docs/maintaining.md#development).
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

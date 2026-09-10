@@ -281,6 +281,42 @@ describe('internal audit read services', () => {
       expect(statements.join('\n')).not.toContain('COUNT(');
     });
 
+    it('resumes a completed scan and CSV export without replaying entries or querying', async () => {
+      const Prisma = createPrismaNamespace();
+      const prisma = { $queryRaw: jest.fn() };
+      const service = new AuditScanService(createOptions(prisma), Prisma, null);
+      const checkpoint = encodeAuditCursor('2026-08-28T12:00:01.000001Z', uuid1);
+      const options = { tenantId: 'tenant-1', after: checkpoint, until: checkpoint };
+
+      const pages: AuditScanPage[] = [];
+      for await (const page of service.scan(options)) pages.push(page);
+
+      expect(pages).toEqual([
+        { entries: [], checkpoint: null, highWatermark: checkpoint },
+      ]);
+      let csv = '';
+      for await (const chunk of service.exportCsv(options)) csv += String(chunk);
+      expect(csv.startsWith('schemaVersion,id,tenantId,actorId')).toBe(true);
+      expect(csv.split('\r\n')).toHaveLength(2);
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['2026-08-28T12:00:02.000001Z', uuid1],
+      ['2026-08-28T12:00:01.000001Z', uuid2],
+    ])('rejects a resume boundary after the high-watermark (%s, %s)', (timestamp, id) => {
+      const Prisma = createPrismaNamespace();
+      const prisma = { $queryRaw: jest.fn() };
+      const service = new AuditScanService(createOptions(prisma), Prisma, null);
+
+      expect(() => service.scan({
+        tenantId: 'tenant-1',
+        after: encodeAuditCursor(timestamp, id),
+        until: encodeAuditCursor('2026-08-28T12:00:01.000001Z', uuid1),
+      })).toThrow('after must be before or equal to until');
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('preserves the abort reason after high-watermark resolution and skips the batch query', async () => {
       const Prisma = createPrismaNamespace();
       const controller = new AbortController();

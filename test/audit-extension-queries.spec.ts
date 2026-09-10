@@ -210,6 +210,93 @@ describe('createAuditExtension — query handlers', () => {
   });
 
   describe('atomic-required transaction routing', () => {
+    it.each(['tenant', 'post-read', 'serialization'] as const)(
+      'rejects helper completion after a caller catches a JavaScript %s audit error',
+      async (failureKind) => {
+        const { handlers, clientMethods } = getHandlers({
+          consistency: 'atomic-required',
+          trackedModels: ['User'],
+          tenantRequired: failureKind === 'tenant',
+          tenantResolver: () => null,
+          logger: { warn: jest.fn(), error: jest.fn() },
+        });
+        const txClient = buildMockClient();
+        const created = { id: 'u1', name: 'Alice' };
+        txClient.user.findFirst.mockResolvedValue(created);
+        if (failureKind === 'post-read') {
+          txClient.user.findFirst.mockRejectedValue(new Error('post-read failed in JavaScript'));
+        }
+        const transactionHost = {
+          $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+        };
+        const query = jest.fn().mockResolvedValue(created);
+        let caught: unknown;
+        const completion = AuditContext.run({
+          actor: defaultActor,
+          noAudit: false,
+          metadata: failureKind === 'serialization' ? { counter: BigInt(1) } : undefined,
+        }, () => clientMethods.withAuditTransaction.call(transactionHost, async () => {
+          try {
+            await handlers.create({ model: 'User', args: { data: created }, query });
+          } catch (error) {
+            caught = error;
+          }
+          return 'caller handled the error';
+        }));
+
+        await expect(completion).rejects.toBeInstanceOf(Error);
+        expect(caught).toBeInstanceOf(Error);
+        expect(query).toHaveBeenCalledTimes(1);
+        expect(txClient.$executeRaw).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects helper completion after a caller catches an affected-count mismatch', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const txClient = buildMockClient();
+      txClient.user.findMany.mockResolvedValue([{ id: 'u1' }]);
+      txClient.user.findFirst.mockResolvedValue({ id: 'u1' });
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+      await expect(clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await handlers.deleteMany({
+          model: 'User', args: { where: {} }, query: jest.fn().mockResolvedValue({ count: 0 }),
+        }).catch(() => undefined);
+      })).rejects.toThrow('affected 0 records but captured 1 preimages');
+    });
+
+    it('allows recovery from a business error and does not retain a prior transaction audit failure', async () => {
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required',
+        trackedModels: ['User'],
+        tenantRequired: true,
+        tenantResolver: () => null,
+        logger: { warn: jest.fn(), error: jest.fn() },
+      });
+      const txClient = buildMockClient();
+      const created = { id: 'u1' };
+      txClient.user.findFirst.mockResolvedValue(created);
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(txClient),
+      };
+      await expect(clientMethods.withAuditTransaction.call(transactionHost, () =>
+        handlers.create({ model: 'User', args: { data: created }, query: jest.fn().mockResolvedValue(created) }),
+      )).rejects.toThrow('tenant context required');
+
+      await expect(clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        await handlers.create({
+          model: 'User', args: { data: {} },
+          query: jest.fn().mockRejectedValue(new Error('recoverable business error')),
+        }).catch(() => undefined);
+        return 'recovered';
+      })).resolves.toBe('recovered');
+    });
+
     it('rejects a tracked write before the business query outside the helper', async () => {
       const { handlers } = getHandlers({
         consistency: 'atomic-required',

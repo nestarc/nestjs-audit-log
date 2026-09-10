@@ -5,11 +5,12 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Observable } from 'rxjs';
+import { from, mergeMap, Observable } from 'rxjs';
 import { NO_AUDIT_KEY } from '../decorators/no-audit.decorator';
 import { AUDIT_ACTION_KEY } from '../decorators/audit-action.decorator';
 import { AUDIT_REASON_KEY } from '../decorators/audit-reason.decorator';
 import { AuditContext } from '../services/audit-context';
+import { resolveDeferredActor } from '../middleware/audit-actor.middleware';
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
@@ -37,6 +38,13 @@ export class AuditInterceptor implements NestInterceptor {
       }
       if (reason !== undefined) {
         store.reason = reason;
+      }
+
+      if (context.getType() === 'http') {
+        const actorReady = resolveDeferredActor(store);
+        if (actorReady) {
+          return from(actorReady).pipe(mergeMap(() => next.handle()));
+        }
       }
     }
 

@@ -37,6 +37,7 @@ export function createCreateHandler(
   } = dependencies;
 
   return async function create({ model, args, query }: any) {
+    enforceNestedWriteContract(model, 'create', args, options, Prisma);
     if (shouldSkip(model, trackedModels, ignoredModels)) {
       return query(args);
     }
@@ -48,7 +49,6 @@ export function createCreateHandler(
     );
     const pkField = getPkField(model, options);
     const delegateName = modelDelegateName(model);
-    enforceNestedWriteContract(model, 'create', args, options, Prisma);
     const pkInjected = tryInjectPk(args, pkField, options, {
       model,
       operation: 'create',

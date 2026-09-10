@@ -1,15 +1,23 @@
 import type { AuditErrorContext } from '../../interfaces/audit-shared-options.interface';
 import type { AuditExtensionOptions } from './audit-types';
 
+/** Internal options bound to one extension's interactive transaction scope. */
+export interface AuditRuntimeOptions extends AuditExtensionOptions {
+  markAtomicFailure?: (error: unknown) => void;
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 export function reportAuditError(
-  options: AuditExtensionOptions,
+  options: AuditRuntimeOptions,
   error: unknown,
   ctx: AuditErrorContext,
 ): void {
+  if (options.consistency === 'atomic-required') {
+    options.markAtomicFailure?.(error);
+  }
   const logger = options.logger ?? console;
   if (options.onAuditError) {
     try {

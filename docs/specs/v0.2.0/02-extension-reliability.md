@@ -2,6 +2,9 @@
 
 Date: 2026-06-11
 Status: Historical v0.2.0 implementation specification — released; not the current package contract
+
+> Current usage: [README](../../../README.md) and [CHANGELOG](../../../CHANGELOG.md).
+> This specification describes v0.2.0 history; later contracts may differ.
 Roadmap items: #2 (추적 기본값 변경 — BREAKING), #3 (신뢰성 강화), #6 (select 프로젝션 targetId 유실 수정), Smaller fixes (`@updatedAt`-only 노이즈 필터, 커스텀 Prisma client output path — 확장·AuditService 양쪽, 중첩 관계 쓰기 경계 문서화·감지 경고)
 
 ## Goal

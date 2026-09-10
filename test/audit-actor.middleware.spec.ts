@@ -64,6 +64,22 @@ describe('AuditActorMiddleware', () => {
     });
   });
 
+  it('defers interceptor-stage extraction while seeding request metadata', async () => {
+    const actorExtractor = jest.fn(() => ({ id: 'user-1', type: 'user' as const }));
+    middleware = new AuditActorMiddleware({
+      prisma: {},
+      actorExtractor,
+      actorExtractionStage: 'interceptor',
+    });
+
+    await middleware.use({ headers: { 'x-request-id': 'guard-request' } }, {}, () => {
+      expect(actorExtractor).not.toHaveBeenCalled();
+      expect(AuditContext.getActor()).toBeNull();
+      expect(AuditContext.getMetadata()).toEqual({ correlationId: 'guard-request' });
+    });
+    expect(actorExtractor).not.toHaveBeenCalled();
+  });
+
   it('seeds correlationId metadata from x-request-id header', async () => {
     const req = {
       headers: { 'x-request-id': 'req-1' },

@@ -1,34 +1,36 @@
 /**
- * Benchmark: Audit extension overhead measurement
- *
- * Compares:
- *   A) Direct Prisma CUD (no audit extension)
- *   B) Prisma CUD with audit extension (before/after diff + INSERT audit_logs)
- *
- * Usage:
- *   docker compose -f test/e2e/docker-compose.yml up -d
- *   DATABASE_URL=postgresql://test:test@localhost:5433/audit_test \
- *     npx ts-node benchmarks/audit-overhead.ts
+ * Sequential create/update/delete latency on the dedicated local test database.
+ * See docs/benchmarks.md for setup, comparisons, and measurement limits.
  */
 
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { arch, cpus, platform, release } from 'node:os';
+import { version as prismaVersion } from '@prisma/client/package.json';
+import { version as packageVersion } from '../package.json';
 import {
   createTestPrismaClient,
+  DATABASE_URL,
   PrismaClient,
   prismaModule,
 } from '../test/e2e/prisma-client';
-import { createAuditExtension } from '../src/prisma/audit-extension';
+import { createAuditedClient } from '../src/prisma/audit-extension';
 import { AuditContext } from '../src/services/audit-context';
 import { applyAuditTableSchema } from '../src/sql';
 
-const WARMUP = 30;
-const ITERATIONS = 300;
+type Operation = 'create' | 'update' | 'delete';
+type ModeId = 'direct' | 'transaction' | 'atomic-required' | 'best-effort';
 
-// ---------------------------------------------------------------------------
-// Stats helpers (shared pattern with @nestarc/tenancy)
-// ---------------------------------------------------------------------------
+interface Mode {
+  id: ModeId;
+  label: string;
+  audited: boolean;
+  run(work: (client: PrismaClient) => Promise<unknown>): Promise<unknown>;
+}
 
 interface BenchResult {
-  label: string;
+  mode: ModeId;
+  operation: Operation;
   iterations: number;
   avgMs: number;
   p50Ms: number;
@@ -38,244 +40,230 @@ interface BenchResult {
   maxMs: number;
 }
 
-function percentile(sorted: number[], p: number): number {
-  const idx = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.max(0, idx)];
+function readCount(name: string, fallback: number, minimum: number): number {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isSafeInteger(value) || value < minimum || value > 100_000) {
+    throw new Error(`${name} must be an integer from ${minimum} to 100000`);
+  }
+  return value;
 }
 
-function analyze(label: string, timings: number[]): BenchResult {
+function assertTestDatabase(): void {
+  const url = new URL(DATABASE_URL);
+  if (
+    !['postgres:', 'postgresql:'].includes(url.protocol) ||
+    !['localhost', '127.0.0.1'].includes(url.hostname) ||
+    url.port !== '5433' ||
+    url.pathname !== '/audit_test' ||
+    url.username !== 'test' ||
+    url.password !== 'test' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    throw new Error(
+      'Benchmark requires the dedicated local test database: ' +
+        'postgresql://test:test@localhost:5433/audit_test. ' +
+        'Run npm run test:e2e:setup first; do not use an application database.',
+    );
+  }
+}
+
+function gitMetadata(): { revision: string; modifiedSources: boolean | null } {
+  try {
+    return {
+      revision: execFileSync('git', ['rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim(),
+      modifiedSources:
+        execFileSync(
+          'git',
+          ['status', '--porcelain', '--', 'src', 'benchmarks', 'package.json', 'package-lock.json'],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+        ).trim().length > 0,
+    };
+  } catch {
+    return { revision: 'unavailable', modifiedSources: null };
+  }
+}
+
+function analyze(mode: ModeId, operation: Operation, timings: number[]): BenchResult {
   const sorted = [...timings].sort((a, b) => a - b);
-  const total = sorted.reduce((a, b) => a + b, 0);
+  const percentile = (p: number) => sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)];
   return {
-    label,
+    mode,
+    operation,
     iterations: sorted.length,
-    avgMs: Math.round((total / sorted.length) * 100) / 100,
-    p50Ms: Math.round(percentile(sorted, 50) * 100) / 100,
-    p95Ms: Math.round(percentile(sorted, 95) * 100) / 100,
-    p99Ms: Math.round(percentile(sorted, 99) * 100) / 100,
-    minMs: Math.round(sorted[0] * 100) / 100,
-    maxMs: Math.round(sorted[sorted.length - 1] * 100) / 100,
+    avgMs: sorted.reduce((sum, timing) => sum + timing, 0) / sorted.length,
+    p50Ms: percentile(50),
+    p95Ms: percentile(95),
+    p99Ms: percentile(99),
+    minMs: sorted[0],
+    maxMs: sorted[sorted.length - 1],
   };
 }
 
-function printResult(r: BenchResult) {
-  console.log(`\n${r.label}`);
-  console.log(`  Iterations: ${r.iterations}`);
-  console.log(
-    `  Avg: ${r.avgMs}ms | P50: ${r.p50Ms}ms | P95: ${r.p95Ms}ms | P99: ${r.p99Ms}ms`,
-  );
-  console.log(`  Min: ${r.minMs}ms | Max: ${r.maxMs}ms`);
+async function runScenario(
+  prisma: PrismaClient,
+  mode: Mode,
+  operation: Operation,
+  runId: string,
+  warmup: number,
+  iterations: number,
+): Promise<BenchResult> {
+  const actorId = `${runId}-${mode.id}-${operation}`;
+  const records = Array.from({ length: warmup + iterations }, (_, index) => ({
+    id: randomUUID(),
+    name: `user-${index}`,
+    email: `${actorId}-${index}@bench.test`,
+    password: 'benchmark-password',
+  }));
+  const timings: number[] = [];
+
+  try {
+    if (operation !== 'create') {
+      // Fixture creation is outside the measured operation and has no audit extension.
+      await prisma.user.createMany({ data: records });
+    }
+
+    for (let index = 0; index < records.length; index++) {
+      const record = records[index];
+      await AuditContext.runAs({ id: actorId, type: 'user' }, async () => {
+        const start = performance.now();
+        await mode.run(async (client) => {
+          if (operation === 'create') {
+            return client.user.create({ data: record });
+          }
+          if (operation === 'update') {
+            return client.user.update({
+              where: { id: record.id },
+              data: { name: `updated-${index}`, email: `updated-${record.email}` },
+            });
+          }
+          return client.user.delete({ where: { id: record.id } });
+        });
+        if (index >= warmup) timings.push(performance.now() - start);
+      });
+    }
+
+    // Fail a run that silently skipped auditing, instead of reporting misleading latency.
+    const auditRows = await prisma.$queryRaw<Array<{ action: string; source: string; count: number }>>`
+      SELECT action, source, count(*)::int AS count
+      FROM audit_logs
+      WHERE actor_id = ${actorId}
+      GROUP BY action, source
+    `;
+    const expectedAction = { create: 'User.created', update: 'User.updated', delete: 'User.deleted' }[operation];
+    const valid = mode.audited
+      ? auditRows.length === 1 &&
+        auditRows[0].action === expectedAction &&
+        auditRows[0].source === 'auto' &&
+        auditRows[0].count === records.length
+      : auditRows.length === 0;
+    if (!valid) {
+      throw new Error(`Unexpected audit evidence for ${actorId}: ${JSON.stringify(auditRows)}`);
+    }
+
+    return analyze(mode.id, operation, timings);
+  } finally {
+    // Delete only this scenario's business fixtures. Append-only audit rows remain.
+    await prisma.user.deleteMany({ where: { id: { in: records.map((record) => record.id) } } });
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Cleanup helper — temporarily removes append-only enforcement
-// ---------------------------------------------------------------------------
+async function main(): Promise<void> {
+  assertTestDatabase();
+  const warmup = readCount('BENCH_WARMUP', 30, 0);
+  const iterations = readCount('BENCH_ITERATIONS', 300, 1);
+  const runId = `bench-${randomUUID()}`;
+  const prisma = createTestPrismaClient();
 
-async function cleanAuditLogs(prisma: PrismaClient) {
-  await prisma.$executeRawUnsafe(
-    `DROP RULE IF EXISTS audit_logs_no_delete ON audit_logs`,
-  );
-  await prisma.$executeRawUnsafe(
-    `DROP TRIGGER IF EXISTS audit_logs_no_delete_trg ON audit_logs`,
-  );
-  await prisma.$executeRaw`DELETE FROM audit_logs`;
-  await applyAuditTableSchema(prisma);
-}
+  try {
+    await prisma.$connect();
+    await applyAuditTableSchema(prisma);
+    const postgres = await prisma.$queryRaw<Array<{ version: string }>>`SELECT version()`;
+    const metadata = {
+      runId,
+      timestamp: new Date().toISOString(),
+      package: `@nestarc/audit-log@${packageVersion}`,
+      source: 'local TypeScript sources',
+      ...gitMetadata(),
+      node: process.version,
+      prisma: prismaVersion,
+      prismaClient: process.env.PRISMA_TEST_CLIENT === 'legacy' ? 'legacy' : 'prisma-client with PrismaPg adapter',
+      postgres: postgres[0].version,
+      host: 'local workstation',
+      os: `${platform()} ${release()} ${arch()}`,
+      cpu: cpus()[0]?.model ?? 'unavailable',
+      logicalCpus: cpus().length,
+      database: 'localhost:5433/audit_test (dedicated test database)',
+      warmup,
+      iterations,
+      concurrency: 1,
+      operationOrder: ['create', 'update', 'delete'],
+      modeOrder: ['direct', 'transaction', 'atomic-required', 'best-effort'],
+    };
+    console.log('@nestarc/audit-log benchmark metadata');
+    console.log(JSON.stringify(metadata, null, 2));
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-async function main() {
-  console.log('=== @nestarc/audit-log Benchmark ===\n');
-
-  const basePrisma = createTestPrismaClient();
-  await basePrisma.$connect();
-
-  // Setup: ensure users table + audit_logs table exist
-  console.log('Setting up database...');
-  await basePrisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS users (
-      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name       TEXT NOT NULL,
-      email      TEXT NOT NULL UNIQUE,
-      password   TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
-  await applyAuditTableSchema(basePrisma);
-
-  // Create extended client
-  const auditPrisma = basePrisma.$extends(
-    createAuditExtension({
+    const sharedOptions = {
       trackedModels: ['User'],
       sensitiveFields: ['password'],
+      databaseMapping: { User: { tableName: 'users' } },
       prismaModule,
-    }),
-  ) as any;
-
-  // ===================================================================
-  // Benchmark A: Baseline — create without audit extension
-  // ===================================================================
-  console.log('Cleaning up...');
-  await basePrisma.$executeRaw`DELETE FROM users`;
-  await cleanAuditLogs(basePrisma);
-
-  console.log(`\nWarming up A (${WARMUP} iterations)...`);
-  for (let i = 0; i < WARMUP; i++) {
-    await basePrisma.user.create({
-      data: { name: `warmup-${i}`, email: `warmup-a-${i}@bench.test`, password: 'pw' },
-    });
-  }
-  await basePrisma.$executeRaw`DELETE FROM users`;
-
-  console.log(`Running A: create without audit (${ITERATIONS} iterations)...`);
-  const timingsA: number[] = [];
-  for (let i = 0; i < ITERATIONS; i++) {
-    const start = performance.now();
-    await basePrisma.user.create({
-      data: { name: `user-${i}`, email: `a-${i}@bench.test`, password: 'pw' },
-    });
-    timingsA.push(performance.now() - start);
-  }
-
-  // ===================================================================
-  // Benchmark B: create WITH audit extension
-  // ===================================================================
-  await basePrisma.$executeRaw`DELETE FROM users`;
-  await cleanAuditLogs(basePrisma);
-
-  console.log(`Warming up B (${WARMUP} iterations)...`);
-  for (let i = 0; i < WARMUP; i++) {
-    await AuditContext.run(
-      { actor: { id: 'bench', type: 'user' }, noAudit: false },
-      () =>
-        auditPrisma.user.create({
-          data: { name: `warmup-${i}`, email: `warmup-b-${i}@bench.test`, password: 'pw' },
-        }),
-    );
-  }
-  await basePrisma.$executeRaw`DELETE FROM users`;
-  await cleanAuditLogs(basePrisma);
-
-  console.log(`Running B: create with audit (${ITERATIONS} iterations)...`);
-  const timingsB: number[] = [];
-  for (let i = 0; i < ITERATIONS; i++) {
-    await AuditContext.run(
-      { actor: { id: 'bench', type: 'user' }, noAudit: false },
-      async () => {
-        const start = performance.now();
-        await auditPrisma.user.create({
-          data: { name: `user-${i}`, email: `b-${i}@bench.test`, password: 'pw' },
-        });
-        timingsB.push(performance.now() - start);
+    };
+    const atomic = createAuditedClient(prisma, { ...sharedOptions, consistency: 'atomic-required' });
+    const bestEffort = createAuditedClient(prisma, { ...sharedOptions, consistency: 'best-effort' });
+    const modes: Mode[] = [
+      { id: 'direct', label: 'direct Prisma (no audit)', audited: false, run: (work) => work(prisma) },
+      {
+        id: 'transaction',
+        label: 'Prisma interactive transaction (no audit)',
+        audited: false,
+        run: (work) => prisma.$transaction(work),
       },
-    );
-  }
-
-  // ===================================================================
-  // Benchmark C: update WITH audit (before/after diff)
-  // ===================================================================
-  await basePrisma.$executeRaw`DELETE FROM users`;
-  await cleanAuditLogs(basePrisma);
-
-  // Seed users for update
-  const userIds: string[] = [];
-  for (let i = 0; i < ITERATIONS + WARMUP; i++) {
-    const u = await basePrisma.user.create({
-      data: { name: `user-${i}`, email: `c-${i}@bench.test`, password: 'pw' },
-    });
-    userIds.push(u.id);
-  }
-
-  console.log(`Warming up C (${WARMUP} iterations)...`);
-  for (let i = 0; i < WARMUP; i++) {
-    await AuditContext.run(
-      { actor: { id: 'bench', type: 'user' }, noAudit: false },
-      () =>
-        auditPrisma.user.update({
-          where: { id: userIds[i] },
-          data: { name: `updated-warmup-${i}` },
-        }),
-    );
-  }
-  await cleanAuditLogs(basePrisma);
-
-  console.log(`Running C: update with audit + diff (${ITERATIONS} iterations)...`);
-  const timingsC: number[] = [];
-  for (let i = 0; i < ITERATIONS; i++) {
-    await AuditContext.run(
-      { actor: { id: 'bench', type: 'user' }, noAudit: false },
-      async () => {
-        const start = performance.now();
-        await auditPrisma.user.update({
-          where: { id: userIds[WARMUP + i] },
-          data: { name: `updated-${i}`, email: `c-updated-${i}@bench.test` },
-        });
-        timingsC.push(performance.now() - start);
+      {
+        id: 'atomic-required',
+        label: 'atomic-required with withAuditTransaction()',
+        audited: true,
+        run: (work) => atomic.withAuditTransaction((tx) => work(tx as PrismaClient)),
       },
-    );
+      { id: 'best-effort', label: 'best-effort direct write', audited: true, run: (work) => work(bestEffort) },
+    ];
+    const results: BenchResult[] = [];
+
+    for (const operation of ['create', 'update', 'delete'] as const) {
+      for (const mode of modes) {
+        console.log(`Running ${operation}: ${mode.label} (${warmup} warmup + ${iterations} measured)`);
+        results.push(await runScenario(prisma, mode, operation, runId, warmup, iterations));
+      }
+    }
+
+    console.log('\nLatency in milliseconds (including transaction commit where used)');
+    console.table(results.map((result) => ({
+      operation: result.operation,
+      mode: result.mode,
+      iterations: result.iterations,
+      avgMs: result.avgMs.toFixed(3),
+      p50Ms: result.p50Ms.toFixed(3),
+      p95Ms: result.p95Ms.toFixed(3),
+      p99Ms: result.p99Ms.toFixed(3),
+    })));
+    console.log('\nMean latency deltas within this run:');
+    for (const operation of ['create', 'update', 'delete'] as const) {
+      const average = (mode: ModeId) => results.find((result) => result.operation === operation && result.mode === mode)!.avgMs;
+      console.log(`${operation}: atomic-required minus transaction baseline = ${(average('atomic-required') - average('transaction')).toFixed(3)}ms; ` +
+        `best-effort minus direct baseline = ${(average('best-effort') - average('direct')).toFixed(3)}ms`);
+    }
+    console.log('\nMachine-readable result (unrounded milliseconds):');
+    console.log(JSON.stringify({ metadata, results }, null, 2));
+    console.log(`\nVerified audit evidence. Audit rows for ${runId} remain for inspection; business fixtures were removed.`);
+  } finally {
+    await prisma.$disconnect();
   }
-
-  // ===================================================================
-  // Benchmark D: delete WITH audit
-  // ===================================================================
-  await cleanAuditLogs(basePrisma);
-
-  console.log(`Running D: delete with audit (${ITERATIONS} iterations)...`);
-  const timingsD: number[] = [];
-  // Re-use existing users (they were updated, still present)
-  for (let i = 0; i < ITERATIONS; i++) {
-    await AuditContext.run(
-      { actor: { id: 'bench', type: 'user' }, noAudit: false },
-      async () => {
-        const start = performance.now();
-        await auditPrisma.user.delete({
-          where: { id: userIds[WARMUP + i] },
-        });
-        timingsD.push(performance.now() - start);
-      },
-    );
-  }
-
-  // ===================================================================
-  // Results
-  // ===================================================================
-  const resultA = analyze('A) create — no audit (baseline)', timingsA);
-  const resultB = analyze('B) create — with audit', timingsB);
-  const resultC = analyze('C) update — with audit + diff', timingsC);
-  const resultD = analyze('D) delete — with audit', timingsD);
-
-  const createOverhead = resultB.avgMs - resultA.avgMs;
-  const createPct = ((createOverhead / resultA.avgMs) * 100).toFixed(1);
-
-  console.log('\n' + '='.repeat(70));
-  console.log('RESULTS');
-  console.log('='.repeat(70));
-
-  for (const r of [resultA, resultB, resultC, resultD]) {
-    printResult(r);
-  }
-
-  console.log('\n' + '-'.repeat(70));
-  console.log(
-    `Create overhead (avg): +${createOverhead.toFixed(2)}ms (+${createPct}%)`,
-  );
-  console.log(
-    `Create overhead (p95): +${(resultB.p95Ms - resultA.p95Ms).toFixed(2)}ms`,
-  );
-  console.log('-'.repeat(70));
-
-  // Cleanup
-  await basePrisma.$executeRaw`DELETE FROM users`;
-  await cleanAuditLogs(basePrisma);
-  await basePrisma.$disconnect();
-
-  console.log('\nDone.');
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exitCode = 1;
 });

@@ -191,6 +191,18 @@ export class AuditScanService {
     conditions: unknown[],
     options: AuditScanOptions,
   ): Promise<{ checkpoint: string; hasEntries: boolean }> {
+    if (
+      options.after &&
+      options.until &&
+      this.compareCursorParts(
+        decodeAuditCursor(options.after),
+        decodeAuditCursor(options.until),
+      ) === 0
+    ) {
+      // A saved final page can be resumed safely without replaying its entries.
+      return { checkpoint: options.until, hasEntries: false };
+    }
+
     const Prisma = this.Prisma;
     const where = this.buildWhere(conditions);
     const sql = this.tableRef
@@ -285,8 +297,8 @@ export class AuditScanService {
     }
     const after = options.after ? decodeAuditCursor(options.after) : undefined;
     const until = options.until ? decodeAuditCursor(options.until) : undefined;
-    if (after && until && this.compareCursorParts(after, until) >= 0) {
-      throw new TypeError('[@nestarc/audit-log] after must be before until.');
+    if (after && until && this.compareCursorParts(after, until) > 0) {
+      throw new TypeError('[@nestarc/audit-log] after must be before or equal to until.');
     }
     if (
       options.signal !== undefined &&

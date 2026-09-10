@@ -1,6 +1,16 @@
-import { Module, RequestMethod } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import {
+  CanActivate,
+  Controller,
+  ExecutionContext,
+  Get,
+  Injectable,
+  Module,
+  RequestMethod,
+  UseGuards,
+} from '@nestjs/common';
+import { APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import request from 'supertest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -11,6 +21,7 @@ import { AuditService } from '../src/services/audit.service';
 import { AuditLogModuleOptions } from '../src/interfaces/audit-log-options.interface';
 import { AuditActorMiddleware } from '../src/middleware/audit-actor.middleware';
 import { AuditInterceptor } from '../src/interceptors/audit.interceptor';
+import { AuditContext } from '../src/services/audit-context';
 
 describe('AuditLogModule', () => {
   const mockOptions: AuditLogModuleOptions = {
@@ -204,5 +215,90 @@ describe('AuditLogModule', () => {
       expect(resolveMiddlewareWildcard('not-a-version')).toBe('*');
       expect(resolveMiddlewareWildcard(undefined)).toBe('*');
     });
+  });
+
+  describe('guard-aware actor extraction over HTTP', () => {
+    @Injectable()
+    class AuthenticationGuard implements CanActivate {
+      async canActivate(context: ExecutionContext): Promise<boolean> {
+        const req = context.switchToHttp().getRequest();
+        if (!req.headers['x-user-id']) return false;
+        await Promise.resolve();
+        req.user = { id: req.headers['x-user-id'] };
+        return true;
+      }
+    }
+
+    @Controller('guard-actor')
+    @UseGuards(AuthenticationGuard)
+    class ActorController {
+      @Get()
+      readActor() {
+        return {
+          actor: AuditContext.getActor(),
+          metadata: AuditContext.getMetadata(),
+          hasContext: AuditContext.getStore() !== undefined,
+        };
+      }
+
+      @Get('excluded')
+      excluded() {
+        return this.readActor();
+      }
+    }
+
+    it.each(['sync-global', 'async-global', 'manual'] as const)(
+      'extracts once after guards with %s registration and preserves exclusions',
+      async (registration) => {
+        const actorExtractor = jest.fn(async (req: any) => ({
+          id: req.user?.id ?? null,
+          type: req.user ? 'user' as const : 'system' as const,
+        }));
+        const options: AuditLogModuleOptions = {
+          ...mockOptions,
+          actorExtractor,
+          actorExtractionStage: 'interceptor',
+          registerGlobalInterceptor: registration !== 'manual',
+          excludeRoutes: [{ path: 'guard-actor/excluded', method: RequestMethod.GET }],
+        };
+        const module = await Test.createTestingModule({
+          imports: [registration === 'async-global'
+            ? AuditLogModule.forRootAsync({ useFactory: async () => options })
+            : AuditLogModule.forRoot(options)],
+          controllers: [ActorController],
+        }).compile();
+        const app = module.createNestApplication();
+        if (registration === 'manual') {
+          app.useGlobalInterceptors(new AuditInterceptor(app.get(Reflector)));
+        }
+        await app.init();
+
+        try {
+          const response = await request(app.getHttpServer())
+            .get('/guard-actor')
+            .set('x-user-id', 'authenticated-user')
+            .set('x-request-id', 'guard-correlation')
+            .expect(200);
+          expect(response.body).toEqual({
+            actor: { id: 'authenticated-user', type: 'user' },
+            metadata: { correlationId: 'guard-correlation' },
+            hasContext: true,
+          });
+          expect(actorExtractor).toHaveBeenCalledTimes(1);
+
+          await request(app.getHttpServer()).get('/guard-actor').expect(403);
+          expect(actorExtractor).toHaveBeenCalledTimes(1);
+
+          const excluded = await request(app.getHttpServer())
+            .get('/guard-actor/excluded')
+            .set('x-user-id', 'excluded-user')
+            .expect(200);
+          expect(excluded.body).toEqual({ actor: null, hasContext: false });
+          expect(actorExtractor).toHaveBeenCalledTimes(1);
+        } finally {
+          await app.close();
+        }
+      },
+    );
   });
 });

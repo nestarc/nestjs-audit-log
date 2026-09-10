@@ -105,6 +105,55 @@ describe('Phase 7 durable audit stream E2E', () => {
     expect(delivered).toHaveLength(3);
   });
 
+  it('documents that a late commit behind the ACKed timestamp cursor needs reconciliation', async () => {
+    const delivered: string[] = [];
+    const runner = new AuditStreamRunner(service, {
+      streamId: 'late-commit-limitation',
+      scan: { tenantId: 'tenant-1' },
+      sink: {
+        deliver: async (entries) => {
+          delivered.push(...entries.map((entry) => entry.id));
+        },
+      },
+      checkpointStore: store,
+    });
+
+    // A uses the schema's default now() inside an open transaction. B commits
+    // on another connection before A, so a timestamp cursor can advance past A.
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO ${Prisma.raw(AUDIT_TABLE)} (id, tenant_id, action)
+        VALUES (${uuid(1)}::uuid, 'tenant-1', 'late-commit.A')
+      `;
+      await prisma.$executeRaw`
+        INSERT INTO ${Prisma.raw(AUDIT_TABLE)} (id, tenant_id, action)
+        VALUES (${uuid(2)}::uuid, 'tenant-1', 'late-commit.B')
+      `;
+      const ordering = await tx.$queryRaw`
+        SELECT (a.created_at, a.id) < (b.created_at, b.id) AS "aBeforeB"
+        FROM ${Prisma.raw(AUDIT_TABLE)} a, ${Prisma.raw(AUDIT_TABLE)} b
+        WHERE a.id = ${uuid(1)}::uuid AND b.id = ${uuid(2)}::uuid
+      ` as Array<{ aBeforeB: boolean }>;
+      expect(ordering).toEqual([{ aBeforeB: true }]);
+      await expect(service.getById(uuid(1), { tenantId: 'tenant-1' })).resolves.toBeNull();
+      await expect(runner.runOnce()).resolves.toMatchObject({ deliveredEntries: 1 });
+      expect(delivered).toEqual([uuid(2)]);
+    }, { timeout: 10_000, maxWait: 5_000 });
+
+    // A is now committed and available to ordinary reads, but its tuple is
+    // below the persisted checkpoint and subsequent stream runs do not see it.
+    await expect(service.getById(uuid(1), { tenantId: 'tenant-1' })).resolves.toMatchObject({
+      id: uuid(1),
+    });
+    await expect(runner.runOnce()).resolves.toMatchObject({ status: 'idle' });
+    await prisma.$executeRaw`
+      INSERT INTO ${Prisma.raw(AUDIT_TABLE)} (id, tenant_id, action)
+      VALUES (${uuid(3)}::uuid, 'tenant-1', 'late-commit.C')
+    `;
+    await expect(runner.runOnce()).resolves.toMatchObject({ deliveredEntries: 1 });
+    expect(delivered).toEqual([uuid(2), uuid(3)]);
+  });
+
   it('redelivers the same entry IDs when checkpoint persistence fails after ACK', async () => {
     await seed(1);
     let failSave = true;

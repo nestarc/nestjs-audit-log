@@ -21,6 +21,7 @@ import {
   warnForTrackingConfiguration,
 } from './audit-extension/mutation-policy';
 import { createOperationHandlers } from './audit-extension/operation-handlers';
+import type { AuditRuntimeOptions } from './audit-extension/audit-errors';
 import type { LifecycleSuppressionScope } from './audit-extension/operation-handlers';
 import type {
   AuditBatchOverflow,
@@ -127,7 +128,21 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
     Prisma.dmmf?.datamodel?.models?.map((model) => model.name),
   );
 
-  const transactionContext = new AsyncLocalStorage<any>();
+  const transactionContext = new AsyncLocalStorage<{
+    client: any;
+    failed: boolean;
+    failure?: unknown;
+  }>();
+  const runtimeOptions: AuditRuntimeOptions = {
+    ...options,
+    markAtomicFailure(error) {
+      const scope = transactionContext.getStore();
+      if (scope && !scope.failed) {
+        scope.failed = true;
+        scope.failure = error;
+      }
+    },
+  };
   const lifecycleSuppressionScope =
     new AsyncLocalStorage<LifecycleSuppressionScope>();
   const auditCapabilities: AuditCapabilities = Object.freeze({
@@ -153,8 +168,18 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           validatePositiveInteger(transactionOptions?.timeout, 'timeout');
           validatePositiveInteger(transactionOptions?.maxWait, 'maxWait');
           return this.$transaction(
-            (tx: any) =>
-              transactionContext.run(tx, async () => await callback(tx)),
+            (tx: any) => {
+              const scope = { client: tx, failed: false, failure: undefined as unknown };
+              return transactionContext.run(scope, async () => {
+                const result = await callback(tx);
+                // A caller may catch a JavaScript audit error after a business
+                // write. Keep that transaction from committing incomplete evidence.
+                if (options.consistency === 'atomic-required' && scope.failed) {
+                  throw scope.failure;
+                }
+                return result;
+              });
+            },
             transactionOptions,
           );
         },
@@ -165,7 +190,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           if (!auditCapabilities.atomicLifecycle) {
             throw new Error(AUDIT_LIFECYCLE_CONSISTENCY_ERROR);
           }
-          const tx = transactionContext.getStore();
+          const tx = transactionContext.getStore()?.client;
           if (!tx) {
             throw new Error(AUDIT_LIFECYCLE_CONTEXT_ERROR);
           }
@@ -220,13 +245,13 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
       query: {
         $allModels: createOperationHandlers({
           client,
-          options,
+          options: runtimeOptions,
           Prisma,
           auditTableRef,
           trackedModels,
           ignoredModels,
           sensitiveFieldsFor,
-          getTransactionClient: () => transactionContext.getStore(),
+          getTransactionClient: () => transactionContext.getStore()?.client,
           lifecycleSuppressionScope,
         }),
       },

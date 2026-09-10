@@ -2,6 +2,9 @@
 
 Date: 2026-06-11
 Status: Historical v0.2.0 implementation specification — released; not the current package contract
+
+> Current usage: [README](../../../README.md) and [CHANGELOG](../../../CHANGELOG.md).
+> This specification describes v0.2.0 history; later contracts may differ.
 Roadmap items: #1 (보존 정책 + 파티셔닝 + prune API + GIN 인덱스), #11 (tableName 설정 + 트리거 기반 strict append-only — 0.2.0 승격)
 
 ## Goal

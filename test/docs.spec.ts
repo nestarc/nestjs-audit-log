@@ -1,5 +1,5 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { dirname, extname, join, relative, resolve, sep } from 'path';
 
 const root = join(__dirname, '..');
 
@@ -7,26 +7,150 @@ function read(path: string): string {
   return readFileSync(join(root, path), 'utf8');
 }
 
-describe('documentation gates', () => {
-  it('documents atomic-required and explicit legacy best-effort contracts', () => {
-    const readme = read('README.md');
+const guides = [
+  'docs/agent-guide.md',
+  'docs/api-reference.md',
+  'docs/transactions.md',
+  'docs/context-and-tenancy.md',
+  'docs/storage-and-retention.md',
+  'docs/export-and-streams.md',
+  'docs/benchmarks.md',
+  'docs/maintaining.md',
+];
+const currentUsage = ['README.md', 'llms.txt', ...guides, 'examples/quick-start/README.md'];
+const packageFiles = (JSON.parse(read('package.json')) as { files: string[] }).files;
 
-    expect(readme).toContain("consistency: 'atomic-required'");
-    expect(readme).toContain('withAuditTransaction()');
-    expect(readme).toContain('rejects tracked writes outside');
-    expect(readme).toContain('orphan success rows');
-    expect(readme).toContain('AuditService.log(input, tx)');
-    expect(readme).toContain('`experimentalTxAudit` was removed in v0.5.0');
-    expect(readme).toContain('including `false`, fail');
-    expect(readme).not.toContain('| `experimentalTxAudit` |');
-    expect(readme).toContain('databaseMapping');
-    expect(readme).toContain('lock the target row and refresh the preimage');
-    expect(readme).toContain(
-      'Supported — use `atomic-required` for authoritative automatic tracking',
-    );
-    expect(readme).not.toContain(
-      'Preview — choose the automatic tracking consistency explicitly',
-    );
+function selectedForPackage(path: string): boolean {
+  // npm includes the root README and license even when omitted from `files`.
+  return ['README.md', 'LICENSE', 'package.json'].includes(path) ||
+    packageFiles.some((entry) => path === entry || path.startsWith(`${entry}/`));
+}
+
+function exampleFiles(directory = 'examples/quick-start'): string[] {
+  return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
+    if (['node_modules', 'dist', 'generated', '.git'].includes(entry.name)) return [];
+    const path = `${directory}/${entry.name}`;
+    return entry.isDirectory() ? exampleFiles(path) : [path];
+  });
+}
+
+function prose(markdown: string): string {
+  let fence: string | undefined;
+  return markdown.split('\n').filter((line) => {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = undefined;
+      return false;
+    }
+    return !fence;
+  }).join('\n');
+}
+
+function linkTargets(markdown: string): string[] {
+  const text = prose(markdown);
+  const inline = [...text.matchAll(/\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)]+))(?:\s+["'][^"']*["'])?\s*\)/g)]
+    .map((match) => match[1] ?? match[2]);
+  const references = [...text.matchAll(/^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/gm)]
+    .map((match) => match[1]);
+  return [...inline, ...references];
+}
+
+function headingAnchors(markdown: string): Set<string> {
+  const anchors = new Set<string>();
+  const occurrences = new Map<string, number>();
+  for (const match of prose(markdown).matchAll(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/gm)) {
+    // GitHub heading slugs preserve letters, numbers, hyphens, and underscores.
+    const base = match[1].toLowerCase()
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/<[^>]+>/g, '')
+      .replace(/[^\p{L}\p{N}\p{M}_\- ]/gu, '')
+      .replace(/ /g, '-');
+    const count = occurrences.get(base) ?? 0;
+    anchors.add(count === 0 ? base : `${base}-${count}`);
+    occurrences.set(base, count + 1);
+  }
+  for (const match of prose(markdown).matchAll(/<a\s+[^>]*(?:id|name)=["']([^"']+)["'][^>]*>/gi)) {
+    anchors.add(match[1]);
+  }
+  return anchors;
+}
+
+describe('documentation gates', () => {
+  it('selects current usage docs and the runnable example for publication', () => {
+    const requiredFiles = [
+      ...currentUsage,
+      'CHANGELOG.md',
+      'docs/2026-08-28-experimental-tx-audit-removal-adr.md',
+      'examples/quick-start/.env.example',
+      'examples/quick-start/package.json',
+      'examples/quick-start/tsconfig.json',
+      'examples/quick-start/prisma.config.ts',
+      'examples/quick-start/prisma/schema.prisma',
+      'examples/quick-start/prisma/migrations/migration_lock.toml',
+      'examples/quick-start/prisma/migrations/20260910000000_users/migration.sql',
+      ...exampleFiles().filter((path) => path.endsWith('.ts')),
+    ];
+    expect(exampleFiles().some((path) => path.endsWith('/src/smoke.ts'))).toBe(true);
+    for (const path of requiredFiles) {
+      expect({ path, exists: existsSync(join(root, path)), published: selectedForPackage(path) })
+        .toEqual({ path, exists: true, published: true });
+    }
+  });
+
+  it.each(currentUsage)('%s identifies its source version and links release differences', (path) => {
+    const document = read(path);
+    expect(document).toMatch(/current (?:checkout|repository checkout|local package sources)/i);
+    const hasChangelogLink = linkTargets(document).some((target) =>
+      resolve(dirname(join(root, path)), target.split('#')[0]) === join(root, 'CHANGELOG.md'));
+    expect(hasChangelogLink).toBe(true);
+  });
+
+  it('keeps local Markdown links and heading anchors valid in published documentation', () => {
+    const documents = [...new Set([
+      ...currentUsage,
+      'CHANGELOG.md',
+      ...packageFiles.filter((path) => path.endsWith('.md')),
+      ...exampleFiles().filter((path) => path.endsWith('.md')),
+    ])];
+    const failures: string[] = [];
+    for (const document of documents) {
+      for (const target of linkTargets(read(document))) {
+        // External references, including historical release links, are not network-tested.
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) continue;
+        const [pathPart, fragment] = target.split('#', 2);
+        const destination = pathPart
+          ? resolve(dirname(join(root, document)), decodeURIComponent(pathPart.split('?')[0]))
+          : join(root, document);
+        const relativePath = relative(root, destination).split(sep).join('/');
+        const context = `${document}: ${target}`;
+        if (relativePath.startsWith('../') || !existsSync(destination)) {
+          failures.push(`${context} (missing local target)`);
+          continue;
+        }
+        if (!selectedForPackage(relativePath)) failures.push(`${context} (target omitted from package files)`);
+        if (fragment && statSync(destination).isFile() && ['.md', '.txt'].includes(extname(destination))) {
+          if (!headingAnchors(readFileSync(destination, 'utf8')).has(decodeURIComponent(fragment))) {
+            failures.push(`${context} (missing heading anchor)`);
+          }
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('routes current transaction guidance to the supported and explicit legacy modes', () => {
+    const transactions = read('docs/transactions.md');
+    const api = read('docs/api-reference.md');
+
+    expect(transactions).toContain("consistency: 'atomic-required'");
+    expect(transactions).toContain("consistency: 'best-effort'");
+    expect(transactions).toContain('withAuditTransaction()');
+    expect(transactions).toContain('AuditService.log(input, tx)');
+    expect(transactions).toMatch(/experimentalTxAudit.*removed in v0\.5\.0/);
+    expect(transactions).toMatch(/including `false`, fail\s+fast/);
+    expect(api).not.toMatch(/^\| `experimentalTxAudit` \|/m);
+    expect(transactions).not.toContain('Preview — choose the automatic tracking consistency explicitly');
   });
 
   it('records the v0.5.0 experimental transaction routing removal policy', () => {
@@ -216,16 +340,6 @@ describe('documentation gates', () => {
     expect(release).toContain('softprops/action-gh-release@v3');
   });
 
-  it('documents Prisma 7 generator, adapter, and namespace injection setup', () => {
-    const readme = read('README.md');
-
-    expect(readme).toContain('Prisma 7 (primary)');
-    expect(readme).toContain('provider = "prisma-client"');
-    expect(readme).toContain("from '@prisma/adapter-pg'");
-    expect(readme).toContain('prismaModule');
-    expect(readme).toContain('prisma.config.ts');
-  });
-
   it('documents v0.2.0 release notes in CHANGELOG', () => {
     const changelog = read('CHANGELOG.md');
     const v020Start = changelog.indexOf('## [0.2.0]');
@@ -242,76 +356,6 @@ describe('documentation gates', () => {
     expect(v020).toMatch(
       /they\s+do not establish transaction-atomic automatic auditing/,
     );
-  });
-
-  it('documents v0.2.0 storage, query, and nested-write behavior in README', () => {
-    const readme = read('README.md');
-
-    expect(readme).toContain('Retention & Partitioning');
-    expect(readme).toContain('ensurePartitions');
-    expect(readme).toContain('AuditService.prune');
-    expect(readme).toContain('Query API v2');
-    expect(readme).toContain('includeTotal: false');
-    expect(readme).toContain('Nested writes');
-    expect(readme).toContain('trigger enforcement');
-  });
-
-  it('keeps README cursor pagination examples on a fixed filter set', () => {
-    const readme = read('README.md');
-
-    expect(readme).toContain(
-      `await auditService.query({
-    tenantId: 'tenant-1',
-    action: 'invoice.*',
-    actorType: 'user',
-    source: 'auto',
-    result: 'success',
-    cursor: page.nextCursor!,
-    limit: 50,
-    includeTotal: false,
-  });`,
-    );
-  });
-
-  it('documents tenantRequired path differences and atomic transaction behavior', () => {
-    const readme = read('README.md');
-
-    expect(readme).toContain('audit entry skipped');
-    expect(readme).toContain('fails closed in `atomic-required`');
-    expect(readme).toContain('tenantId and allTenants are mutually exclusive');
-    expect(readme).toContain('No trackedModels/ignoredModels configured');
-    expect(readme).toContain('uses no private Prisma API');
-    expect(readme).toContain('generic public helper guard');
-    expect(readme).not.toContain('`experimentalTxAudit` is deprecated');
-    expect(readme).not.toContain('reserved for future transaction-aware routing');
-  });
-
-  it('documents forward tenant-scoped scan and streaming CSV contracts', () => {
-    const readme = read('README.md');
-    const changelog = read('CHANGELOG.md');
-
-    expect(readme).toContain('### Streaming export and CSV');
-    expect(readme).toContain('auditService.scan({');
-    expect(readme).toContain('page.highWatermark');
-    expect(readme).toContain('auditService.exportCsv({');
-    expect(readme).toContain('AUDIT_CSV_COLUMNS_V1');
-    expect(readme).toContain('host-application responsibilities');
-    expect(changelog).toContain('`AuditService.scan()`');
-    expect(changelog).toContain('`AuditService.exportCsv()`');
-  });
-
-  it('documents durable at-least-once stream and retention contracts', () => {
-    const readme = read('README.md');
-    const changelog = read('CHANGELOG.md');
-
-    expect(readme).toContain('### Durable log streams');
-    expect(readme).toContain('new AuditStreamRunner');
-    expect(readme).toContain('PostgresAuditStreamStore');
-    expect(readme).toContain('Idempotency-Key');
-    expect(readme).toContain('Retry-After');
-    expect(readme).toContain('requiredCheckpoints');
-    expect(changelog).toContain('`AuditStreamRunner`');
-    expect(changelog).toContain('`HttpAuditStreamSink`');
   });
 
   it('keeps the design document aligned with v0.2.0 query, storage, and tenancy contracts', () => {

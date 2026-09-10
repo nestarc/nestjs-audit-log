@@ -1,10 +1,15 @@
 # @nestarc/audit-log 무결성 개선 및 후속 기능 계획
 
+> **Historical implementation plan — archived 2026-09-10.** Scope: v0.3.0 baseline; later phases shipped in v0.4.0/v0.5.0.
+> This file preserves the decisions, findings, and instructions from that period; it is not the
+> current package contract or a task to execute. Start with the [current README](../README.md) and
+> [CHANGELOG](../CHANGELOG.md) for supported usage and release differences.
+
 - 작성일: 2026-08-20
 - 대상 저장소: `@nestarc/audit-log`
 - 기준 브랜치: `main`
 - 기준 커밋: `9597a73` (`v0.3.0`, `Implement audit log enhancements`)
-- 문서 상태: Phase 7 구현 완료 — coordinated peer matrix CI 통과 후 릴리스 가능
+- 문서 상태: Historical — Phase 7 완료 이력; 현행 계약과 후속 완료 상태는 README 및 CHANGELOG 참조
 - 우선순위 기준: 감사 데이터의 진실성 및 트랜잭션 무결성
 
 ## 1. 이 문서의 목적

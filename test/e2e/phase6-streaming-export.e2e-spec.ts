@@ -159,6 +159,28 @@ describe('Phase 6 tenant-scoped streaming export E2E', () => {
     expect(resumedIds).toEqual([uuid(3), uuid(4), uuid(5)]);
   });
 
+  it('resumes a saved final page as an empty completed range without replay', async () => {
+    await seed(tenantRows());
+    let finalPage: AuditScanPage | undefined;
+    for await (const page of service.scan({ tenantId: 'tenant-1', batchSize: 2 })) {
+      finalPage = page;
+    }
+    expect(finalPage?.checkpoint).toBe(finalPage?.highWatermark);
+
+    const resumedPages: AuditScanPage[] = [];
+    for await (const page of service.scan({
+      tenantId: 'tenant-1',
+      after: finalPage!.checkpoint!,
+      until: finalPage!.highWatermark,
+    })) {
+      resumedPages.push(page);
+    }
+
+    expect(resumedPages).toEqual([
+      { entries: [], checkpoint: null, highWatermark: finalPage!.highWatermark },
+    ]);
+  });
+
   it('applies export filters while allowing intentional all-tenant scans', async () => {
     await seed([
       ...tenantRows(),

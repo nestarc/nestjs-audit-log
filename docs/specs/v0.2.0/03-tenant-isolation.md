@@ -2,6 +2,9 @@
 
 Date: 2026-06-11
 Status: Historical v0.2.0 implementation specification — released; not the current package contract
+
+> Current usage: [README](../../../README.md) and [CHANGELOG](../../../CHANGELOG.md).
+> This specification describes v0.2.0 history; later contracts may differ.
 Roadmap items: #4 (테넌트 격리 정합성), Smaller fixes — 레다크션 강화
 
 ## Goal
