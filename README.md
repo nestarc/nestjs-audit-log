@@ -357,7 +357,7 @@ The independent PostgreSQL release fixture verifies this last-known-good publish
 |---|---|
 | `@nestarc/tenancy` | `0.15.0` |
 | `@nestarc/audit-log` | `0.5.0` |
-| `@nestarc/soft-delete` | `0.7.2` |
+| `@nestarc/soft-delete` | `0.7.3` |
 | Runtime lane | Node 24, NestJS 11.1.18, Prisma 7.9.1, PostgreSQL 16 |
 
 This is a coordinated integration test tuple, not the full peer-support matrix. The candidate gate

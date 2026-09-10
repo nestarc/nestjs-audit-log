@@ -280,7 +280,7 @@ describe('documentation gates', () => {
     expect(changelog).toContain('rejected thenables');
     expect(fixture.dependencies['@nestarc/tenancy']).toBe('0.15.0');
     expect(fixture.dependencies['@nestarc/audit-log']).toBe('0.5.0');
-    expect(fixture.dependencies['@nestarc/soft-delete']).toBe('0.7.2');
+    expect(fixture.dependencies['@nestarc/soft-delete']).toBe('0.7.3');
 
     for (const packageName of [
       '@nestarc/tenancy',

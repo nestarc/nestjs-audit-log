@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Release tooling
 
+- Update the exact published ecosystem fixture to `@nestarc/soft-delete@0.7.3`, whose optional
+  peer range supports audit-log 0.6.0, and verify the packed audit-log candidate with strict peers.
 - Add an explicit packed tenancy `0.16.x` candidate mode to the consumer-owned PostgreSQL
   ecosystem gate. Published, audit-log candidate, and tenancy candidate modes now use strict peer
   installation and assert tenancy/audit-log/soft-delete version, source, and integrity separately.
