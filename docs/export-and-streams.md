@@ -1,7 +1,7 @@
 # Audit export and durable delivery
 
-Applies to the current checkout. Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for released and unreleased differences.
+Applies to the current checkout (`0.6.0` release preparation). Start with the [README](../README.md);
+see [CHANGELOG](../CHANGELOG.md) for version changes. This version is not yet published to npm.
 
 ## Streaming export and CSV
 
@@ -37,8 +37,8 @@ the same filters. Checkpoints contain positions, not filters. `batchSize` defaul
 be between 1 and 10,000. An empty scan yields one empty page with a null checkpoint.
 
 In the current checkout, `after === until` is an already completed range: it yields one empty page
-without a database query or replay. `after > until` is invalid. This completed-range behavior is an
-unreleased correction to the published v0.5.0 validation.
+without a database query or replay. `after > until` is invalid. This completed-range behavior is a
+0.6.0 correction to the published v0.5.0 validation.
 
 `AuditScanOptions` supports `action`, `actorId`, `targetType`, `targetId`, `from`, `to`, `batchSize`,
 `after`, `until`, and `signal`, in addition to explicit tenant scope. It does not expose every

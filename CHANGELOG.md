@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-10
+
 ### Added
 
 - Add opt-in `actorExtractionStage: 'interceptor'` so authenticated actor extraction can run
@@ -26,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Documentation
 
 - Separate current usage guides from historical plans and maintainer procedures, and include
-  current usage documentation and examples in package artifacts. These changes remain
-  unreleased; the published 0.5.0 package does not include the new actor option or fixes above.
+  current usage documentation and examples in package artifacts. The new actor option and
+  fixes above are introduced in 0.6.0 and are absent from the published 0.5.0 package.
 
 ### Release tooling
 

@@ -1,7 +1,7 @@
 # Automatic tracking and transaction contracts
 
-Applies to the current checkout. Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for released and unreleased differences.
+Applies to the current checkout (`0.6.0` release preparation). Start with the [README](../README.md);
+see [CHANGELOG](../CHANGELOG.md) for version changes. This version is not yet published to npm.
 
 ## Scope of automatic tracking
 
@@ -28,8 +28,8 @@ The current checkout checks nested mutation data recursively, including when the
 intermediate model is excluded from tracking. An excluded relation may contain a deeper mutation
 that reaches a tracked model. A relation whose target and nested mutation targets are all excluded
 does not trigger the guard when public Prisma DMMF relation metadata is available. If that metadata
-is unavailable, the atomic path fails conservatively. These recursive exclusion checks are an
-unreleased correction; see [CHANGELOG](../CHANGELOG.md).
+is unavailable, the atomic path fails conservatively. These recursive exclusion checks are corrected
+in 0.6.0; see [CHANGELOG](../CHANGELOG.md).
 
 `best-effort` preserves the business mutation and warns about unsupported nested tracking.
 It supplies no child-record evidence for those changes. `@NoAudit()` remains an intentional bypass.
@@ -71,7 +71,7 @@ and result types, rejects nested helper calls, and uses no private Prisma API. `
 fail-closed. A supported tracked mutation outside the helper throws before its business query runs.
 The current checkout also rejects helper completion after an audit failure even if the callback
 catches that failure; catching it cannot commit earlier business writes without their audit work.
-This is an unreleased correction. Recoverable business exceptions remain caller-controlled.
+This is corrected in 0.6.0. Recoverable business exceptions remain caller-controlled.
 HTTP actor-extractor failures are a separate context setup path: they are reported and continue
 with a null actor, as described in [actor extraction](context-and-tenancy.md#http-actor-extraction).
 `withAuditLifecycle()` is available only when the extension uses `atomic-required`; best-effort

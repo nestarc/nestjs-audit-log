@@ -1,7 +1,7 @@
 # Actor context, decorators, and tenant scope
 
-Applies to the current checkout. Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for released and unreleased differences.
+Applies to the current checkout (`0.6.0` release preparation). Start with the [README](../README.md);
+see [CHANGELOG](../CHANGELOG.md) for version changes. This version is not yet published to npm.
 
 ## HTTP actor extraction
 
@@ -13,7 +13,7 @@ see [CHANGELOG](../CHANGELOG.md) for released and unreleased differences.
 | `'middleware'` (default) | Before NestJS Guards | Authentication middleware has already populated identity, or the extractor resolves it itself |
 | `'interceptor'` | After successful Guards, before the route handler | A Guard, including Passport authentication, populates `req.user` |
 
-The stage option is an unreleased checkout addition. Published v0.5.0 always extracts in middleware.
+The stage option is introduced in 0.6.0. Published v0.5.0 always extracts in middleware.
 Do not assume a Guard-populated `req.user` is available at that earlier stage.
 
 ```typescript

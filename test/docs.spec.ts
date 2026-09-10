@@ -251,7 +251,7 @@ describe('documentation gates', () => {
     ).toContain('--tenancy-candidate');
   });
 
-  it('keeps the v0.5.0 release metadata and published ecosystem tuple aligned', () => {
+  it('keeps current release metadata consistent and preserves the published ecosystem tuple', () => {
     const packageJson = JSON.parse(read('package.json')) as { version: string };
     const packageLock = JSON.parse(read('package-lock.json')) as {
       version: string;
@@ -271,9 +271,11 @@ describe('documentation gates', () => {
     const readme = read('README.md');
     const changelog = read('CHANGELOG.md');
 
-    expect(packageJson.version).toBe('0.5.0');
-    expect(packageLock.version).toBe('0.5.0');
-    expect(packageLock.packages['']?.version).toBe('0.5.0');
+    expect(packageJson.version).toBe('0.6.0');
+    expect(packageLock.version).toBe(packageJson.version);
+    expect(packageLock.packages['']?.version).toBe(packageJson.version);
+    expect(changelog).toContain(`## [${packageJson.version}] - 2026-09-10`);
+    expect(readme).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);
     expect(changelog).toContain('## [0.5.0] - 2026-08-28');
     expect(changelog).toContain('rejected thenables');
     expect(fixture.dependencies['@nestarc/tenancy']).toBe('0.15.0');

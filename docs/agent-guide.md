@@ -1,15 +1,16 @@
 # Using audit-log from an AI-assisted workflow
 
 This guide is for agents integrating `@nestarc/audit-log` into a consuming application. It describes
-the current checkout; inspect the installed version before choosing examples.
+the current checkout, prepared as 0.6.0 and not yet published to npm; inspect the installed version
+before choosing examples.
 
 ## Choose the matching contract
 
 1. Read the consuming application's `package.json` and the installed package's `package.json`.
    Check Node, NestJS, Prisma, and `@nestarc/audit-log` versions before proposing changes.
 2. Use the [README](../README.md) for the current checkout and [CHANGELOG](../CHANGELOG.md) for
-   released versus unreleased features. `actorExtractionStage` and the documented scan/nested-audit
-   corrections are checkout additions; do not assume the published v0.5.0 package contains them.
+   version changes. `actorExtractionStage` and the documented scan, nested-audit, and caught-audit-error
+   corrections are introduced in 0.6.0; do not assume the published v0.5.0 package contains them.
 3. Inspect public types through the package root (`dist/index.d.ts` in an installed package).
    Import supported APIs and types from `@nestarc/audit-log`; avoid relying on private Prisma APIs
    or guessing undocumented option names.
@@ -27,7 +28,7 @@ the current checkout; inspect the installed version before choosing examples.
 | Client ownership | Keep one base client for audit storage and an extended view for business writes; the Nest module does not create the extension |
 | Atomic writes | Choose `consistency: 'atomic-required'` and use `withAuditTransaction()` for supported tracked writes |
 | Shared settings | Pass intended `tableName`, tenant options, masking, and error reporting to module and extension independently; DDL also needs the same table name |
-| Actor timing | For Guard-populated `req.user`, use the checkout's interceptor-stage extraction; published v0.5.0 requires earlier authentication or extraction |
+| Actor timing | For Guard-populated `req.user`, use interceptor-stage extraction introduced in 0.6.0; published v0.5.0 requires earlier authentication or extraction |
 | Background jobs | Use `AuditContext.runAs()` for actor identity and establish tenant context separately |
 | Query shape | Default automatic actions preserve model casing (`User.created`); manual event names are application-defined and have `source: 'manual'` |
 | Tenant authorization | A caller must authorize any explicit tenant or `allTenants: true`; the package's scope selector is not an authorization check |

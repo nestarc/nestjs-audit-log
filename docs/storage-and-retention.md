@@ -1,7 +1,7 @@
 # Audit storage, retention, and database permissions
 
-Applies to the current checkout. Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for released and unreleased differences.
+Applies to the current checkout (`0.6.0` release preparation). Start with the [README](../README.md);
+see [CHANGELOG](../CHANGELOG.md) for version changes. This version is not yet published to npm.
 
 ## Schema utilities
 

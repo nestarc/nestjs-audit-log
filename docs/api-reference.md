@@ -1,7 +1,7 @@
 # Audit log API reference
 
-Applies to the current checkout. Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for released and unreleased differences.
+Applies to the current checkout (`0.6.0` release preparation). Start with the [README](../README.md);
+see [CHANGELOG](../CHANGELOG.md) for version changes. This version is not yet published to npm.
 
 ## Entry points
 
@@ -28,7 +28,7 @@ For custom table names, also pass the same value to schema and partition utiliti
 |--------|------|---------|-------------|
 | `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
 | `actorExtractor` | `(req) => AuditActor \| Promise<AuditActor>` | *required* | Extracts actor from HTTP request |
-| `actorExtractionStage` | `'middleware' \| 'interceptor'` | `'middleware'` | Current-checkout addition: choose `interceptor` for identity populated by authentication Guards; [actor timing](context-and-tenancy.md#http-actor-extraction) |
+| `actorExtractionStage` | `'middleware' \| 'interceptor'` | `'middleware'` | Added in 0.6.0: choose `interceptor` for identity populated by authentication Guards; [actor timing](context-and-tenancy.md#http-actor-extraction) |
 | `tenantRequired` | `boolean` | `false` | When `true`, `log()` requires tenant context; `query()`/`getById()` require it unless explicit `tenantId` or `allTenants` is supplied |
 | `excludeRoutes` | `RouteInfo[]` | `[]` | Routes excluded from `AuditActorMiddleware` |
 | `registerGlobalInterceptor` | `boolean` | `true` | Set `false` to bind `AuditInterceptor` manually |

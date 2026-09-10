@@ -2,10 +2,10 @@
 
 > NestJS audit logging with Prisma change tracking and PostgreSQL storage.
 
-Check the installed package version and CHANGELOG before using examples. This repository's
-main branch includes unreleased changes on top of 0.5.0. In particular actorExtractionStage,
-the nested-parent guard fix, caught-audit-error rollback, and completed-scan replay handling
-are not features of the published 0.5.0 tarball. Use the installed README and declarations
+Check the installed package version and CHANGELOG before using examples. The current checkout
+is prepared as 0.6.0 and is not yet published to npm. Version 0.6.0 introduces actorExtractionStage
+and corrects nested-parent guards, caught-audit-error rollback, and completed-scan replay handling.
+These changes are not in the published 0.5.0 tarball. Use the installed README and declarations
 for the installed artifact, or the v0.5.0 tag for that release.
 
 ## Current checkout
@@ -18,7 +18,7 @@ for the installed artifact, or the v0.5.0 tag for that release.
 - [Actor and tenancy](docs/context-and-tenancy.md): authenticated actors, jobs, and explicit query scope.
 - [Storage and retention](docs/storage-and-retention.md): privileges, partitions, and maintenance.
 - [Export and streams](docs/export-and-streams.md): checkpoints, delivery retries, and late-commit limitations.
-- [Changelog](CHANGELOG.md): published versus unreleased behavior.
+- [Changelog](CHANGELOG.md): version changes and release preparation.
 
 ## Release references
 

@@ -1,6 +1,6 @@
 # Audit logging benchmark
 
-Applies to the current checkout; see [CHANGELOG](../CHANGELOG.md) for released and unreleased differences.
+Applies to the current checkout (0.6.0); see [CHANGELOG](../CHANGELOG.md) for version differences.
 
 This benchmark measures sequential `User.create()`, `User.update()`, and `User.delete()` latency using the current local package sources. It measures four modes independently:
 
@@ -58,7 +58,7 @@ The previous README's `+1.10ms` create-overhead figure has been retired. Its scr
 ## Recorded local run — 2026-09-10
 
 The [recorded JSON report](benchmarks/2026-09-10-local.json) contains the complete summary statistics
-for one run of this unreleased checkout (the machine hostname is omitted). Node.js 24.11.1,
+for one run of the modified checkout before the 0.6.0 version bump (the machine hostname is omitted). Node.js 24.11.1,
 Prisma 7.9.1, PostgreSQL 16.15 in local Docker, Apple M1 Pro, concurrency one, 30 warmups and
 300 measured calls per operation/mode were used. Audit evidence checks passed in all scenarios.
 

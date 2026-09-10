@@ -9,8 +9,9 @@ Record who changed a Prisma model, what changed, and when in a NestJS applicatio
 before/after diffs and manual business events in an append-only PostgreSQL audit trail, then query,
 export, or deliver the records to an external service.
 
-This README describes the **current checkout**. See [CHANGELOG](CHANGELOG.md) for unreleased changes
-and [the v0.5.0 README](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md) when using
+This README describes the **current checkout**, prepared as version **0.6.0** and not yet published
+to npm. See [CHANGELOG](CHANGELOG.md) for version changes and
+[the v0.5.0 README](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md) when using
 that published version. The runnable example builds and installs this checkout.
 
 **Choose `atomic-required` for automatic tracking:** supported tracked writes and their audit rows
@@ -56,7 +57,7 @@ The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that m
 
 ### 1. Install and generate Prisma
 
-These steps use a tarball built from the current checkout, including the unreleased actor option.
+These steps use a tarball built from the current checkout, including the actor option added in 0.6.0.
 For the registry release, follow the [v0.5.0 guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md)
 instead. Build the tarball in this repository:
 
@@ -67,10 +68,10 @@ npm pack --pack-destination /tmp
 ```
 
 Then, in your consuming NestJS application, install the tarball emitted by that command (the current
-package version is `0.5.0`) and its Prisma 7 runtime dependencies:
+package version is `0.6.0`) and its Prisma 7 runtime dependencies:
 
 ```bash
-npm install /tmp/nestarc-audit-log-0.5.0.tgz @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
+npm install /tmp/nestarc-audit-log-0.6.0.tgz @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
 npm install --save-dev prisma@7
 ```
 
@@ -207,7 +208,7 @@ export class AppModule {}
 ```
 
 `actorExtractionStage: 'interceptor'` reads the actor after authentication Guards populate `req.user`
-and before the route handler runs. **This option is an unreleased checkout addition.** Published
+and before the route handler runs. **This option is introduced in 0.6.0.** Published
 v0.5.0 extracts in middleware: authenticate before that middleware or provide an extractor that can
 resolve identity there. The default remains `'middleware'` for compatibility. Writes inside Guards
 precede interceptor extraction; use earlier authentication middleware if those writes need an actor.

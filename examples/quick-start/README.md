@@ -1,8 +1,9 @@
 # Run the audit-log Quick Start
 
-This example uses the **current repository checkout**, including unreleased fixes and
-`actorExtractionStage`. Published `@nestarc/audit-log@0.5.0` does not contain that option.
-Do not replace the local dependency with npm `latest` until the relevant release is published.
+This example uses the **current repository checkout**, prepared as 0.6.0 and not yet published to npm.
+Version 0.6.0 introduces `actorExtractionStage` and the fixes described in the changelog.
+Published `@nestarc/audit-log@0.5.0` does not contain that option.
+Do not replace the local dependency with npm `latest` until 0.6.0 is published.
 See the root [changelog](../../CHANGELOG.md) and [usage guide](../../README.md).
 
 Requirements: Node.js 22.13+ in the 22.x line or Node.js 24.x, npm, and PostgreSQL.
