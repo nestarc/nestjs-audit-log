@@ -72,7 +72,7 @@ jobs:
       - name: E2E tests
         run: npm run test:e2e
 
-      - name: Verify packed documentation example
+      - name: Verify packed documentation and adoption scenarios
         if: matrix.node-version == '24'
         run: npm run test:docs:consumer
 

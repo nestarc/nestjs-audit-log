@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added (target: 0.7.0)
 
+- Extend packed-consumer verification with 0.7.0 adoption assertions for concurrent HTTP/worker
+  context, shared masking/tenant policy, custom storage, caught policy/audit failures, manual
+  transaction boundaries, and tracking exclusions; run the gate before publishing.
+
 - Add a published-0.6.0 Quick Start and [incremental adoption guide](docs/adoption-guide.md),
   separated from candidate build/pack instructions. Expand the packaged example with manual-only
   transactions, tenant-scoped role changes and authorized history reads, plus runnable assertions

@@ -8,7 +8,8 @@
     "db:setup": "prisma migrate deploy && npm run generate && npm run build && node dist/setup.js",
     "smoke": "npm run build && node dist/smoke.js",
     "start": "npm run build && node dist/main.js",
-    "smoke:manual": "npm run build && node dist/manual-smoke.js"
+    "smoke:manual": "npm run build && node dist/manual-smoke.js",
+    "smoke:candidate": "tsc -p tsconfig.candidate.json && node dist-candidate/candidate/adoption-smoke.js"
   },
   "engines": {
     "node": "^22.13.0 || ^24.0.0"

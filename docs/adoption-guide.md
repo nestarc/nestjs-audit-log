@@ -216,6 +216,49 @@ role before/after and rollback assertions. Maintainers run these same packaged e
 The [consumer gate](maintaining.md#run-tests) installs outside the repository with strict peers and
 removes its temporary schema. This verifies the example, not every write path in your application.
 
+### Candidate adoption assertions (0.7.0 Unreleased)
+
+The candidate command additionally compiles and runs
+[`candidate/adoption-smoke.ts`](../examples/quick-start/candidate/adoption-smoke.ts) using the packed
+public API. It creates a custom `adoption_events` table through `defineAuditConfig().schemaOptions`
+and uses the same factory's module/extension options. The normal `src` build remains compatible with
+registry 0.6.0; `--registry` explicitly skips these unreleased assertions.
+
+| Required scenario | Executable assertion / output scenario |
+|---|---|
+| Guard role change and tenant isolation | `http-guard-role-and-tenant-isolation`: concurrent Alice/Bob requests, exact target/actor/tenant and `member → admin`, cross-tenant history empty, unauthorized tenant rejected by demo host Guard |
+| Worker actor, shared masking and tenant policy | `worker-context-and-shared-masking-tenant-policy`: concurrent workers retain distinct system actors/tenants; automatic changes and manual metadata redact password; `runAs` without tenant fails both paths |
+| Business exception | `business-error-rollback`: business and audit rows both absent after rejection |
+| Automatic audit INSERT failure | `caught-audit-insert-error-rollback`: temporary CHECK constraint rejects an UPDATE audit row; catching it still rolls back the earlier CREATE and audit row |
+| N01/N02 caught policy errors | `caught-n01-n02-policy-errors-rollback`: both returning bulk APIs and blank actor reject; helper rejects after callback catches; no business/audit rows persist |
+| Ordinary transaction manual errors | `manual-policy-propagation-and-catch-boundary`: actor error propagation rolls back business/prior manual row; catching the JavaScript policy error commits them, with no invalid-actor event |
+| Tracking exclusions | `tracked-excluded-noaudit-manual-contract`: allowlist exclusion, denylist exclusion and real `@NoAudit()` route create business rows without automatic events; explicit manual calls still require actor and record once valid |
+| Custom table | `custom-table-ddl-insert-query`: custom table row count matches both tenants' service query totals; successful HTTP/worker assertions verify manual and automatic contents |
+
+The baseline `smoke:manual` also verifies a successful manual-only role change and business-exception
+rollback without creating an automatic extension. The candidate prints `mode: "candidate-adoption"`,
+all eight scenario names, and `result: "passed"` only after every assertion succeeds. The consumer
+runner separately prints installed version, mode, resolved artifact and integrity; the manifest
+version alone cannot distinguish the unpublished candidate from registry 0.6.0.
+
+To adapt these assertions, use your test authentication, tenant resolver and models. For example,
+after an expected automatic helper rejection, check both sides rather than only the thrown error:
+
+```typescript
+await assert.rejects(audited.withAuditTransaction(async tx => {
+  await tx.user.create({ data: pending });
+  await assert.rejects(tx.user.createManyAndReturn({ data: [another] }), /createManyAndReturn/);
+}));
+assert.equal(await base.user.count({ where: { id: pending.id } }), 0);
+assert.equal((await audit.query({ tenantId, targetId: pending.id })).entries.length, 0);
+```
+
+The full fixture validates its local `audit_test` URL and runner-generated schema before doing I/O.
+Its temporary CHECK constraint does not disable append-only enforcement and is removed in `finally`;
+the runner drops its entire unique schema and removes the temporary consumer on success or failure.
+Do not copy fault injection into application startup. Passing this fixture verifies these scenarios,
+not all writes in your application or database.
+
 Keep these boundaries available during adoption:
 
 | Boundary | Contract |

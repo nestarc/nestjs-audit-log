@@ -2,7 +2,8 @@
 
 This standalone example pins **published `@nestarc/audit-log@0.6.0`** (npm verified 2026-09-29).
 No repository build is required. The current checkout also includes **0.7.0 Unreleased** APIs under
-a 0.6.0 manifest; this example intentionally uses only published APIs. See the
+a 0.6.0 manifest; the default `src` build uses only published APIs. The separately compiled
+`candidate` directory tests unreleased contracts. See the
 [changelog](../../CHANGELOG.md), [adoption guide](../../docs/adoption-guide.md) and
 [candidate instructions](../../docs/maintaining.md#candidate-documentation-example).
 
@@ -126,3 +127,20 @@ example against its pinned registry dependency. Each prints artifact origin/inte
 only its own unique temporary schema/directory, including on failure. The full 0.7.0 policy matrix
 and external site deployment remain separate release work; passing this example does not establish
 complete audit coverage in your application.
+
+
+### Candidate adoption scenarios (0.7.0 Unreleased)
+
+The candidate consumer gate also runs `smoke:candidate`, which compiles with
+`tsconfig.candidate.json` and executes [adoption-smoke.ts](candidate/adoption-smoke.ts).
+It requires the gate's unique local `audit_test` schema and a candidate package with
+`defineAuditConfig`/`actorRequired`; it is excluded from the default registry-compatible build.
+Use `npm run test:docs:consumer` from the repository root to get installation, schema isolation and
+teardown. `--registry` runs only the 0.6.0 baseline and explicitly reports this candidate suite skipped.
+
+The [scenario-to-assertion map](../../docs/adoption-guide.md#candidate-adoption-assertions-070-unreleased)
+explains the eight named results: concurrent HTTP/worker identities, masking/tenant policies,
+business and audit failures, caught N01/N02 errors, manual catch boundaries, tracking exclusions,
+and custom table storage. Success prints `mode: "candidate-adoption"`, eight `scenarios`, and
+`result: "passed"`. The Guard uses fixed test identities; replace it with host authentication and
+authorization when adapting the assertions.

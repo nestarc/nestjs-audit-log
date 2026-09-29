@@ -29,7 +29,7 @@ function selectedForPackage(path: string): boolean {
 
 function exampleFiles(directory = 'examples/quick-start'): string[] {
   return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
-    if (['node_modules', 'dist', 'generated', '.git'].includes(entry.name)) return [];
+    if (['node_modules', 'dist', 'dist-candidate', 'generated', '.git'].includes(entry.name)) return [];
     const path = `${directory}/${entry.name}`;
     return entry.isDirectory() ? exampleFiles(path) : [path];
   });
@@ -135,6 +135,27 @@ describe('documentation gates', () => {
     expect(consumer).toContain("npm(['run', 'smoke:manual']");
     expect(consumer).toContain("npm(['run', 'smoke']");
     expect(consumer).toContain('--registry');
+  });
+
+  it('separates candidate compilation and runs adoption assertions in CI and before publishing', () => {
+    const baseline = JSON.parse(read('examples/quick-start/tsconfig.json')) as { include: string[] };
+    const candidate = JSON.parse(read('examples/quick-start/tsconfig.candidate.json')) as { include: string[] };
+    expect(baseline.include).toEqual(['src/**/*.ts']);
+    expect(candidate.include).toEqual(['candidate/**/*.ts']);
+    const fixture = read('examples/quick-start/candidate/adoption-smoke.ts');
+    expect(fixture).toContain("from '@nestarc/audit-log'");
+    expect(fixture).not.toMatch(/from ['"][^'"]*\/src(?:['"]|\/(?!generated|audit-options))/);
+    const runner = read('scripts/verify-docs-consumer.cjs');
+    expect(runner).toContain("if (!registry) npm(['run', 'smoke:candidate']");
+    expect(runner).toContain("'candidate/adoption-smoke.ts', 'tsconfig.candidate.json'");
+    for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+      expect(read(workflow)).toContain('npm run test:docs:consumer');
+    }
+    const release = read('.github/workflows/release.yml');
+    expect(release.indexOf('npm run test:docs:consumer')).toBeLessThan(release.indexOf('npm publish'));
+    for (const match of fixture.matchAll(/passed\.push\('([^']+)'\)/g)) {
+      expect(read('docs/adoption-guide.md')).toContain(match[1]);
+    }
   });
 
   it('keeps local Markdown links and heading anchors valid in published documentation', () => {

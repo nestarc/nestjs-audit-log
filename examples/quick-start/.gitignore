@@ -3,3 +3,4 @@ dist/
 src/generated/
 .env
 package-lock.json
+dist-candidate/

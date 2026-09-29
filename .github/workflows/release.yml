@@ -121,6 +121,9 @@ jobs:
       - name: E2E tests
         run: npm run test:e2e
 
+      - name: Verify packed adoption scenarios
+        run: npm run test:docs:consumer
+
       - name: Verify package contents
         run: npm pack --dry-run
 

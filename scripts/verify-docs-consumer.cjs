@@ -52,6 +52,7 @@ async function main() {
       'prisma/schema.prisma', 'prisma/migrations/20260910000000_users/migration.sql',
       'prisma/migrations/20260929000000_user_roles/migration.sql',
       'src/prisma.service.ts', 'src/prisma.module.ts', 'src/app.module.ts', 'src/user.controller.ts',
+      'candidate/adoption-smoke.ts', 'tsconfig.candidate.json',
       'src/main.ts', 'src/setup.ts', 'src/smoke.ts', 'src/audit-options.ts', 'src/manual-role.ts', 'src/manual-smoke.ts'];
     for (const expected of ['README.md', 'llms.txt', 'dist/index.js', 'dist/index.d.ts',
       'docs/benchmarks/2026-09-10-local.json',
@@ -81,6 +82,8 @@ async function main() {
     npm(['run', 'db:setup'], consumer, env);
     npm(['run', 'smoke:manual'], consumer, env);
     npm(['run', 'smoke'], consumer, env);
+    if (!registry) npm(['run', 'smoke:candidate'], consumer, env);
+    else console.log('Candidate adoption scenarios skipped: registry 0.6.0 lacks the unreleased APIs.');
     console.log(JSON.stringify({ package: pack.name, version: registry ? registryVersion : pack.version, mode: registry ? 'registry' : 'candidate',
       resolved: artifact.resolved, integrity: artifact.integrity,
       node: process.version, result: 'documentation consumer passed' }));

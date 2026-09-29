@@ -104,14 +104,17 @@ The documentation consumer gate packs this checkout, verifies the shipped guide/
 extracts the example from that tarball, installs into an isolated temporary project with strict peers,
 then generates Prisma,
 applies schema setup, compiles, and runs the manual-only and HTTP/role/actor/redaction/rollback smoke tests.
-The optional `--registry` mode installs the example manifest's exact registry version instead; output
+Candidate mode also compiles/runs the [N05 adoption assertions](adoption-guide.md#candidate-adoption-assertions-070-unreleased),
+including real audit INSERT fault injection in that isolated schema. CI and the pre-publish release
+workflow run this gate. The optional `--registry` mode skips unreleased assertions and installs the example manifest's exact registry version instead; output
 records mode, version, resolved artifact and integrity. It uses only a
 local database named `audit_test` (default port `5433`), creates a unique schema, and removes its own
 schema and temporary project in teardown. It does not start or stop PostgreSQL for you.
 
 ## 0.7.0 publication and external documentation checklist
 
-- [ ] Complete N05 candidate policy/tenant/exclusion scenarios and the full release gates.
+- [x] Implement N05 packed candidate policy/tenant/exclusion assertions and wire them into CI/release.
+- [ ] Confirm remote CI, the full peer matrix and ecosystem release gates for the release commit.
 - [ ] Publish 0.7.0 and verify the actual registry artifact with compilation and smoke assertions.
 - [ ] Update the Quick Start pin, version boundaries and published ecosystem exact tuple with evidence.
 - [ ] Update the separate documentation-site repository, including its version selector and adoption links.
