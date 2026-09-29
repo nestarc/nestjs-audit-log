@@ -118,8 +118,8 @@ unchanged at soft-delete 0.7.3 and audit-log 0.5.0. Both modes require a valid f
 ## 0.7.0 publication and external documentation checklist
 
 - [x] Implement N05 packed candidate policy/tenant/exclusion assertions and wire them into CI/release.
-- [ ] Confirm remote CI, the full peer matrix and ecosystem release gates for the release commit.
-- [ ] Publish 0.7.0 and verify the actual registry artifact with compilation and smoke assertions.
+- [x] Confirm remote CI, the full peer matrix and ecosystem release gates for the release commit.
+- [x] Publish 0.7.0 and verify the actual registry artifact with compilation and smoke assertions.
 - [ ] Update the Quick Start pin, version boundaries and published ecosystem exact tuple with evidence.
 - [ ] Update the separate documentation-site repository, including its version selector and adoption links.
 - [ ] Deploy that site and verify its public pages against the published package.
