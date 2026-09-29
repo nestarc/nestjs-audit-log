@@ -78,6 +78,7 @@ function createFixture(
   const dependencies: OperationHandlerDependencies = {
     client,
     options,
+    unsupportedOperationWarnings: new Set(),
     Prisma: {
       defineExtension: jest.fn(),
       dmmf: {

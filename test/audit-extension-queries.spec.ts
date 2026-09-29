@@ -209,6 +209,106 @@ describe('createAuditExtension — query handlers', () => {
     });
   });
 
+  describe.each(['createManyAndReturn', 'updateManyAndReturn'] as const)('%s guard', (operation) => {
+    const args = { data: { password: 'never-log-this-secret' } };
+
+    it('rejects before the business query outside and inside the helper, even when caught', async () => {
+      const onAuditError = jest.fn(() => { throw new Error('reporter failed'); });
+      const logger = {
+        warn: jest.fn(() => { throw new Error('logger failed'); }),
+        error: jest.fn(() => { throw new Error('logger failed'); }),
+      };
+      const { handlers, clientMethods } = getHandlers({
+        consistency: 'atomic-required', trackedModels: ['User'], logger, onAuditError,
+      });
+      const query = jest.fn();
+      await expect(handlers[operation]({ model: 'User', args, query }))
+        .rejects.toThrow(`User.${operation}`);
+      const transactionHost = {
+        $transaction: (callback: (tx: any) => Promise<any>) => callback(buildMockClient()),
+      };
+      let caught: unknown;
+      const completion = clientMethods.withAuditTransaction.call(transactionHost, async () => {
+        try {
+          await handlers[operation]({ model: 'User', args, query });
+        } catch (error) {
+          caught = error;
+        }
+        return 'handled';
+      });
+      await expect(completion).rejects.toThrow(`User.${operation}`);
+      await expect(completion).rejects.toBe(caught);
+      expect(query).not.toHaveBeenCalled();
+      expect(onAuditError).toHaveBeenLastCalledWith(caught, {
+        phase: 'context', model: 'User', operation,
+      });
+      expect(String(caught)).not.toContain(args.data.password);
+      expect(String(caught)).toContain(operation === 'createManyAndReturn' ? 'create()' : 'update()');
+      // A failed transaction must not poison a subsequent scope.
+      await expect(clientMethods.withAuditTransaction.call(transactionHost, async () => 'ok'))
+        .resolves.toBe('ok');
+    });
+
+    it.each(['atomic-required', 'best-effort'] as const)(
+      'preserves excluded/NoAudit results and errors without warning in %s', async (consistency) => {
+        for (const exclusion of ['allowlist', 'denylist', 'empty', 'noAudit']) {
+          const logger = { warn: jest.fn(), error: jest.fn() };
+          const { handlers, mockClient } = getHandlers({
+            consistency, logger,
+            ...(exclusion === 'denylist' ? { ignoredModels: ['User'] }
+              : { trackedModels: exclusion === 'empty' ? [] : exclusion === 'allowlist' ? ['Post'] : ['User'] }),
+          });
+          logger.warn.mockClear();
+          const result = [{ id: 'u1' }];
+          const businessError = new Error('business error');
+          const query = jest.fn().mockResolvedValueOnce(result).mockRejectedValueOnce(businessError);
+          await AuditContext.run({ actor: defaultActor, noAudit: exclusion === 'noAudit' }, async () => {
+            await expect(handlers[operation]({ model: 'User', args, query })).resolves.toBe(result);
+            await expect(handlers[operation]({ model: 'User', args, query })).rejects.toBe(businessError);
+          });
+          expect(query).toHaveBeenCalledTimes(2);
+          expect(query).toHaveBeenCalledWith(args);
+          expect(logger.warn).not.toHaveBeenCalled();
+          expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it.each([false, true])('preserves best-effort results/errors when logger throws = %s', async (throws) => {
+      const logger = { warn: jest.fn(() => { if (throws) throw new Error('logger failed'); }), error: jest.fn() };
+      const { handlers, mockClient } = getHandlers({ trackedModels: ['User'], logger, logFailures: true });
+      const result = [{ id: 'u1' }];
+      const businessError = new Error('original business error');
+      const query = jest.fn().mockRejectedValueOnce(businessError).mockResolvedValue(result);
+      await expect(handlers[operation]({ model: 'User', args, query })).rejects.toBe(businessError);
+      await expect(handlers[operation]({ model: 'User', args, query })).resolves.toBe(result);
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(query).toHaveBeenCalledWith(args);
+      expect(mockClient.$executeRaw).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(`User.${operation}`));
+      expect(logger.warn.mock.calls[0]).not.toEqual(expect.arrayContaining([expect.stringContaining(args.data.password)]));
+    });
+  });
+
+  it('deduplicates unsupported warnings by model/operation per extension instance', async () => {
+    const logger = { warn: jest.fn(), error: jest.fn() };
+    const options = { trackedModels: ['User', 'Post'], logger };
+    const first = getHandlers(options);
+    const secondApplication = capturedFactory(buildMockClient()).query.$allModels;
+    const query = jest.fn().mockResolvedValue([]);
+    for (const model of ['User', 'Post']) {
+      for (const operation of ['createManyAndReturn', 'updateManyAndReturn']) {
+        await first.handlers[operation]({ model, args: {}, query });
+        await secondApplication[operation]({ model, args: {}, query });
+      }
+    }
+    expect(logger.warn).toHaveBeenCalledTimes(4);
+    const second = getHandlers(options);
+    await second.handlers.createManyAndReturn({ model: 'User', args: {}, query });
+    expect(logger.warn).toHaveBeenCalledTimes(5);
+  });
+
   describe('atomic-required transaction routing', () => {
     it.each(['tenant', 'post-read', 'serialization'] as const)(
       'rejects helper completion after a caller catches a JavaScript %s audit error',

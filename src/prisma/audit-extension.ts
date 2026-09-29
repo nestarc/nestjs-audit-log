@@ -145,6 +145,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
   };
   const lifecycleSuppressionScope =
     new AsyncLocalStorage<LifecycleSuppressionScope>();
+  const unsupportedOperationWarnings = new Set<string>();
   const auditCapabilities: AuditCapabilities = Object.freeze({
     consistency: options.consistency,
     atomicLifecycle: options.consistency === 'atomic-required',
@@ -253,6 +254,7 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
           sensitiveFieldsFor,
           getTransactionClient: () => transactionContext.getStore()?.client,
           lifecycleSuppressionScope,
+          unsupportedOperationWarnings,
         }),
       },
     });

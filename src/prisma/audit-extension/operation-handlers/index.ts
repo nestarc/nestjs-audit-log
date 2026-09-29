@@ -2,6 +2,7 @@ import { createCreateHandler } from './create';
 import { createUpdateHandler } from './update';
 import { createDeleteHandler } from './delete';
 import { createUpsertHandler } from './upsert';
+import { createUnsupportedReturningHandler } from './unsupported';
 import {
   createCreateManyHandler,
   createDeleteManyHandler,
@@ -40,5 +41,7 @@ export function createOperationHandlers(
     createMany: createCreateManyHandler(dependencies),
     updateMany: createUpdateManyHandler(dependencies),
     deleteMany: createDeleteManyHandler(dependencies),
+    createManyAndReturn: createUnsupportedReturningHandler(dependencies, 'createManyAndReturn'),
+    updateManyAndReturn: createUnsupportedReturningHandler(dependencies, 'updateManyAndReturn'),
   };
 }

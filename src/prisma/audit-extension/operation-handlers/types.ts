@@ -1,6 +1,6 @@
 import type { AsyncLocalStorage } from 'node:async_hooks';
 import type { PrismaModuleLike } from '../../prisma-namespace';
-import type { AuditExtensionOptions } from '../audit-types';
+import type { AuditRuntimeOptions } from '../audit-errors';
 
 export interface LifecycleSuppressionScope {
   model: string;
@@ -10,7 +10,7 @@ export interface LifecycleSuppressionScope {
 
 export interface OperationHandlerDependencies {
   client: any;
-  options: AuditExtensionOptions;
+  options: AuditRuntimeOptions;
   Prisma: PrismaModuleLike['Prisma'];
   auditTableRef?: unknown;
   trackedModels?: string[];
@@ -18,6 +18,7 @@ export interface OperationHandlerDependencies {
   sensitiveFieldsFor(model: string): string[];
   getTransactionClient(): any;
   lifecycleSuppressionScope: AsyncLocalStorage<LifecycleSuppressionScope>;
+  unsupportedOperationWarnings: Set<string>;
 }
 
 export interface OperationHandlerInput {
@@ -38,4 +39,6 @@ export interface OperationHandlers {
   createMany: OperationHandler;
   updateMany: OperationHandler;
   deleteMany: OperationHandler;
+  createManyAndReturn: OperationHandler;
+  updateManyAndReturn: OperationHandler;
 }

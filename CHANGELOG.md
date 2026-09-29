@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking Changes (target: 0.7.0)
+
+- Reject tracked `createManyAndReturn` and `updateManyAndReturn` operations in `atomic-required`
+  before the business query, inside or outside `withAuditTransaction()`. Catching this policy error
+  inside the helper still rolls back the entire transaction, including prior business and audit rows.
+  Excluded models and `@NoAudit()` retain their intentional bypass. See the
+  [0.6 to 0.7 migration guidance](docs/transactions.md#migrating-from-06-to-07-unreleased).
+
+### Changed
+
+- Warn once per model/operation per extension instance for unsupported returning bulk operations
+  in `best-effort`, preserving their business results and errors even if the logger fails. These
+  operations still produce no automatic audit rows. Older Prisma peers without these APIs remain
+  supported; the guard does not expand coverage to raw SQL, base clients, or future Prisma APIs.
+
 ## [0.6.0] - 2026-09-10
 
 ### Added

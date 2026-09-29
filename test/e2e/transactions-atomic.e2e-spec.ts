@@ -95,6 +95,7 @@ describe('atomic-required transaction E2E', () => {
     const user = await seedUser(basePrisma, {
       name: 'Committed Before',
       email: 'atomic-committed-update@test.com',
+      updatedAt: new Date('2020-01-01T00:00:00.000Z'),
     });
 
     const updated = await audited.withAuditTransaction((tx: any) =>
@@ -684,7 +685,7 @@ async function auditLogs(prisma: PrismaClient, action: string): Promise<any[]> {
 
 async function seedUser(
   prisma: PrismaClient,
-  input: { name: string; email: string },
+  input: { name: string; email: string; updatedAt?: Date },
 ): Promise<any> {
   return prisma.user.create({
     data: { ...input, password: 'pw' },

@@ -1,7 +1,8 @@
 # Automatic tracking and transaction contracts
 
-Applies to the current checkout (`0.6.0`). Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for version changes.
+Applies to the current checkout (`0.6.0` package metadata, with the unreleased 0.7.0
+returning-operation guard described below). Start with the [README](../README.md);
+see [CHANGELOG](../CHANGELOG.md) for version changes. The guard is not part of the 0.6.0 release.
 
 ## Scope of automatic tracking
 
@@ -113,10 +114,13 @@ for before-and-after examples and the manual transaction alternative.
 | `createMany` | Rejected before mutation because Prisma only returns count-level evidence | One `Model.createdMany` summary row |
 | `updateMany` | Rejected before mutation because exact record before/after diffs are unavailable | One `Model.updatedMany` summary row |
 | `deleteMany` | Locks and refreshes at most `maxBatchRecords` preimages, then writes one `Model.deleted` row per deleted record in the same transaction | Writes record rows up to the cap; overflow rejects unless `batchOverflow: 'summary'` is explicitly selected |
-| `createManyAndReturn` / `updateManyAndReturn` | Not intercepted; outside audit coverage | Not intercepted; outside audit coverage |
+| `createManyAndReturn` / `updateManyAndReturn` (unreleased 0.7.0) | Tracked models rejected before mutation, inside or outside the helper; catching the error still rejects helper completion | Business query and result/error preserved; no automatic audit row; warning once per model/operation per extension instance |
 
-`createManyAndReturn` and `updateManyAndReturn` can execute without an automatic record; do not use
-them for tracked model writes that require evidence. Use supported per-record operations instead.
+The returning-operation guard respects excluded models and `@NoAudit()`. Best-effort warnings use
+the configured logger (or console), contain the model, operation, and single-record alternative,
+and never include request data. Logger failures do not affect the business query. On Prisma peers
+without these APIs, extension creation and existing operations continue to work. This is a guard
+for these two known APIs, not detection of every future Prisma API or writes through other clients.
 
 Summary rows are deliberately not shaped like record evidence: `targetId` is `null`, `changes` is
 empty, and metadata contains `auditKind: 'summary'`, the exact `operation`, `recordCount`, and
@@ -127,6 +131,35 @@ The default overflow policy is fail-closed. Best-effort callers that explicitly 
 overflow receive one `Model.deletedMany` row with `overflow: true` and `maxBatchRecords`; it is a
 batch activity marker, not evidence of which rows were deleted. In atomic mode, a cap overflow,
 preimage/affected-count mismatch, or any audit insert failure rolls back the entire `deleteMany`.
+
+## Migrating from 0.6 to 0.7 (unreleased)
+
+In 0.6.0, `createManyAndReturn` and `updateManyAndReturn` could execute without an automatic audit
+record in either consistency mode. The 0.7.0 candidate rejects both for tracked models in
+`atomic-required`, before the business query. If a callback catches this policy error,
+`withAuditTransaction()` still rejects and rolls back all earlier business writes and audit rows.
+This behavior change targets 0.7.0; it is not a 0.6.x patch or an already published release.
+
+Replace these calls with sequential `create()` or `update()` calls inside `withAuditTransaction()`.
+For example, replace `tx.user.createManyAndReturn({ data: users })` with:
+
+```typescript
+const created = await prisma.withAuditTransaction(async (tx) => {
+  const records = [];
+  for (const data of users) {
+    records.push(await tx.user.create({ data }));
+  }
+  return records;
+});
+```
+
+For updates, use explicit record IDs and single-record `update()` calls. Alternatively, keep a base
+client transaction and call `AuditService.log(input, tx)` for a manual business event, propagating
+errors out of the callback. That event contains the evidence you supply; it does not generate
+automatic record before/after values. Best-effort retains the original business behavior with a
+new warning and no automatic record for these APIs; it is not an equivalent atomic migration path.
+Existing `createMany`, `updateMany`, nested-write, and soft-delete lifecycle contracts are unchanged.
+No schema migration is required for this guard.
 
 ## Atomic soft-delete lifecycle integration
 

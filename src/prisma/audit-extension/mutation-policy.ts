@@ -4,6 +4,39 @@ import type { Changes } from '../diff';
 import type { AuditExtensionOptions } from './audit-types';
 import type { PrismaModuleLike } from '../prisma-namespace';
 import { reportAuditError } from './audit-errors';
+import type { AuditRuntimeOptions } from './audit-errors';
+
+export type UnsupportedReturningOperation =
+  | 'createManyAndReturn'
+  | 'updateManyAndReturn';
+
+export function enforceUnsupportedReturningOperation(
+  model: string,
+  operation: UnsupportedReturningOperation,
+  options: AuditRuntimeOptions,
+  warnings: Set<string>,
+): void {
+  const singular = operation === 'createManyAndReturn' ? 'create' : 'update';
+  const message =
+    `[@nestarc/audit-log] ${model}.${operation} is not supported for automatic auditing; ` +
+    `use sequential ${singular}() calls inside withAuditTransaction()`;
+
+  if (options.consistency === 'atomic-required') {
+    reportAuditError(options, new Error(`atomic-required: ${message}`), {
+      phase: 'context', model, operation,
+    });
+    return;
+  }
+
+  const key = `${model}.${operation}`;
+  if (warnings.has(key)) return;
+  warnings.add(key);
+  try {
+    (options.logger ?? console).warn(message);
+  } catch {
+    // A diagnostic failure must not change the business result or error.
+  }
+}
 
 const ATOMIC_CONTEXT_ERROR =
   '[@nestarc/audit-log] atomic-required tracked write must run inside withAuditTransaction()';

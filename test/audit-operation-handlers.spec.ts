@@ -43,6 +43,8 @@ const operationCases: Array<{
     args: { where: {}, data: { name: 'Updated' } },
   },
   { operation: 'deleteMany', args: { where: {} } },
+  { operation: 'createManyAndReturn', args: { data: [{ name: 'Created' }] } },
+  { operation: 'updateManyAndReturn', args: { where: {}, data: { name: 'Updated' } } },
 ];
 
 const failureCases: Array<{
@@ -115,6 +117,7 @@ function createFixture(input: {
     sensitiveFieldsFor: () => [],
     getTransactionClient: () => input.transactionClient,
     lifecycleSuppressionScope,
+    unsupportedOperationWarnings: new Set(),
   };
 
   return {
@@ -125,7 +128,7 @@ function createFixture(input: {
 }
 
 describe('audit operation handler factories', () => {
-  it('composes the exact seven independently exported handlers', async () => {
+  it('composes supported handlers and unsupported returning-operation guards', async () => {
     const factories = [
       createCreateHandler,
       createUpdateHandler,
@@ -148,6 +151,8 @@ describe('audit operation handler factories', () => {
       'createMany',
       'updateMany',
       'deleteMany',
+      'createManyAndReturn',
+      'updateManyAndReturn',
     ]);
     for (const factory of factories) {
       expect(typeof factory).toBe('function');
