@@ -16,6 +16,7 @@ import {
   batchOverflowError,
   batchSummaryMetadata,
   deleteManyRecordMetadata,
+  prepareMutationActor,
   resolveAuditClient,
   shouldSkip,
 } from '../mutation-policy';
@@ -41,6 +42,9 @@ export function createCreateManyHandler(
       return query(args);
     }
 
+    const actor = prepareMutationActor(options, model, 'createMany');
+    if (actor === false) return query(args);
+
     assertAtomicBulkSummaryUnsupported(options, 'createMany');
 
     const auditClient = resolveAuditClient(
@@ -58,6 +62,7 @@ export function createCreateManyHandler(
         args,
         pkField: getPkField(model, options),
         error,
+        actor,
       }, auditTableRef);
       throw error;
     }
@@ -73,7 +78,7 @@ export function createCreateManyHandler(
           (result as any).count,
         ),
         operation: 'createMany',
-      }, options);
+      }, options, actor);
       await tryAuditLog(auditClient, params, options, {
         model,
         operation: 'createMany',
@@ -107,6 +112,9 @@ export function createUpdateManyHandler(
       return query(args);
     }
 
+    const actor = prepareMutationActor(options, model, 'updateMany');
+    if (actor === false) return query(args);
+
     assertAtomicBulkSummaryUnsupported(options, 'updateMany');
 
     const auditClient = resolveAuditClient(
@@ -124,6 +132,7 @@ export function createUpdateManyHandler(
         args,
         pkField: getPkField(model, options),
         error,
+        actor,
       }, auditTableRef);
       throw error;
     }
@@ -139,7 +148,7 @@ export function createUpdateManyHandler(
           (result as any).count,
         ),
         operation: 'updateMany',
-      }, options);
+      }, options, actor);
       await tryAuditLog(auditClient, params, options, {
         model,
         operation: 'updateMany',
@@ -175,6 +184,9 @@ export function createDeleteManyHandler(
     if (shouldSkip(model, trackedModels, ignoredModels)) {
       return query(args);
     }
+
+    const actor = prepareMutationActor(options, model, 'deleteMany');
+    if (actor === false) return query(args);
 
     const auditClient = resolveAuditClient(
       client,
@@ -248,6 +260,7 @@ export function createDeleteManyHandler(
         args,
         pkField,
         error,
+        actor,
       }, auditTableRef);
       throw error;
     }
@@ -274,7 +287,7 @@ export function createDeleteManyHandler(
                 },
           ),
           operation: 'deleteMany',
-        }, options);
+        }, options, actor);
         await tryAuditLog(auditClient, params, options, {
           model,
           operation: 'deleteMany',
@@ -313,7 +326,7 @@ export function createDeleteManyHandler(
             changes,
             metadata: deleteManyRecordMetadata(records.length),
             operation: 'deleteMany',
-          }, options);
+          }, options, actor);
           await tryAuditLog(auditClient, params, options, {
             model,
             operation: 'deleteMany',

@@ -53,10 +53,40 @@ context for those routes. Excluding the middleware does not itself disable autom
 use `@NoAudit()` only where an audit context/interceptor is present, or explicitly choose your
 tracking scope.
 
+## Requiring an identifiable actor (0.7.0 Unreleased)
+
+The current checkout implements `actorRequired?: boolean` for the upcoming 0.7.0 release.
+It defaults to `false`. Set it on **both** module and extension options when both manual and
+automatic writes require attribution; these independent registrations do not merge settings.
+
+With `actorRequired: true`, `user`, `system`, and `api_key` actors all need a string ID with at
+least one non-whitespace character. Null actors, null IDs, empty IDs, and whitespace-only IDs
+are invalid. Valid IDs are stored unchanged, including surrounding whitespace.
+
+| Path with an invalid actor | Behavior |
+|---|---|
+| Tracked automatic `atomic-required` write | Rejects before the business query; catching the error inside `withAuditTransaction()` still rolls back earlier business and audit rows |
+| Tracked automatic `best-effort` write | Reports the policy error, executes the business query, and omits the automatic audit row, including failure rows |
+| Explicit `AuditService.log(input, tx?)` | Rejects before the audit INSERT, even in `@NoAudit()`; transaction commit depends on the caller propagating the error |
+| Excluded model or `@NoAudit()` automatic write | Retains the existing tracking exclusion |
+| Query, scan, or CSV export | No actor-required write check; tenant scope and host authorization remain necessary |
+
+Supported single-record, bulk, and lifecycle writes share this policy. Automatic operations copy
+and validate the actor before the business query and use that copy for their records, including
+all per-record `deleteMany` entries. Existing nested/bulk restrictions still apply. Policy errors
+report `onAuditError(error, { phase: 'context', model, operation })` where available; throwing hooks
+or loggers do not change the policy or replace a best-effort business error.
+
+Actor extraction timing still defaults to middleware. Use `actorExtractionStage: 'interceptor'`
+for Guard-populated identities, as shown above. Extractor failure continues with a null actor,
+so a read request is not rejected solely because extraction failed. The actor policy is enforced
+when a tracked write or manual log is reached. It is attribution validation, not authentication
+or authorization. See the [manual transaction boundary](api-reference.md#auditserviceloginput-tx).
+
 ## Background jobs and manual context
 
 Use `AuditContext.runAs()` for worker, cron, and command-line execution. Without an actor context,
-automatic and manual records use `actorId: null` and `actorType: 'system'`.
+with the default `actorRequired: false`, automatic and manual records use `actorId: null` and `actorType: 'system'`.
 
 ```typescript
 import { AuditContext } from '@nestarc/audit-log';

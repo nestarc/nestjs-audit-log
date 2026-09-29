@@ -1,5 +1,7 @@
 import { AuditContext, mergeContextMetadata } from '../../services/audit-context';
 import { resolveTenantId } from '../../utils/tenant';
+import { snapshotAuditActor } from '../../utils/actor';
+import type { AuditActor } from '../../interfaces/actor.interface';
 import type { AuditErrorContext } from '../../interfaces/audit-shared-options.interface';
 import { getSensitiveFieldsFor, redactObject } from '../diff';
 import type { Changes } from '../diff';
@@ -52,19 +54,33 @@ export function buildAuditInsertParams(
 export function buildAuditInsertParams(
   input: AuditInsertInput,
   options: AuditInsertBuildOptions,
+  actorSnapshot?: AuditActor | null,
 ): AuditInsertParams | null;
 export function buildAuditInsertParams(
   input: AuditInsertInput,
   options: AuditInsertBuildOptions = {},
+  actorSnapshot?: AuditActor | null,
 ): AuditInsertParams | null {
   const runtimeOptions: AuditExtensionOptions = {
     consistency: 'best-effort',
     ...options,
   };
   const store = AuditContext.getStore();
-  const actor = store?.actor ?? null;
   const actionOverride = store?.actionOverride;
   const action = actionOverride ?? input.action;
+  let actor: AuditActor | null;
+  try {
+    actor = snapshotAuditActor(
+      actorSnapshot === undefined ? store?.actor ?? null : actorSnapshot,
+      runtimeOptions.actorRequired,
+    );
+  } catch (error) {
+    reportAuditError(runtimeOptions, error, {
+      phase: 'context', model: input.targetType, operation: input.operation,
+      action, targetId: input.targetId,
+    });
+    return null;
+  }
   warnForMissingContextStore(input, runtimeOptions, action, store);
   let tenantId: string | null = null;
 
@@ -301,6 +317,7 @@ export async function tryLogFailure(
     before?: any;
     pkField: string;
     error: unknown;
+    actor?: AuditActor | null;
   },
   tableRef?: unknown,
 ): Promise<void> {
@@ -320,7 +337,7 @@ export async function tryLogFailure(
     metadata: failureMetadata(input.operation, input.error),
     operation: input.operation,
     result: 'failure',
-  }, options);
+  }, options, input.actor);
   await tryAuditLog(client, params, options, {
     model: input.model,
     operation: input.operation,

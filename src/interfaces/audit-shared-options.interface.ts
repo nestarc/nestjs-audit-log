@@ -27,6 +27,8 @@ export interface AuditErrorContext {
  */
 export interface AuditSharedOptions {
   tableName?: string;
+  /** Require a non-blank string actor ID for audit writes. Defaults to false. */
+  actorRequired?: boolean;
   tenantRequired?: boolean;
   tenantResolver?: () => string | null;
   onAuditError?: (error: unknown, ctx: AuditErrorContext) => void;

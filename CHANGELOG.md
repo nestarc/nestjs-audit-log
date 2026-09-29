@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (target: 0.7.0)
+
+- Add opt-in `actorRequired` to module and extension shared options (default `false`). All actor
+  types require a non-blank string ID, preserved without trimming. Automatic writes snapshot
+  identity before the business query. Atomic policy failures reject before mutation and mark
+  helper completion as failed even when caught; best-effort preserves business behavior, reports
+  the error, and omits the audit row. Manual `log()` rejects before INSERT but leaves transaction
+  rollback to the caller. Reads and intentional automatic tracking exclusions retain existing
+  behavior. See the [actor policy](docs/context-and-tenancy.md#requiring-an-identifiable-actor-070-unreleased).
+
 ### Breaking Changes (target: 0.7.0)
 
 - Reject tracked `createManyAndReturn` and `updateManyAndReturn` operations in `atomic-required`

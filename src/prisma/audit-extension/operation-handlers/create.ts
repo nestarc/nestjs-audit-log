@@ -14,6 +14,7 @@ import {
 import {
   auditFlags,
   enforceNestedWriteContract,
+  prepareMutationActor,
   resolveAuditClient,
   shouldSkip,
 } from '../mutation-policy';
@@ -42,6 +43,9 @@ export function createCreateHandler(
       return query(args);
     }
 
+    const actor = prepareMutationActor(options, model, 'create');
+    if (actor === false) return query(args);
+
     const auditClient = resolveAuditClient(
       client,
       options,
@@ -63,6 +67,7 @@ export function createCreateHandler(
         args,
         pkField,
         error,
+        actor,
       }, auditTableRef);
       throw error;
     }
@@ -103,7 +108,7 @@ export function createCreateHandler(
         changes,
         metadata: auditFlags({ postReadFailed }),
         operation: 'create',
-      }, options);
+      }, options, actor);
       await tryAuditLog(auditClient, params, options, {
         model,
         operation: 'create',

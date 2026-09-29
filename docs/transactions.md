@@ -75,6 +75,11 @@ catches that failure; catching it cannot commit earlier business writes without 
 This is corrected in 0.6.0. Recoverable business exceptions remain caller-controlled.
 HTTP actor-extractor failures are a separate context setup path: they are reported and continue
 with a null actor, as described in [actor extraction](context-and-tenancy.md#http-actor-extraction).
+With `actorRequired: true` (0.7.0 Unreleased), reaching a tracked automatic write with an invalid
+actor rejects before its business query and marks an active atomic helper as failed. Catching
+that policy error cannot commit earlier writes. Explicit manual `log()` rejects before INSERT,
+but does not mark the helper or an external transaction as failed: callers must propagate its
+error to roll back. See [manual logging](api-reference.md#auditserviceloginput-tx).
 `withAuditLifecycle()` is available only when the extension uses `atomic-required`; best-effort
 clients reject before the lifecycle callback runs. Integrations can verify this contract through
 `getAuditCapabilities()`, which reports the configured consistency and atomic lifecycle support.
@@ -133,6 +138,13 @@ batch activity marker, not evidence of which rows were deleted. In atomic mode, 
 preimage/affected-count mismatch, or any audit insert failure rolls back the entire `deleteMany`.
 
 ## Migrating from 0.6 to 0.7 (unreleased)
+
+`actorRequired` is opt-in and defaults to `false`. Before enabling it on module and extension
+options, provide non-blank IDs for HTTP users, system workers, and API keys. Guard-based identity
+requires `actorExtractionStage: 'interceptor'`; workers can use `AuditContext.runAs()` and must
+establish tenant context separately. In best-effort, invalid actors preserve business writes but
+omit audit rows. Reads remain unaffected. See the [actor policy](context-and-tenancy.md#requiring-an-identifiable-actor-070-unreleased).
+
 
 In 0.6.0, `createManyAndReturn` and `updateManyAndReturn` could execute without an automatic audit
 record in either consistency mode. The 0.7.0 candidate rejects both for tracked models in

@@ -11,6 +11,7 @@ import {
   readBeforeMutation,
 } from '../audit-database';
 import {
+  prepareMutationActor,
   resolveAuditClient,
   shouldSkip,
 } from '../mutation-policy';
@@ -38,6 +39,9 @@ export function createDeleteHandler(
     if (shouldSkip(model, trackedModels, ignoredModels)) {
       return query(args);
     }
+
+    const actor = prepareMutationActor(options, model, 'delete');
+    if (actor === false) return query(args);
 
     const auditClient = resolveAuditClient(
       client,
@@ -86,6 +90,7 @@ export function createDeleteHandler(
         before,
         pkField,
         error,
+        actor,
       }, auditTableRef);
       throw error;
     }
@@ -115,7 +120,7 @@ export function createDeleteHandler(
           ? { preReadFailed: true }
           : undefined,
         operation: 'delete',
-      }, options);
+      }, options, actor);
       await tryAuditLog(auditClient, params, options, {
         model,
         operation: 'delete',

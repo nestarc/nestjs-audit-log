@@ -14,6 +14,8 @@ import {
 } from '../interfaces/audit-entry.interface';
 import { AuditContext, mergeContextMetadata } from './audit-context';
 import { resolveTenantId } from '../utils/tenant';
+import { snapshotAuditActor } from '../utils/actor';
+import { reportAuditError } from '../prisma/audit-extension/audit-errors';
 import { resolvePrismaNamespace } from '../prisma/prisma-namespace';
 import { getSensitiveFieldsFor, redactObject } from '../prisma/diff';
 import { validateAuditTableName } from '../sql/table-name';
@@ -82,7 +84,18 @@ export class AuditService {
 
   async log(input: ManualAuditLogInput, tx?: any): Promise<void> {
     const client = tx ?? this.options.prisma;
-    const actor = AuditContext.getActor();
+    let actor: ReturnType<typeof snapshotAuditActor>;
+    try {
+      actor = snapshotAuditActor(AuditContext.getActor(), this.options.actorRequired);
+    } catch (error) {
+      // Manual calls report and reject, but do not enlist an external transaction
+      // in the automatic helper's failure tracking.
+      reportAuditError({ ...this.options, consistency: 'best-effort' }, error, {
+        phase: 'context', model: input.targetType, operation: 'log',
+        action: input.action, targetId: input.targetId,
+      });
+      throw error;
+    }
     let tenantId: string | null;
     try {
       tenantId = resolveTenantId({

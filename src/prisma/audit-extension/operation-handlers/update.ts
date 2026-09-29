@@ -17,6 +17,7 @@ import {
   auditFlags,
   enforceNestedWriteContract,
   isEmptyChanges,
+  prepareMutationActor,
   resolveAuditClient,
   shouldSkip,
 } from '../mutation-policy';
@@ -44,6 +45,9 @@ export function createUpdateHandler(
     if (shouldSkip(model, trackedModels, ignoredModels)) {
       return query(args);
     }
+
+    const actor = prepareMutationActor(options, model, 'update');
+    if (actor === false) return query(args);
 
     const auditClient = resolveAuditClient(
       client,
@@ -89,6 +93,7 @@ export function createUpdateHandler(
         before,
         pkField,
         error,
+        actor,
       }, auditTableRef);
       throw error;
     }
@@ -147,7 +152,7 @@ export function createUpdateHandler(
         changes,
         metadata: auditFlags({ preReadFailed, postReadFailed }),
         operation: 'update',
-      }, options);
+      }, options, actor);
       await tryAuditLog(auditClient, params, options, {
         model,
         operation: 'update',

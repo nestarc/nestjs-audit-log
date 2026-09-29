@@ -1,4 +1,6 @@
 import { AuditContext } from '../../services/audit-context';
+import { snapshotAuditActor } from '../../utils/actor';
+import type { AuditActor } from '../../interfaces/actor.interface';
 import { shouldTrackModel } from '../diff';
 import type { Changes } from '../diff';
 import type { AuditExtensionOptions } from './audit-types';
@@ -43,6 +45,20 @@ const ATOMIC_CONTEXT_ERROR =
 const NESTED_WRITE_ATOMIC_ERROR =
   '[@nestarc/audit-log] atomic-required does not support nested writes to tracked related models; run explicit related-model mutations inside withAuditTransaction()';
 const DEFAULT_MAX_BATCH_RECORDS = 1000;
+
+/** false means best-effort must execute only the business query, without audit I/O. */
+export function prepareMutationActor(
+  options: AuditRuntimeOptions,
+  model: string,
+  operation: string,
+): AuditActor | null | false {
+  try {
+    return snapshotAuditActor(AuditContext.getActor(), options.actorRequired);
+  } catch (error) {
+    reportAuditError(options, error, { phase: 'context', model, operation });
+    return false;
+  }
+}
 
 export function shouldSkip(
   model: string,
