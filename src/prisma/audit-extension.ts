@@ -1,3 +1,4 @@
+import { validateAuditExtensionOptions } from './audit-extension/validate-options';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { AuditContext } from '../services/audit-context';
 import { getSensitiveFieldsFor } from './diff';
@@ -69,8 +70,6 @@ type TransactionClientOf<TClient> = TClient extends {
   ? TTransactionClient
   : never;
 
-const EXPERIMENTAL_TX_AUDIT_REMOVED_ERROR =
-  '[@nestarc/audit-log] experimentalTxAudit was removed in v0.5.0; use consistency: "atomic-required" with withAuditTransaction(), or remove experimentalTxAudit and keep explicit consistency: "best-effort"';
 const NESTED_TRANSACTION_ERROR =
   '[@nestarc/audit-log] nested withAuditTransaction() calls are not supported';
 const AUDIT_LIFECYCLE_CONTEXT_ERROR =
@@ -79,42 +78,7 @@ const AUDIT_LIFECYCLE_CONSISTENCY_ERROR =
   '[@nestarc/audit-log] withAuditLifecycle() requires consistency: "atomic-required"';
 
 export function createAuditExtension(options: AuditExtensionOptions): any {
-  if (Object.prototype.hasOwnProperty.call(options, 'experimentalTxAudit')) {
-    throw new Error(EXPERIMENTAL_TX_AUDIT_REMOVED_ERROR);
-  }
-  if (
-    options.consistency !== 'atomic-required' &&
-    options.consistency !== 'best-effort'
-  ) {
-    throw new Error(
-      '[@nestarc/audit-log] consistency must be explicitly set to "atomic-required" or "best-effort"',
-    );
-  }
-  if (
-    options.maxBatchRecords !== undefined &&
-    (!Number.isInteger(options.maxBatchRecords) || options.maxBatchRecords < 1)
-  ) {
-    throw new Error(
-      '[@nestarc/audit-log] maxBatchRecords must be a positive integer',
-    );
-  }
-  if (
-    options.batchOverflow !== undefined &&
-    options.batchOverflow !== 'reject' &&
-    options.batchOverflow !== 'summary'
-  ) {
-    throw new Error(
-      '[@nestarc/audit-log] batchOverflow must be "reject" or "summary"',
-    );
-  }
-  if (
-    options.consistency === 'atomic-required' &&
-    options.batchOverflow === 'summary'
-  ) {
-    throw new Error(
-      '[@nestarc/audit-log] batchOverflow: "summary" is only available in best-effort mode',
-    );
-  }
+  validateAuditExtensionOptions(options);
   const sensitiveFieldsFor = (model: string) =>
     getSensitiveFieldsFor(model, options);
   const { trackedModels, ignoredModels } = options;

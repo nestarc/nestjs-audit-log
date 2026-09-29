@@ -1,8 +1,8 @@
 # Audit log API reference
 
 Applies to the current checkout (`0.6.0`). Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for version changes. `actorRequired` is implemented in this
-checkout for **0.7.0 Unreleased**; it is not part of the released 0.6.0 API.
+see [CHANGELOG](../CHANGELOG.md) for version changes. `actorRequired` and `defineAuditConfig()`
+are implemented in this checkout for **0.7.0 Unreleased**; they are not part of the released 0.6.0 API.
 
 ## Entry points
 
@@ -13,6 +13,7 @@ use them for the complete current signatures.
 |---|---|
 | `AuditLogModule.forRoot(options)` | Register synchronous NestJS options and export `AuditService` |
 | `AuditLogModule.forRootAsync({ imports?, inject?, useFactory })` | Register a factory that returns options or a promise of options |
+| `defineAuditConfig(input)` | 0.7.0 Unreleased: build consistent module, optional extension, schema and partition options |
 | `createAuditedClient(basePrisma, options)` | Extend a base client and preserve the typed transaction callback/result |
 | `basePrisma.$extends(createAuditExtension(options))` | Compose the audit extension explicitly with other Prisma extensions |
 | `client.withAuditTransaction(callback, options?)` | Run supported automatic writes and audit work on the same interactive transaction |
@@ -22,6 +23,91 @@ Module and extension configuration are independent: nothing merges them at runti
 setting `actorRequired`, `tenantRequired`, or `sensitiveFields` on the module does not configure automatic tracking.
 Pass shared values to both registration sites as shown in the [Quick Start](../README.md#quick-start).
 For custom table names, also pass the same value to schema and partition utilities.
+For the unreleased 0.7.0 candidate, the factory below builds these options together.
+
+## Common configuration factory (0.7.0 Unreleased)
+
+`defineAuditConfig()` is a synchronous options builder. It performs no DB I/O, creates no Prisma
+client, registers no Nest module, and does not call extractors, resolvers or logging hooks.
+Existing independent registration APIs remain supported.
+
+| Input section | Accepted settings |
+|---|---|
+| `shared` (optional) | `tableName`, `prismaModule`, `tenantRequired`, `tenantResolver`, `actorRequired`, `sensitiveFields`, `sensitiveFieldsByModel`, `logger`, `onAuditError` |
+| `module` (required) | Required `actorExtractor`; optional `actorExtractionStage`, `excludeRoutes`, `registerGlobalInterceptor`, `correlationIdHeader`, `correlationIdGetter` |
+| `extension` (optional) | Required explicit `consistency`; optional `trackedModels`, `ignoredModels`, `primaryKey`, `databaseMapping`, `maxBatchRecords`, `batchOverflow`, `logFailures`, `ignoreTimestampOnlyUpdates` |
+| `schema` (optional) | `partitioned`, `enforcement`, `ginIndex` |
+
+Shared fields belong only in `shared`. The factory rejects misplaced or unknown fields with their
+configuration path, including JavaScript/`any` overrides whose value is `undefined`. Supply `prisma`
+when registering the module, outside the factory. The factory reuses table-name and extension-policy
+validation; consuming APIs retain their other validation and defaults. Omitting `extension` produces
+`extensionOptions: undefined`; providing it produces an `AuditExtensionOptions` without an undefined
+union. An input whose extension is optional at runtime returns a union that must be narrowed.
+
+```typescript
+// Candidate checkout only; not available in released 0.6.0.
+import { AuditLogModule, createAuditedClient, defineAuditConfig } from '@nestarc/audit-log';
+import { Prisma } from './generated/prisma/client';
+
+const config = defineAuditConfig({
+  shared: {
+    prismaModule: { Prisma },
+    tableName: 'audit_events',
+    tenantRequired: true,
+    tenantResolver, // Host-owned tenant context.
+    actorRequired: true,
+    sensitiveFields: ['password', 'ssn'],
+  },
+  module: {
+    actorExtractor, // Host-owned authenticated identity extraction.
+    actorExtractionStage: 'interceptor', // After authentication Guards.
+  },
+  extension: {
+    consistency: 'atomic-required',
+    trackedModels: ['User'],
+    databaseMapping: { User: { tableName: 'users' } },
+  },
+  schema: { partitioned: false },
+});
+
+const audited = createAuditedClient(base, config.extensionOptions);
+const auditModule = AuditLogModule.forRoot({ ...config.moduleOptions, prisma: base });
+// Alternative Nest registration, when a base client is injected:
+const asyncAuditModule = AuditLogModule.forRootAsync({
+  imports: [PrismaModule],
+  inject: [PrismaService],
+  useFactory: (prisma: PrismaService) => ({ ...config.moduleOptions, prisma: prisma.base }),
+});
+```
+
+The host supplies `base`, `actorExtractor`, `tenantResolver`, and its Nest Prisma provider.
+Automatic tracked writes still require `audited.withAuditTransaction(...)`; see the
+[transaction contract](transactions.md). Actor extraction timing does not implement authentication.
+
+For manual events only, omit the extension:
+
+```typescript
+const manualConfig = defineAuditConfig({
+  shared: { prismaModule: { Prisma }, actorRequired: true, sensitiveFields: ['password'] },
+  module: { actorExtractor, actorExtractionStage: 'interceptor' },
+});
+AuditLogModule.forRoot({ ...manualConfig.moduleOptions, prisma: base });
+// manualConfig.extensionOptions is undefined. Use AuditService.log(input, tx)
+// inside the existing transaction and propagate failures for rollback.
+```
+
+Use `applyAuditTableSchema(setupClient, config.schemaOptions)` in a separate setup/migration step.
+For a partitioned table, use
+`ensurePartitions(maintenanceClient, { ...config.partitionOptions, ahead: 1 })` in maintenance.
+Only `tableName` flows from shared settings to these utilities; tenant and actor policies remain
+write/query settings. Calling the factory never applies schema or schedules maintenance.
+
+Arrays and plain configuration objects are copied independently for the input and each output,
+including nested masking lists, mappings and routes. Functions, logger instances (including object
+literals), and the generated `Prisma` namespace retain identity; the `prismaModule` wrapper is copied.
+Nothing is frozen or JSON-serialized. This gives consistency at creation time: later edits or spread
+overrides are the caller's responsibility and are not synchronized between registrations.
 
 ## Module options
 

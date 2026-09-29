@@ -1,5 +1,14 @@
 // Module
 export { AuditLogModule } from './audit-log.module';
+export { defineAuditConfig } from './define-audit-config';
+export type {
+  AuditConfig,
+  AuditConfigInput,
+  AuditConfigSharedOptions,
+  AuditConfigModuleOptions,
+  AuditConfigExtensionOptions,
+  AuditConfigSchemaOptions,
+} from './define-audit-config';
 
 // Service
 export { AuditService } from './services/audit.service';

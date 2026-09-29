@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added (target: 0.7.0)
 
+- Add `defineAuditConfig()` and public configuration types to build module, optional extension,
+  schema and partition options from one shared definition. The synchronous factory preserves
+  defaults, requires explicit extension consistency, rejects misplaced shared fields, and copies
+  mutable configuration independently while retaining callback/logger/Prisma namespace identity.
+  It performs no client creation, DB I/O or Nest registration. See the
+  [configuration factory](docs/api-reference.md#common-configuration-factory-070-unreleased).
 - Add opt-in `actorRequired` to module and extension shared options (default `false`). All actor
   types require a non-blank string ID, preserved without trimming. Automatic writes snapshot
   identity before the business query. Atomic policy failures reject before mutation and mark
@@ -31,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   in `best-effort`, preserving their business results and errors even if the logger fails. These
   operations still produce no automatic audit rows. Older Prisma peers without these APIs remain
   supported; the guard does not expand coverage to raw SQL, base clients, or future Prisma APIs.
+
+### Fixed
+
+- Cast partition-existence lookup results to text in `ensurePartitions()` so Prisma can decode
+  PostgreSQL `regclass` values, including when using the factory's custom `partitionOptions`.
 
 ## [0.6.0] - 2026-09-10
 

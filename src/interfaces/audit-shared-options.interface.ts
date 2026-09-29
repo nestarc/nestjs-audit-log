@@ -23,7 +23,7 @@ export interface AuditErrorContext {
 /**
  * Options shared by the Nest module and Prisma extension.
  * Runtime merging is intentionally not performed; pass the same object to both
- * call sites when both paths should share behavior.
+ * call sites or use defineAuditConfig() when both paths should share behavior.
  */
 export interface AuditSharedOptions {
   tableName?: string;

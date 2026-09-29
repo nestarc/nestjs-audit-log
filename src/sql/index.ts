@@ -306,7 +306,7 @@ export async function ensurePartitions(
 
   for (const partition of partitions) {
     const existsRows = await prisma.$queryRawUnsafe(
-      'SELECT to_regclass($1) AS "exists"',
+      'SELECT to_regclass($1)::text AS "exists"',
       partition.name,
     ) as Array<{ exists: string | null }>;
     if (existsRows[0]?.exists) {
