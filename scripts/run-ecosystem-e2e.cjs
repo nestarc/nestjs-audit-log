@@ -147,7 +147,9 @@ function main(argv = process.argv.slice(2)) {
       ) throw new Error('npm pack --json did not return the expected audit-log package identity');
       const tarballPath = path.join(packageDirectory, pack.filename);
       logCandidate(pack.name, pack.version, pack.integrity, tarballPath);
-      replaceFixtureDependency(fixtureCopy, AUDIT_LOG_PACKAGE, tarballPath);
+      replaceFixtureDependency(fixtureCopy, AUDIT_LOG_PACKAGE, `file:${tarballPath}`);
+      // Keep the published baseline intact; 0.7 candidates require this companion release.
+      replaceFixtureDependency(fixtureCopy, '@nestarc/soft-delete', '0.7.4');
       verificationEnvironment = createStrictEnvironment({
         AUDIT_LOG_CANDIDATE_INTEGRITY: pack.integrity,
         AUDIT_LOG_CANDIDATE_VERSION: pack.version,
@@ -156,7 +158,7 @@ function main(argv = process.argv.slice(2)) {
     } else if (mode === 'tenancy-candidate') {
       const candidate = validateTenancyTarball(tenancyTarball);
       logCandidate(TENANCY_PACKAGE, candidate.version, candidate.integrity, candidate.path);
-      replaceFixtureDependency(fixtureCopy, TENANCY_PACKAGE, candidate.path);
+      replaceFixtureDependency(fixtureCopy, TENANCY_PACKAGE, `file:${candidate.path}`);
       verificationEnvironment = createStrictEnvironment({
         ECOSYSTEM_MODE: mode,
         TENANCY_CANDIDATE_INTEGRITY: candidate.integrity,
@@ -181,13 +183,13 @@ function main(argv = process.argv.slice(2)) {
   }
 }
 
-function replaceFixtureDependency(fixtureCopy, packageName, tarballPath) {
+function replaceFixtureDependency(fixtureCopy, packageName, specification) {
   const manifestPath = path.join(fixtureCopy, 'package.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   if (!(packageName in manifest.dependencies)) {
     throw new Error(`Fixture dependency is missing: ${packageName}`);
   }
-  manifest.dependencies[packageName] = `file:${tarballPath}`;
+  manifest.dependencies[packageName] = specification;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 

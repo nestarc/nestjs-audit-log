@@ -111,6 +111,10 @@ records mode, version, resolved artifact and integrity. It uses only a
 local database named `audit_test` (default port `5433`), creates a unique schema, and removes its own
 schema and temporary project in teardown. It does not start or stop PostgreSQL for you.
 
+The audit-log candidate mode installs exact `@nestarc/soft-delete@0.7.4` in its temporary
+consumer to satisfy audit-log 0.7's peer contract. The checked-in published tuple remains
+unchanged at soft-delete 0.7.3 and audit-log 0.5.0. Both modes require a valid full peer graph.
+
 ## 0.7.0 publication and external documentation checklist
 
 - [x] Implement N05 packed candidate policy/tenant/exclusion assertions and wire them into CI/release.

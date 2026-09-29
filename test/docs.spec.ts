@@ -326,7 +326,7 @@ describe('documentation gates', () => {
     expect(packageJson.version).toBe('0.7.0');
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages['']?.version).toBe(packageJson.version);
-    expect(changelog).toContain(`## [${packageJson.version}] - Unreleased`);
+    expect(changelog).toContain(`## [${packageJson.version}] - 2026-09-29`);
     expect(changelog).toContain('## [0.6.0] - 2026-09-10');
     expect(read('docs/maintaining.md')).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);
     expect(changelog).toContain('## [0.5.0] - 2026-08-28');
