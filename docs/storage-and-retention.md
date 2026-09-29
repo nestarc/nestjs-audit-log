@@ -1,6 +1,6 @@
 # Audit storage, retention, and database permissions
 
-Applies to the current checkout (`0.6.0`). Start with the [README](../README.md);
+Applies to the current checkout (`0.7.0 Unreleased`). Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## Schema utilities

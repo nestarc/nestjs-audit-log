@@ -1,6 +1,6 @@
 # Audit logging benchmark
 
-Applies to the current checkout (0.6.0); see [CHANGELOG](../CHANGELOG.md) for version differences.
+Applies to the current checkout (0.7.0 Unreleased); see [CHANGELOG](../CHANGELOG.md) for version differences.
 
 This benchmark measures sequential `User.create()`, `User.update()`, and `User.delete()` latency using the current local package sources. It measures four modes independently:
 

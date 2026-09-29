@@ -1,6 +1,6 @@
 # Maintaining and releasing audit-log
 
-Applies to the current checkout (`0.6.0`). Start with the [README](../README.md);
+Applies to the current checkout (`0.7.0 Unreleased`). Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## Published ecosystem release gate
@@ -51,7 +51,7 @@ npm pack --pack-destination /tmp
 Copy `examples/quick-start` into a separate writable directory, then install the emitted artifact there:
 
 ```sh
-npm install --save-exact /tmp/nestarc-audit-log-0.6.0.tgz --strict-peer-deps
+npm install --save-exact /tmp/nestarc-audit-log-0.7.0.tgz --strict-peer-deps
 cp .env.example .env
 # Set DATABASE_URL to a disposable local PostgreSQL database/schema.
 npm run db:setup

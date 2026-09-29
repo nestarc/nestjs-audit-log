@@ -1,8 +1,8 @@
 # Adopt audit logging one workflow at a time
 
 The baseline recipes here use **published `@nestarc/audit-log@0.6.0`**, verified against npm on
-2026-09-29. The current checkout also contains **0.7.0 Unreleased** changes; its manifest remains
-0.6.0, so a local tarball with that version is not the registry release. See [CHANGELOG](../CHANGELOG.md).
+2026-09-29. The current checkout also contains **0.7.0 Unreleased** changes with package version
+0.7.0; the candidate has not been published. See [CHANGELOG](../CHANGELOG.md).
 `actorRequired` and `defineAuditConfig()` are candidate-only APIs. Do not install `@0.7.0` yet.
 
 Start with an existing NestJS + Prisma + PostgreSQL application. Choose one business event when
@@ -238,8 +238,8 @@ registry 0.6.0; `--registry` explicitly skips these unreleased assertions.
 The baseline `smoke:manual` also verifies a successful manual-only role change and business-exception
 rollback without creating an automatic extension. The candidate prints `mode: "candidate-adoption"`,
 all eight scenario names, and `result: "passed"` only after every assertion succeeds. The consumer
-runner separately prints installed version, mode, resolved artifact and integrity; the manifest
-version alone cannot distinguish the unpublished candidate from registry 0.6.0.
+runner separately prints installed version, mode, resolved artifact and integrity. Candidate mode
+now installs local 0.7.0; registry mode retains the verified 0.6.0 release.
 
 To adapt these assertions, use your test authentication, tenant resolver and models. For example,
 after an expected automatic helper rejection, check both sides rather than only the thrown error:

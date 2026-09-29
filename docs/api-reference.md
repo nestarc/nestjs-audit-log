@@ -1,6 +1,6 @@
 # Audit log API reference
 
-Applies to the current checkout (`0.6.0`). Start with the [README](../README.md);
+Applies to the current checkout (`0.7.0 Unreleased`). Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes. `actorRequired` and `defineAuditConfig()`
 are implemented in this checkout for **0.7.0 Unreleased**; they are not part of the released 0.6.0 API.
 

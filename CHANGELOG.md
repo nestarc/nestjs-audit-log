@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] - Unreleased
 
-### Added (target: 0.7.0)
+### Added
 
 - Extend packed-consumer verification with 0.7.0 adoption assertions for concurrent HTTP/worker
   context, shared masking/tenant policy, custom storage, caught policy/audit failures, manual
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rollback to the caller. Reads and intentional automatic tracking exclusions retain existing
   behavior. See the [actor policy](docs/context-and-tenancy.md#requiring-an-identifiable-actor-070-unreleased).
 
-### Breaking Changes (target: 0.7.0)
+### Breaking Changes
 
 - Reject tracked `createManyAndReturn` and `updateManyAndReturn` operations in `atomic-required`
   before the business query, inside or outside `withAuditTransaction()`. Catching this policy error

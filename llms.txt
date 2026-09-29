@@ -3,7 +3,7 @@
 > NestJS audit logging with Prisma change tracking and PostgreSQL storage.
 
 Use published @nestarc/audit-log@0.6.0 for the baseline Quick Start (npm verified 2026-09-29).
-The current checkout has 0.7.0 Unreleased changes under a 0.6.0 manifest; candidate artifacts differ
+The current checkout has 0.7.0 Unreleased changes under a 0.7.0 manifest; candidate artifacts differ
 from the registry release. actorRequired and defineAuditConfig are candidate-only. Check the
 installed package source, declarations and [CHANGELOG](CHANGELOG.md) before choosing examples.
 

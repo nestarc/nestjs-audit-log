@@ -101,7 +101,7 @@ describe('documentation gates', () => {
 
   it.each(currentUsage)('%s identifies its source version and links release differences', (path) => {
     const document = read(path);
-    expect(document).toMatch(/0\.6\.0/);
+    expect(document).toContain('0.7.0');
     const hasChangelogLink = linkTargets(document).some((target) =>
       resolve(dirname(join(root, path)), target.split('#')[0]) === join(root, 'CHANGELOG.md'));
     expect(hasChangelogLink).toBe(true);
@@ -323,10 +323,11 @@ describe('documentation gates', () => {
     const readme = read('README.md');
     const changelog = read('CHANGELOG.md');
 
-    expect(packageJson.version).toBe('0.6.0');
+    expect(packageJson.version).toBe('0.7.0');
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages['']?.version).toBe(packageJson.version);
-    expect(changelog).toContain(`## [${packageJson.version}] - 2026-09-10`);
+    expect(changelog).toContain(`## [${packageJson.version}] - Unreleased`);
+    expect(changelog).toContain('## [0.6.0] - 2026-09-10');
     expect(read('docs/maintaining.md')).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);
     expect(changelog).toContain('## [0.5.0] - 2026-08-28');
     expect(changelog).toContain('rejected thenables');

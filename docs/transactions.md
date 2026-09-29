@@ -1,6 +1,6 @@
 # Automatic tracking and transaction contracts
 
-Applies to the current checkout (`0.6.0` package metadata, with the unreleased 0.7.0
+Applies to the current checkout (`0.7.0 Unreleased`, including the
 returning-operation guard described below). Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes. The guard is not part of the 0.6.0 release.
 

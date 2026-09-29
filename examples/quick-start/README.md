@@ -2,7 +2,7 @@
 
 This standalone example pins **published `@nestarc/audit-log@0.6.0`** (npm verified 2026-09-29).
 No repository build is required. The current checkout also includes **0.7.0 Unreleased** APIs under
-a 0.6.0 manifest; the default `src` build uses only published APIs. The separately compiled
+a 0.7.0 manifest; the default `src` build uses only published APIs. The separately compiled
 `candidate` directory tests unreleased contracts. See the
 [changelog](../../CHANGELOG.md), [adoption guide](../../docs/adoption-guide.md) and
 [candidate instructions](../../docs/maintaining.md#candidate-documentation-example).

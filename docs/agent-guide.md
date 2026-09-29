@@ -2,7 +2,7 @@
 
 This guide is for agents integrating `@nestarc/audit-log` into a consuming application. It describes
 published 0.6.0 for baseline adoption. The current checkout also contains 0.7.0 Unreleased work
-under a 0.6.0 manifest; inspect artifact provenance as well as the installed version.
+under a 0.7.0 manifest; inspect artifact provenance as well as the installed version.
 
 ## Choose the matching contract
 

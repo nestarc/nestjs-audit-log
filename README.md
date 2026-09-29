@@ -10,7 +10,7 @@ before/after diffs and manual business events in an append-only PostgreSQL audit
 export, or deliver the records to an external service.
 
 The Quick Start uses **published `@nestarc/audit-log@0.6.0`**, verified on npm on 2026-09-29.
-The current checkout contains **0.7.0 Unreleased** work while its manifest remains 0.6.0.
+The current checkout contains **0.7.0 Unreleased** work with package version 0.7.0; it has not been published.
 Candidate tarballs and the registry release are different artifacts even when their version matches.
 See [CHANGELOG](CHANGELOG.md) and the [candidate path](docs/maintaining.md#candidate-documentation-example).
 `actorRequired` and `defineAuditConfig()` are not available in the published 0.6.0 release.
