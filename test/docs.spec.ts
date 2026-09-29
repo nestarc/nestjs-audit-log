@@ -9,6 +9,7 @@ function read(path: string): string {
 
 const guides = [
   'docs/agent-guide.md',
+  'docs/adoption-guide.md',
   'docs/api-reference.md',
   'docs/transactions.md',
   'docs/context-and-tenancy.md',
@@ -100,10 +101,40 @@ describe('documentation gates', () => {
 
   it.each(currentUsage)('%s identifies its source version and links release differences', (path) => {
     const document = read(path);
-    expect(document).toMatch(/current (?:checkout|repository checkout|local package sources)/i);
+    expect(document).toMatch(/0\.6\.0/);
     const hasChangelogLink = linkTargets(document).some((target) =>
       resolve(dirname(join(root, path)), target.split('#')[0]) === join(root, 'CHANGELOG.md'));
     expect(hasChangelogLink).toBe(true);
+  });
+
+  it('separates the pinned registry adoption path from unreleased candidate APIs', () => {
+    const example = JSON.parse(read('examples/quick-start/package.json')) as {
+      dependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    const version = example.dependencies['@nestarc/audit-log'];
+    expect(version).toBe('0.6.0');
+    const readme = read('README.md');
+    expect(readme).toContain(`npm install --save-exact @nestarc/audit-log@${version}`);
+    const quickStart = readme.split('## Quick Start')[1].split('## Read and write')[0];
+    expect(quickStart).not.toMatch(/npm (?:ci|pack)|npm run build/);
+    for (const path of ['README.md', 'docs/adoption-guide.md', 'docs/agent-guide.md',
+      'llms.txt', 'examples/quick-start/README.md']) {
+      const doc = read(path);
+      expect(doc).toMatch(/0\.7\.0 Unreleased/);
+      expect(doc).not.toMatch(/npm (?:install|i|add)\s+[^\n]*@nestarc\/audit-log@0\.7\.0/);
+    }
+    for (const path of ['README.md', 'docs/agent-guide.md', 'llms.txt']) {
+      expect(linkTargets(read(path)).some(target => target.endsWith('adoption-guide.md'))).toBe(true);
+    }
+    expect(example.scripts['smoke:manual']).toContain('dist/manual-smoke.js');
+    const manual = read('examples/quick-start/src/manual-smoke.ts');
+    expect(manual).not.toMatch(/createAuditedClient|createAuditExtension|withAuditTransaction/);
+    const consumer = read('scripts/verify-docs-consumer.cjs');
+    expect(consumer).toContain('package/examples/quick-start');
+    expect(consumer).toContain("npm(['run', 'smoke:manual']");
+    expect(consumer).toContain("npm(['run', 'smoke']");
+    expect(consumer).toContain('--registry');
   });
 
   it('keeps local Markdown links and heading anchors valid in published documentation', () => {
@@ -275,7 +306,7 @@ describe('documentation gates', () => {
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages['']?.version).toBe(packageJson.version);
     expect(changelog).toContain(`## [${packageJson.version}] - 2026-09-10`);
-    expect(readme).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);
+    expect(read('docs/maintaining.md')).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);
     expect(changelog).toContain('## [0.5.0] - 2026-08-28');
     expect(changelog).toContain('rejected thenables');
     expect(fixture.dependencies['@nestarc/tenancy']).toBe('0.15.0');

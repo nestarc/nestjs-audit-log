@@ -37,6 +37,33 @@ npm ci
 npm run build
 ```
 
+### Candidate documentation example
+
+The consumer Quick Start pins the verified registry release `@nestarc/audit-log@0.6.0`. To exercise
+**0.7.0 Unreleased** APIs from the current checkout, build and pack explicitly in the repository:
+
+```sh
+npm ci
+npm run build
+npm pack --pack-destination /tmp
+```
+
+Copy `examples/quick-start` into a separate writable directory, then install the emitted artifact there:
+
+```sh
+npm install --save-exact /tmp/nestarc-audit-log-0.6.0.tgz --strict-peer-deps
+cp .env.example .env
+# Set DATABASE_URL to a disposable local PostgreSQL database/schema.
+npm run db:setup
+npm run smoke:manual
+npm run smoke
+```
+
+The filename reflects the current manifest, not publication of the 0.7.0 changes. Record its integrity
+and origin when sharing evidence. Do not publish or install nonexistent `@0.7.0` as part of this path.
+The baseline example deliberately remains 0.6.0-compatible; candidate-specific policy scenarios are
+separate release gates. [Adoption guide](adoption-guide.md) explains the API boundary.
+
 ### Run tests
 
 ```bash
@@ -58,6 +85,8 @@ npm run test:e2e:teardown
 # Packed README consumer (uses an isolated schema in the local audit_test database)
 npm run docker:up -- --wait --wait-timeout 60
 npm run test:docs:consumer
+# Same packaged example using the pinned registry release instead of the candidate
+npm run test:docs:consumer -- --registry
 
 # Published ecosystem tuple and explicit packed candidates
 npm run test:e2e:ecosystem
@@ -72,7 +101,20 @@ setup, test, and teardown commands remain available for debugging;
 `test:e2e:setup` intentionally leaves PostgreSQL running until teardown.
 
 The documentation consumer gate packs this checkout, verifies the shipped guide/example files,
-installs the tarball into an isolated temporary project with strict peers, then generates Prisma,
-applies schema setup, compiles, and runs the HTTP/actor/redaction/rollback smoke test. It uses only a
+extracts the example from that tarball, installs into an isolated temporary project with strict peers,
+then generates Prisma,
+applies schema setup, compiles, and runs the manual-only and HTTP/role/actor/redaction/rollback smoke tests.
+The optional `--registry` mode installs the example manifest's exact registry version instead; output
+records mode, version, resolved artifact and integrity. It uses only a
 local database named `audit_test` (default port `5433`), creates a unique schema, and removes its own
 schema and temporary project in teardown. It does not start or stop PostgreSQL for you.
+
+## 0.7.0 publication and external documentation checklist
+
+- [ ] Complete N05 candidate policy/tenant/exclusion scenarios and the full release gates.
+- [ ] Publish 0.7.0 and verify the actual registry artifact with compilation and smoke assertions.
+- [ ] Update the Quick Start pin, version boundaries and published ecosystem exact tuple with evidence.
+- [ ] Update the separate documentation-site repository, including its version selector and adoption links.
+- [ ] Deploy that site and verify its public pages against the published package.
+
+Repository documentation changes alone do not complete the site update or deployment.

@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuditLogModule } from '@nestarc/audit-log';
 import { PrismaModule } from './prisma.module';
-import { PrismaService, sharedAuditOptions } from './prisma.service';
+import { PrismaService } from './prisma.service';
+import { sharedAuditOptions, tenantScope } from './audit-options';
 import { DemoIdentityGuard, UserController } from './user.controller';
 
 @Module({
@@ -24,4 +25,11 @@ import { DemoIdentityGuard, UserController } from './user.controller';
   controllers: [UserController],
   providers: [DemoIdentityGuard],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Demo only: production must resolve an authorized tenant from authenticated identity.
+    consumer.apply((_req: unknown, _res: unknown, next: () => void) =>
+      tenantScope.run({ tenantId: 'demo-tenant' }, next),
+    ).forRoutes(UserController);
+  }
+}

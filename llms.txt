@@ -2,15 +2,15 @@
 
 > NestJS audit logging with Prisma change tracking and PostgreSQL storage.
 
-Check the installed package version and CHANGELOG before using examples. The current checkout
-is version 0.6.0. Version 0.6.0 introduces actorExtractionStage
-and corrects nested-parent guards, caught-audit-error rollback, and completed-scan replay handling.
-These changes are not in the published 0.5.0 tarball. Use the installed README and declarations
-for the installed artifact, or the v0.5.0 tag for that release.
+Use published @nestarc/audit-log@0.6.0 for the baseline Quick Start (npm verified 2026-09-29).
+The current checkout has 0.7.0 Unreleased changes under a 0.6.0 manifest; candidate artifacts differ
+from the registry release. actorRequired and defineAuditConfig are candidate-only. Check the
+installed package source, declarations and [CHANGELOG](CHANGELOG.md) before choosing examples.
 
-## Current checkout
+## Adoption and API guides
 
 - [README](README.md): requirements, setup, first event, and guide index.
+- [Adoption guide](docs/adoption-guide.md): manual events, one-model tracking, role changes, authorized reads, and verification.
 - [Agent usage guide](docs/agent-guide.md): version boundaries and implementation recipes.
 - [Runnable example](examples/quick-start/README.md): Nest HTTP, Prisma generation, migrations, and smoke verification.
 - [API reference](docs/api-reference.md): public configuration and return contracts.
@@ -19,6 +19,7 @@ for the installed artifact, or the v0.5.0 tag for that release.
 - [Storage and retention](docs/storage-and-retention.md): privileges, partitions, and maintenance.
 - [Export and streams](docs/export-and-streams.md): checkpoints, delivery retries, and late-commit limitations.
 - [Changelog](CHANGELOG.md): version changes.
+- [Candidate installation](docs/maintaining.md#candidate-documentation-example): build/pack and isolated consumer checks.
 
 ## Release references
 

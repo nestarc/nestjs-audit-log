@@ -1,12 +1,14 @@
 import 'reflect-metadata';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { applyAuditTableSchema } from '@nestarc/audit-log';
-import { PrismaService, sharedAuditOptions } from './prisma.service';
+import { PrismaClient } from './generated/prisma/client';
+import { connectionString, databaseSchema, sharedAuditOptions } from './audit-options';
 
 async function main() {
-  const prisma = new PrismaService();
+  const base = new PrismaClient({ adapter: new PrismaPg({ connectionString }, { schema: databaseSchema }) });
   try {
-    await applyAuditTableSchema(prisma.base, { tableName: sharedAuditOptions.tableName });
+    await applyAuditTableSchema(base, { tableName: sharedAuditOptions.tableName });
     console.log('Audit storage ready.');
-  } finally { await prisma.onModuleDestroy(); }
+  } finally { await base.$disconnect(); }
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

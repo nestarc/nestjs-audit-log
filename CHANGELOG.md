@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added (target: 0.7.0)
 
+- Add a published-0.6.0 Quick Start and [incremental adoption guide](docs/adoption-guide.md),
+  separated from candidate build/pack instructions. Expand the packaged example with manual-only
+  transactions, tenant-scoped role changes and authorized history reads, plus runnable assertions
+  for actor, tenant, redaction and rollback. The consumer gate executes the packaged example and
+  supports an explicit pinned-registry validation mode. Site publication remains a release task.
+
 - Add `defineAuditConfig()` and public configuration types to build module, optional extension,
   schema and partition options from one shared definition. The synchronous factory preserves
   defaults, requires explicit extension consistency, rejects misplaced shared fields, and copies

@@ -9,10 +9,14 @@ Record who changed a Prisma model, what changed, and when in a NestJS applicatio
 before/after diffs and manual business events in an append-only PostgreSQL audit trail, then query,
 export, or deliver the records to an external service.
 
-This README describes the **current checkout**, version **0.6.0**.
-See [CHANGELOG](CHANGELOG.md) for version changes and
-[the v0.5.0 README](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md) when using
-that published version. The runnable example builds and installs this checkout.
+The Quick Start uses **published `@nestarc/audit-log@0.6.0`**, verified on npm on 2026-09-29.
+The current checkout contains **0.7.0 Unreleased** work while its manifest remains 0.6.0.
+Candidate tarballs and the registry release are different artifacts even when their version matches.
+See [CHANGELOG](CHANGELOG.md) and the [candidate path](docs/maintaining.md#candidate-documentation-example).
+`actorRequired` and `defineAuditConfig()` are not available in the published 0.6.0 release.
+
+Start with [a manual business event or one tracked model](docs/adoption-guide.md) in an existing app.
+The guide follows a role change through actor/tenant attribution and an authorized history query.
 
 **Choose `atomic-required` for automatic tracking:** supported tracked writes and their audit rows
 commit or roll back together inside `withAuditTransaction()`. Supported tracked writes outside the helper
@@ -45,10 +49,10 @@ Prisma output; match `moduleFormat` to your application's module system.
 
 ## Quick Start
 
-For a complete application with schema, migrations, authentication Guard, and a smoke test, use
-[examples/quick-start](examples/quick-start/README.md). Its README covers database configuration and
-`npm ci && npm run build` at the repository root, then `npm install --install-links`,
-`npm run db:setup`, `npm run smoke`, and `npm start` in the example directory.
+For a complete standalone application with schema, migrations, a demo Guard, and smoke assertions,
+use [examples/quick-start](examples/quick-start/README.md). Copy that directory to your own workspace,
+install its pinned dependencies, and run `npm run db:setup`, `npm run smoke:manual`, and `npm run smoke`.
+It needs no library checkout build. The manual smoke uses only a base Prisma client and the Nest module.
 
 The integration below assumes NestJS is already installed, `DATABASE_URL` points to your PostgreSQL
 database, and your Prisma schema contains a `User` model with `id`, `name`, `email`, and `password`, mapped
@@ -57,23 +61,18 @@ The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that m
 
 ### 1. Install and generate Prisma
 
-These steps use a tarball built from the current checkout, including the actor option added in 0.6.0.
-For applications using v0.5.0, follow the [v0.5.0 guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.5.0/README.md)
-instead. Build the tarball in this repository:
+In your existing NestJS application, install the verified release and Prisma 7 runtime dependencies:
 
 ```bash
-npm ci
-npm run build
-npm pack --pack-destination /tmp
-```
-
-Then, in your consuming NestJS application, install the tarball emitted by that command (the current
-package version is `0.6.0`) and its Prisma 7 runtime dependencies:
-
-```bash
-npm install /tmp/nestarc-audit-log-0.6.0.tgz @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
+npm install --save-exact @nestarc/audit-log@0.6.0
+npm install @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
 npm install --save-dev prisma@7
 ```
+
+The [runnable example](examples/quick-start/README.md) pins its complete dependency tuple. Existing
+Prisma 5/6 applications should keep their generation setup and compatible Prisma dependencies.
+Contributors testing 0.7.0 Unreleased use the separate
+[build/pack instructions](docs/maintaining.md#candidate-documentation-example), not a registry `@0.7.0` install.
 
 ```dotenv
 # .env — replace with your local database credentials
@@ -335,6 +334,7 @@ and [export guarantees](docs/export-and-streams.md).
 
 | Task | Reference |
 |---|---|
+| Adopt one event or model, including a role-change workflow | [Adoption guide](docs/adoption-guide.md) |
 | Run a complete integration | [Quick Start application](examples/quick-start/README.md) |
 | Configure the module, extension, queries, and manual logging | [API reference](docs/api-reference.md) |
 | Understand transactions, bulk operations, soft-delete, and the v0.5 migration | [Tracking contracts](docs/transactions.md) |

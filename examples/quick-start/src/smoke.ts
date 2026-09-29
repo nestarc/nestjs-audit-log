@@ -6,6 +6,7 @@ import { AuditContext, AuditService } from '@nestarc/audit-log';
 import type { AuditQueryResult } from '@nestarc/audit-log';
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma.service';
+import { tenantScope } from './audit-options';
 
 async function main() {
   const app = await NestFactory.create(AppModule, { logger: false });
@@ -23,11 +24,21 @@ async function main() {
     assert.equal(created.password, undefined);
     const review = await fetch(`${url}/users/${created.id}/review`, { method: 'POST' });
     assert.equal(review.status, 201);
+    const roleResponse = await fetch(`${url}/users/${created.id}/role`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'admin' }),
+    });
+    assert.equal(roleResponse.status, 201);
     const history = await fetch(`${url}/users/${created.id}/audit`);
     assert.equal(history.status, 200);
     const { entries } = await history.json() as AuditQueryResult;
     const automatic = entries.find(entry => entry.action === 'User.created');
     const manual = entries.find(entry => entry.action === 'user.reviewed');
+    const roleChange = entries.find(entry => entry.action === 'User.updated');
+    assert.ok(roleChange);
+    assert.equal(roleChange.actorId, 'demo-user');
+    assert.equal(roleChange.tenantId, 'demo-tenant');
+    assert.equal(roleChange.targetId, created.id);
+    assert.deepEqual(roleChange.changes?.role, { before: 'member', after: 'admin' });
     assert.ok(automatic);
     assert.equal(automatic.source, 'auto');
     assert.equal(automatic.actorId, 'demo-user');
@@ -42,9 +53,11 @@ async function main() {
 
     const audit = app.get(AuditService);
     const filtered = await audit.query({ tenantId: 'demo-tenant', action: 'User.*', source: 'auto', targetId: created.id });
-    assert.equal(filtered.entries.length, 1);
-    await AuditContext.runAs({ id: 'worker-demo', type: 'system' }, () =>
-      audit.log({ action: 'user.exported', targetType: 'User', targetId: created.id }));
+    assert.equal(filtered.entries.length, 2);
+    await tenantScope.run({ tenantId: 'demo-tenant' }, () =>
+      AuditContext.runAs({ id: 'worker-demo', type: 'system' }, () =>
+        audit.log({ action: 'user.exported', targetType: 'User', targetId: created.id })),
+    );
     const background = await audit.query({ tenantId: 'demo-tenant', action: 'user.exported', targetId: created.id });
     assert.equal(background.entries.length, 1);
     assert.equal(background.entries[0].actorId, 'worker-demo');
@@ -53,18 +66,22 @@ async function main() {
     const prisma = app.get(PrismaService);
     const rolledBackEmail = `${randomUUID()}@example.com`;
     let rolledBackId: string | undefined;
-    await assert.rejects(prisma.client.withAuditTransaction(async tx => {
-      const pending = await tx.user.create({ data: { name: 'Rollback', email: rolledBackEmail, password: 'secret' } });
-      rolledBackId = pending.id;
-      throw new Error('rollback probe');
-    }), /rollback probe/);
+    await tenantScope.run({ tenantId: 'demo-tenant' }, () =>
+      AuditContext.runAs({ id: 'rollback-worker', type: 'system' }, () =>
+        assert.rejects(prisma.client.withAuditTransaction(async tx => {
+          const pending = await tx.user.create({ data: { name: 'Rollback', email: rolledBackEmail, password: 'secret' } });
+          rolledBackId = pending.id;
+          throw new Error('rollback probe');
+        }), /rollback probe/),
+      ),
+    );
     assert.ok(rolledBackId);
     assert.equal(await prisma.base.user.count({ where: { email: rolledBackEmail } }), 0);
     const rolledBackAudit = await audit.query({ tenantId: 'demo-tenant', targetType: 'User', targetId: rolledBackId });
     assert.equal(rolledBackAudit.entries.length, 0);
     console.log(JSON.stringify({ action: automatic.action, targetType: automatic.targetType, source: automatic.source,
       actorId: automatic.actorId, tenantId: automatic.tenantId, password: automatic.changes?.password,
-      manualAction: manual.action, backgroundActor: background.entries[0].actorId, rollback: 'passed' }, null, 2));
+      role: roleChange.changes?.role, manualAction: manual.action, backgroundActor: background.entries[0].actorId, rollback: 'passed' }, null, 2));
   } finally { await app.close(); }
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

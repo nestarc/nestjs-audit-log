@@ -17,6 +17,7 @@
     "llms.txt",
     "CHANGELOG.md",
     "docs/agent-guide.md",
+    "docs/adoption-guide.md",
     "docs/api-reference.md",
     "docs/transactions.md",
     "docs/context-and-tenancy.md",
