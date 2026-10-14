@@ -7,7 +7,7 @@ if (!connectionString) throw new Error('Set DATABASE_URL before starting the exa
 export const databaseSchema = new URL(connectionString).searchParams.get('schema') ?? 'public';
 export const tenantScope = new AsyncLocalStorage<{ tenantId: string }>();
 export const prismaModule = { Prisma };
-// 0.6.0: pass these options independently to the module and extension.
+// Pass these options independently; defineAuditConfig can also share them in 0.7.0.
 export const sharedAuditOptions = {
   prismaModule,
   tableName: `${databaseSchema}.audit_logs`,

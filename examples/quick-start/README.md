@@ -1,9 +1,9 @@
 # Run the audit-log Quick Start
 
-This standalone example pins **published `@nestarc/audit-log@0.6.0`** (npm verified 2026-09-29).
-No repository build is required. The current checkout also includes **0.7.0 Unreleased** APIs under
-a 0.7.0 manifest; the default `src` build uses only published APIs. The separately compiled
-`candidate` directory tests unreleased contracts. See the
+This standalone example pins **published `@nestarc/audit-log@0.7.0`** (released 2026-09-29).
+No repository build is required. The default `src` build contains the introductory app; the
+separately compiled `candidate` directory tests additional released adoption contracts, including
+`defineAuditConfig` and `actorRequired`. See the
 [changelog](../../CHANGELOG.md), [adoption guide](../../docs/adoption-guide.md) and
 [candidate instructions](../../docs/maintaining.md#candidate-documentation-example).
 
@@ -37,10 +37,11 @@ restricted runtime connection as described in the [storage guide](../../docs/sto
 Smoke commands leave demonstration rows; use only a disposable database/schema. Repeated runs use
 unique user emails. Keep the generated lockfile for repeat installs with `npm ci`.
 
-If extracting the older example bundled in the **0.6.0 registry tarball**, it still has a local file
-dependency and only the original creation smoke. Run
-`npm pkg set 'dependencies.@nestarc/audit-log=0.6.0'` before installing that example. For the new role and
-manual-only flows, use this directory from the current repository. Both use the same published API.
+The already published **0.7.0 registry tarball** contains an older copy of this example that still
+pins 0.6.0. The 0.6.0 tarball has a local file dependency and only the original creation smoke.
+If extracting either bundled example, run `npm pkg set 'dependencies.@nestarc/audit-log=0.7.0'`
+before installing. Use this directory from the current repository for the updated instructions
+and complete smoke flows; changing the repository does not modify either published tarball.
 
 ## Expected first records
 
@@ -121,24 +122,27 @@ npm run test:docs:consumer
 npm run test:docs:consumer -- --registry
 ```
 
-The first command packs the current candidate and extracts this example from that tarball, installs
-with strict peers outside the repository, and runs setup plus both smokes. The second uses the same
-example against its pinned registry dependency. Each prints artifact origin/integrity and removes
-only its own unique temporary schema/directory, including on failure. The full 0.7.0 policy matrix
-and external site deployment remain separate release work; passing this example does not establish
-complete audit coverage in your application.
+The first command packs the current checkout and extracts this example from that candidate tarball,
+then installs with strict peers outside the repository. The second uses the same updated example
+against its pinned 0.7.0 registry dependency and verifies its origin/integrity against npm metadata.
+Both run setup, the manual and HTTP smokes, and the adoption assertions below. Each prints artifact
+origin/integrity and removes only its own unique temporary schema/directory, including on failure.
+Here, `candidate` identifies the locally packed artifact mode; it does not mean the tested APIs are
+unreleased. Passing this example does not establish complete audit coverage in your application.
 
 
-### Candidate adoption scenarios (0.7.0 Unreleased)
+<a id="candidate-adoption-scenarios-070-unreleased"></a>
 
-The candidate consumer gate also runs `smoke:candidate`, which compiles with
+### Adoption scenarios (0.7.0)
+
+Both consumer modes run `smoke:candidate`, which compiles with
 `tsconfig.candidate.json` and executes [adoption-smoke.ts](candidate/adoption-smoke.ts).
-It requires the gate's unique local `audit_test` schema and a candidate package with
-`defineAuditConfig`/`actorRequired`; it is excluded from the default registry-compatible build.
+It requires the gate's unique local `audit_test` schema and the 0.7.0
+`defineAuditConfig`/`actorRequired` APIs. It is compiled separately from the introductory app.
 Use `npm run test:docs:consumer` from the repository root to get installation, schema isolation and
-teardown. `--registry` runs only the 0.6.0 baseline and explicitly reports this candidate suite skipped.
+teardown, or add `-- --registry` to run the same assertions against published 0.7.0.
 
-The [scenario-to-assertion map](../../docs/adoption-guide.md#candidate-adoption-assertions-070-unreleased)
+The [scenario-to-assertion map](../../docs/adoption-guide.md#adoption-assertions-070)
 explains the eight named results: concurrent HTTP/worker identities, masking/tenant policies,
 business and audit failures, caught N01/N02 errors, manual catch boundaries, tracking exclusions,
 and custom table storage. Success prints `mode: "candidate-adoption"`, eight `scenarios`, and

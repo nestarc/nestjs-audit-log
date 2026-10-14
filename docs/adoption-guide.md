@@ -1,9 +1,8 @@
 # Adopt audit logging one workflow at a time
 
-The baseline recipes here use **published `@nestarc/audit-log@0.6.0`**, verified against npm on
-2026-09-29. The current checkout also contains **0.7.0 Unreleased** changes with package version
-0.7.0; the candidate has not been published. See [CHANGELOG](../CHANGELOG.md).
-`actorRequired` and `defineAuditConfig()` are candidate-only APIs. Do not install `@0.7.0` yet.
+These recipes use **published `@nestarc/audit-log@0.7.0`**, released on 2026-09-29.
+`actorRequired` and `defineAuditConfig()` are available in this release. See
+[CHANGELOG](../CHANGELOG.md) and the [0.6 to 0.7 migration](transactions.md#migrating-from-06-to-07).
 
 Start with an existing NestJS + Prisma + PostgreSQL application. Choose one business event when
 rewriting existing transactions is costly, or one model when you need automatic field diffs.
@@ -75,7 +74,9 @@ It also checks that no automatic rows were created.
 ## Add automatic tracking for one model
 
 Keep the base client for storage and create an extended view of it for business writes. Pass the
-same table, tenant, and masking options separately to the module and extension in 0.6.0:
+same table, tenant, and masking options to the module and extension. Direct configuration remains
+supported in 0.7.0; the [configuration factory](api-reference.md#common-configuration-factory) can
+also build these option objects from one shared definition:
 
 ```typescript
 const audited = createAuditedClient(base, {
@@ -134,8 +135,9 @@ await audited.withAuditTransaction(async tx => {
 
 Choose a bounded workload and transaction timeout appropriate for your application. Chunking changes
 the all-or-nothing boundary to each chunk. Atomic `createMany`/`updateMany` are rejected; `deleteMany`
-has a record cap. Avoid `createManyAndReturn`/`updateManyAndReturn` in 0.6.0 because they have no automatic
-coverage; the 0.7.0 candidate rejects them in atomic mode. See the [bulk matrix](transactions.md#bulk-mutation-contract).
+has a record cap. In 0.7.0, tracked `createManyAndReturn`/`updateManyAndReturn` are also rejected in
+atomic mode; best-effort warns and produces no automatic audit rows. These operations had no automatic
+coverage in 0.6.0. See the [bulk matrix](transactions.md#bulk-mutation-contract).
 `best-effort` does not provide equivalent atomicity.
 
 Before switching a model, check its write paths:
@@ -167,7 +169,7 @@ Do not forward caller-supplied `allTenants: true` without separate cross-tenant 
 
 ## Authentication and worker context
 
-In 0.6.0, `actorExtractionStage: 'interceptor'` runs after successful Guards. The default is still
+Since 0.6.0, `actorExtractionStage: 'interceptor'` runs after successful Guards. The default is still
 middleware. Writes inside Guards occur earlier and need earlier authenticated context. Extraction
 failure alone is not authentication rejection. The example's fixed `DemoIdentityGuard` and fixed
 tenant middleware are demonstrations, not login, membership lookup, or production access control.
@@ -189,15 +191,15 @@ Import `AsyncLocalStorage` from `node:async_hooks` and `AuditContext` from `@nes
 `runAs()` supplies actor identity only; it does not create tenant context. Resolve the job's authorized
 tenant from trusted job data. The HTTP smoke also verifies a separate `worker-demo` actor and tenant.
 
-## Candidate configuration for 0.7.0 Unreleased
+<a id="candidate-configuration-for-070-unreleased"></a>
 
-Only after installing the [candidate tarball](maintaining.md#candidate-documentation-example), you
-can replace the independent option objects with the
-[configuration factory](api-reference.md#common-configuration-factory-070-unreleased).
+## Shared configuration in 0.7.0
+
+With the published 0.7.0 package, you can replace independent option objects with the
+[configuration factory](api-reference.md#common-configuration-factory).
 Use `shared.actorRequired: true` to require a non-blank actor ID for manual and automatic writes.
-The factory does not authenticate, create clients, register Nest modules or apply DDL. Keep the
-baseline runnable example on 0.6.0-compatible APIs until publication. See the
-[0.6 → 0.7 migration](transactions.md#migrating-from-06-to-07-unreleased).
+The factory does not authenticate, create clients, register Nest modules or apply DDL. Direct
+registration remains supported. See the [0.6 → 0.7 migration](transactions.md#migrating-from-06-to-07).
 
 ## Verify the first record and know the limits
 
@@ -212,17 +214,20 @@ npm run smoke
 Use only a disposable test database/schema. Both smokes leave demonstration records there.
 [Expected output and setup](../examples/quick-start/README.md) describe actor, tenant, redaction,
 role before/after and rollback assertions. Maintainers run these same packaged examples through
-`npm run test:docs:consumer` (candidate) and `npm run test:docs:consumer -- --registry` (pinned 0.6.0).
+`npm run test:docs:consumer` (local candidate) and `npm run test:docs:consumer -- --registry` (published 0.7.0).
 The [consumer gate](maintaining.md#run-tests) installs outside the repository with strict peers and
 removes its temporary schema. This verifies the example, not every write path in your application.
 
-### Candidate adoption assertions (0.7.0 Unreleased)
+<a id="candidate-adoption-assertions-070-unreleased"></a>
 
-The candidate command additionally compiles and runs
-[`candidate/adoption-smoke.ts`](../examples/quick-start/candidate/adoption-smoke.ts) using the packed
+### Adoption assertions (0.7.0)
+
+Both consumer commands additionally compile and run
+[`candidate/adoption-smoke.ts`](../examples/quick-start/candidate/adoption-smoke.ts) using the installed
 public API. It creates a custom `adoption_events` table through `defineAuditConfig().schemaOptions`
-and uses the same factory's module/extension options. The normal `src` build remains compatible with
-registry 0.6.0; `--registry` explicitly skips these unreleased assertions.
+and uses the same factory's module/extension options. The existing `candidate` directory and
+`smoke:candidate` command name identify the separately compiled suite; its APIs are released in 0.7.0,
+and `--registry` runs it too.
 
 | Required scenario | Executable assertion / output scenario |
 |---|---|
@@ -236,10 +241,11 @@ registry 0.6.0; `--registry` explicitly skips these unreleased assertions.
 | Custom table | `custom-table-ddl-insert-query`: custom table row count matches both tenants' service query totals; successful HTTP/worker assertions verify manual and automatic contents |
 
 The baseline `smoke:manual` also verifies a successful manual-only role change and business-exception
-rollback without creating an automatic extension. The candidate prints `mode: "candidate-adoption"`,
+rollback without creating an automatic extension. The adoption suite prints `mode: "candidate-adoption"`,
 all eight scenario names, and `result: "passed"` only after every assertion succeeds. The consumer
 runner separately prints installed version, mode, resolved artifact and integrity. Candidate mode
-now installs local 0.7.0; registry mode retains the verified 0.6.0 release.
+installs the local tarball; registry mode installs the published 0.7.0 release. Use the runner's mode
+and artifact metadata, not the suite's legacy output label, to distinguish the two sources.
 
 To adapt these assertions, use your test authentication, tenant resolver and models. For example,
 after an expected automatic helper rejection, check both sides rather than only the thrown error:

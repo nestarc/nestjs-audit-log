@@ -1,6 +1,6 @@
 # Actor context, decorators, and tenant scope
 
-Applies to the current checkout (`0.7.0 Unreleased`). Start with the [README](../README.md);
+Applies to the published `0.7.0` release. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## HTTP actor extraction
@@ -53,9 +53,11 @@ context for those routes. Excluding the middleware does not itself disable autom
 use `@NoAudit()` only where an audit context/interceptor is present, or explicitly choose your
 tracking scope.
 
-## Requiring an identifiable actor (0.7.0 Unreleased)
+<a id="requiring-an-identifiable-actor-070-unreleased"></a>
 
-The current checkout implements `actorRequired?: boolean` for the upcoming 0.7.0 release.
+## Requiring an identifiable actor
+
+`actorRequired?: boolean` was added in 0.7.0.
 It defaults to `false`. Set it on **both** module and extension options when both manual and
 automatic writes require attribution; these independent registrations do not merge settings.
 

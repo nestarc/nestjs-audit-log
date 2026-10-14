@@ -77,13 +77,18 @@ async function main() {
     assert.equal(JSON.parse(fs.readFileSync(path.join(installed, 'package.json'), 'utf8')).version, registry ? registryVersion : pack.version);
     const lock = JSON.parse(fs.readFileSync(path.join(consumer, 'package-lock.json'), 'utf8'));
     const artifact = lock.packages['node_modules/@nestarc/audit-log'];
-    if (registry) assert.ok(artifact.resolved.startsWith('https://registry.npmjs.org/@nestarc/audit-log/'));
-    else assert.equal(artifact.integrity, pack.integrity);
+    if (registry) {
+      const dist = JSON.parse(npm(['view', `@nestarc/audit-log@${registryVersion}`, 'dist', '--json',
+        '--registry=https://registry.npmjs.org'], consumer, env, true));
+      assert.ok(dist.tarball.startsWith('https://registry.npmjs.org/@nestarc/audit-log/'));
+      assert.match(dist.integrity, /^sha512-/);
+      assert.equal(artifact.resolved, dist.tarball);
+      assert.equal(artifact.integrity, dist.integrity);
+    } else assert.equal(artifact.integrity, pack.integrity);
     npm(['run', 'db:setup'], consumer, env);
     npm(['run', 'smoke:manual'], consumer, env);
     npm(['run', 'smoke'], consumer, env);
-    if (!registry) npm(['run', 'smoke:candidate'], consumer, env);
-    else console.log('Candidate adoption scenarios skipped: registry 0.6.0 lacks the unreleased APIs.');
+    npm(['run', 'smoke:candidate'], consumer, env);
     console.log(JSON.stringify({ package: pack.name, version: registry ? registryVersion : pack.version, mode: registry ? 'registry' : 'candidate',
       resolved: artifact.resolved, integrity: artifact.integrity,
       node: process.version, result: 'documentation consumer passed' }));

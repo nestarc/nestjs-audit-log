@@ -1,6 +1,6 @@
 # Audit export and durable delivery
 
-Applies to the current checkout (`0.7.0 Unreleased`). Start with the [README](../README.md);
+Applies to the published `0.7.0` release. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## Streaming export and CSV
@@ -36,7 +36,7 @@ high-watermark is inclusive (`until`). To resume the same tuple range, pass both
 the same filters. Checkpoints contain positions, not filters. `batchSize` defaults to 500 and must
 be between 1 and 10,000. An empty scan yields one empty page with a null checkpoint.
 
-In the current checkout, `after === until` is an already completed range: it yields one empty page
+`after === until` is an already completed range: it yields one empty page
 without a database query or replay. `after > until` is invalid. This completed-range behavior is a
 0.6.0 correction to the published v0.5.0 validation.
 

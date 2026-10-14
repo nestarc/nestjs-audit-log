@@ -1,4 +1,4 @@
-// 0.7.0 Unreleased. Compile separately: registry 0.6.0 has no defineAuditConfig.
+// Released 0.7.0 adoption contracts, compiled separately from the introductory app.
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

@@ -1,8 +1,8 @@
 # Automatic tracking and transaction contracts
 
-Applies to the current checkout (`0.7.0 Unreleased`, including the
-returning-operation guard described below). Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for version changes. The guard is not part of the 0.6.0 release.
+Applies to the published `0.7.0` release, including the returning-operation guard described below.
+Start with the [README](../README.md); see [CHANGELOG](../CHANGELOG.md) for version changes.
+The guard was added in 0.7.0 and is not part of the 0.6.0 release.
 
 ## Scope of automatic tracking
 
@@ -25,7 +25,7 @@ corresponding `*Many` operation targeting a tracked related model is rejected be
 query. Express it as explicit related-model writes inside `withAuditTransaction()` so each record
 receives its own audit row.
 
-The current checkout checks nested mutation data recursively, including when the top-level or an
+The extension checks nested mutation data recursively, including when the top-level or an
 intermediate model is excluded from tracking. An excluded relation may contain a deeper mutation
 that reaches a tracked model. A relation whose target and nested mutation targets are all excluded
 does not trigger the guard when public Prisma DMMF relation metadata is available. If that metadata
@@ -70,12 +70,12 @@ and result types, rejects nested helper calls, and uses no private Prisma API. `
 `maxWait`, when supplied, must be positive integers. In
 `atomic-required`, pre-read, post-read, audit INSERT, and audit context construction errors are
 fail-closed. A supported tracked mutation outside the helper throws before its business query runs.
-The current checkout also rejects helper completion after an audit failure even if the callback
+The helper also rejects completion after an audit failure even if the callback
 catches that failure; catching it cannot commit earlier business writes without their audit work.
 This is corrected in 0.6.0. Recoverable business exceptions remain caller-controlled.
 HTTP actor-extractor failures are a separate context setup path: they are reported and continue
 with a null actor, as described in [actor extraction](context-and-tenancy.md#http-actor-extraction).
-With `actorRequired: true` (0.7.0 Unreleased), reaching a tracked automatic write with an invalid
+With `actorRequired: true` (added in 0.7.0), reaching a tracked automatic write with an invalid
 actor rejects before its business query and marks an active atomic helper as failed. Catching
 that policy error cannot commit earlier writes. Explicit manual `log()` rejects before INSERT,
 but does not mark the helper or an external transaction as failed: callers must propagate its
@@ -119,7 +119,7 @@ for before-and-after examples and the manual transaction alternative.
 | `createMany` | Rejected before mutation because Prisma only returns count-level evidence | One `Model.createdMany` summary row |
 | `updateMany` | Rejected before mutation because exact record before/after diffs are unavailable | One `Model.updatedMany` summary row |
 | `deleteMany` | Locks and refreshes at most `maxBatchRecords` preimages, then writes one `Model.deleted` row per deleted record in the same transaction | Writes record rows up to the cap; overflow rejects unless `batchOverflow: 'summary'` is explicitly selected |
-| `createManyAndReturn` / `updateManyAndReturn` (unreleased 0.7.0) | Tracked models rejected before mutation, inside or outside the helper; catching the error still rejects helper completion | Business query and result/error preserved; no automatic audit row; warning once per model/operation per extension instance |
+| `createManyAndReturn` / `updateManyAndReturn` (guard added in 0.7.0) | Tracked models rejected before mutation, inside or outside the helper; catching the error still rejects helper completion | Business query and result/error preserved; no automatic audit row; warning once per model/operation per extension instance |
 
 The returning-operation guard respects excluded models and `@NoAudit()`. Best-effort warnings use
 the configured logger (or console), contain the model, operation, and single-record alternative,
@@ -137,20 +137,22 @@ overflow receive one `Model.deletedMany` row with `overflow: true` and `maxBatch
 batch activity marker, not evidence of which rows were deleted. In atomic mode, a cap overflow,
 preimage/affected-count mismatch, or any audit insert failure rolls back the entire `deleteMany`.
 
-## Migrating from 0.6 to 0.7 (unreleased)
+<a id="migrating-from-06-to-07-unreleased"></a>
+
+## Migrating from 0.6 to 0.7
 
 `actorRequired` is opt-in and defaults to `false`. Before enabling it on module and extension
 options, provide non-blank IDs for HTTP users, system workers, and API keys. Guard-based identity
 requires `actorExtractionStage: 'interceptor'`; workers can use `AuditContext.runAs()` and must
 establish tenant context separately. In best-effort, invalid actors preserve business writes but
-omit audit rows. Reads remain unaffected. See the [actor policy](context-and-tenancy.md#requiring-an-identifiable-actor-070-unreleased).
+omit audit rows. Reads remain unaffected. See the [actor policy](context-and-tenancy.md#requiring-an-identifiable-actor).
 
 
 In 0.6.0, `createManyAndReturn` and `updateManyAndReturn` could execute without an automatic audit
-record in either consistency mode. The 0.7.0 candidate rejects both for tracked models in
+record in either consistency mode. Version 0.7.0 rejects both for tracked models in
 `atomic-required`, before the business query. If a callback catches this policy error,
 `withAuditTransaction()` still rejects and rolls back all earlier business writes and audit rows.
-This behavior change targets 0.7.0; it is not a 0.6.x patch or an already published release.
+This behavior change shipped in 0.7.0; it is not part of the 0.6.x release line.
 
 Replace these calls with sequential `create()` or `update()` calls inside `withAuditTransaction()`.
 For example, replace `tx.user.createManyAndReturn({ data: users })` with:

@@ -9,11 +9,12 @@ Record who changed a Prisma model, what changed, and when in a NestJS applicatio
 before/after diffs and manual business events in an append-only PostgreSQL audit trail, then query,
 export, or deliver the records to an external service.
 
-The Quick Start uses **published `@nestarc/audit-log@0.6.0`**, verified on npm on 2026-09-29.
-The current checkout contains **0.7.0 Unreleased** work with package version 0.7.0; it has not been published.
-Candidate tarballs and the registry release are different artifacts even when their version matches.
-See [CHANGELOG](CHANGELOG.md) and the [candidate path](docs/maintaining.md#candidate-documentation-example).
-`actorRequired` and `defineAuditConfig()` are not available in the published 0.6.0 release.
+The Quick Start uses **published `@nestarc/audit-log@0.7.0`**, released on 2026-09-29.
+This release includes `actorRequired`, `defineAuditConfig()`, and guards for unsupported returning
+bulk operations. See [CHANGELOG](CHANGELOG.md) and the
+[0.6 to 0.7 migration guide](docs/transactions.md#migrating-from-06-to-07).
+Maintainers can also verify a [locally packed candidate](docs/maintaining.md#candidate-documentation-example);
+verify its source and integrity separately from the registry artifact even when the version matches.
 
 Start with [a manual business event or one tracked model](docs/adoption-guide.md) in an existing app.
 The guide follows a role change through actor/tenant attribution and an authorized history query.
@@ -64,15 +65,15 @@ The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that m
 In your existing NestJS application, install the verified release and Prisma 7 runtime dependencies:
 
 ```bash
-npm install --save-exact @nestarc/audit-log@0.6.0
+npm install --save-exact @nestarc/audit-log@0.7.0
 npm install @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
 npm install --save-dev prisma@7
 ```
 
 The [runnable example](examples/quick-start/README.md) pins its complete dependency tuple. Existing
 Prisma 5/6 applications should keep their generation setup and compatible Prisma dependencies.
-Contributors testing 0.7.0 Unreleased use the separate
-[build/pack instructions](docs/maintaining.md#candidate-documentation-example), not a registry `@0.7.0` install.
+Contributors testing local changes use the separate
+[build/pack instructions](docs/maintaining.md#candidate-documentation-example).
 
 ```dotenv
 # .env — replace with your local database credentials
@@ -217,6 +218,8 @@ Module and extension options are **independent**. The shared object above config
 field masking and manual metadata masking. Pass matching `tableName`, tenant options, and error
 reporting options to both paths when they should share behavior; schema utilities also need the same
 table name. Module options do not configure the extension automatically.
+In 0.7.0, [`defineAuditConfig()`](docs/api-reference.md#common-configuration-factory) can build these
+option objects from one shared definition; the direct registration above remains supported.
 
 ## Read and write audit records
 
@@ -321,6 +324,7 @@ to `AuditService.log(input, tx)` as your business write. See the
 |---|---|
 | Automatic single-record tracking | `create`, `update`, `delete`, and `upsert` through the audited client; supported operations use the helper's transaction |
 | Bulk writes | Atomic `deleteMany` records individual rows within `maxBatchRecords`; atomic `createMany`/`updateMany` are rejected; see the [bulk matrix](docs/transactions.md#bulk-mutation-contract) |
+| Returning bulk writes | In 0.7.0, tracked `createManyAndReturn`/`updateManyAndReturn` are rejected in atomic mode; best-effort warns and produces no automatic audit row |
 | Nested writes | Use explicit related-model writes inside the helper for tracked relations; see [nested writes](docs/transactions.md#nested-writes) |
 | Other writes | Base-client writes, raw SQL, unsupported operations, and database-side cascades/triggers are outside automatic record coverage |
 | Append-only storage | Default row triggers block `UPDATE`/`DELETE`; runtime permissions and a separate owner are required to prevent privileged bypasses or `TRUNCATE` |

@@ -18,20 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   transactions, tenant-scoped role changes and authorized history reads, plus runnable assertions
   for actor, tenant, redaction and rollback. The consumer gate executes the packaged example and
   supports an explicit pinned-registry validation mode. Site publication remains a release task.
+  The [current Quick Start](README.md#quick-start) now targets the published 0.7.0 package.
 
 - Add `defineAuditConfig()` and public configuration types to build module, optional extension,
   schema and partition options from one shared definition. The synchronous factory preserves
   defaults, requires explicit extension consistency, rejects misplaced shared fields, and copies
   mutable configuration independently while retaining callback/logger/Prisma namespace identity.
   It performs no client creation, DB I/O or Nest registration. See the
-  [configuration factory](docs/api-reference.md#common-configuration-factory-070-unreleased).
+  [configuration factory](docs/api-reference.md#common-configuration-factory).
 - Add opt-in `actorRequired` to module and extension shared options (default `false`). All actor
   types require a non-blank string ID, preserved without trimming. Automatic writes snapshot
   identity before the business query. Atomic policy failures reject before mutation and mark
   helper completion as failed even when caught; best-effort preserves business behavior, reports
   the error, and omits the audit row. Manual `log()` rejects before INSERT but leaves transaction
   rollback to the caller. Reads and intentional automatic tracking exclusions retain existing
-  behavior. See the [actor policy](docs/context-and-tenancy.md#requiring-an-identifiable-actor-070-unreleased).
+  behavior. See the [actor policy](docs/context-and-tenancy.md#requiring-an-identifiable-actor).
 
 ### Breaking Changes
 
@@ -39,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   before the business query, inside or outside `withAuditTransaction()`. Catching this policy error
   inside the helper still rolls back the entire transaction, including prior business and audit rows.
   Excluded models and `@NoAudit()` retain their intentional bypass. See the
-  [0.6 to 0.7 migration guidance](docs/transactions.md#migrating-from-06-to-07-unreleased).
+  [0.6 to 0.7 migration guidance](docs/transactions.md#migrating-from-06-to-07).
 
 ### Changed
 

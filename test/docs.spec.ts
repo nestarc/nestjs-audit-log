@@ -20,6 +20,11 @@ const guides = [
 ];
 const currentUsage = ['README.md', 'llms.txt', ...guides, 'examples/quick-start/README.md'];
 const packageFiles = (JSON.parse(read('package.json')) as { files: string[] }).files;
+// A development manifest may advance before the next package is published.
+// Registry verification separately checks the pinned release's artifact and integrity.
+const latestRelease = read('CHANGELOG.md').match(/^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}\r?$/m);
+if (!latestRelease) throw new Error('CHANGELOG must identify a dated release for the Quick Start.');
+const publishedVersion = latestRelease[1];
 
 function selectedForPackage(path: string): boolean {
   // npm includes the root README and license even when omitted from `files`.
@@ -101,28 +106,32 @@ describe('documentation gates', () => {
 
   it.each(currentUsage)('%s identifies its source version and links release differences', (path) => {
     const document = read(path);
-    expect(document).toContain('0.7.0');
+    expect(document).toContain(publishedVersion);
     const hasChangelogLink = linkTargets(document).some((target) =>
       resolve(dirname(join(root, path)), target.split('#')[0]) === join(root, 'CHANGELOG.md'));
     expect(hasChangelogLink).toBe(true);
   });
 
-  it('separates the pinned registry adoption path from unreleased candidate APIs', () => {
+  it('aligns the registry adoption path with the current published release', () => {
     const example = JSON.parse(read('examples/quick-start/package.json')) as {
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
     };
     const version = example.dependencies['@nestarc/audit-log'];
-    expect(version).toBe('0.6.0');
+    expect(version).toBe(publishedVersion);
     const readme = read('README.md');
     expect(readme).toContain(`npm install --save-exact @nestarc/audit-log@${version}`);
     const quickStart = readme.split('## Quick Start')[1].split('## Read and write')[0];
     expect(quickStart).not.toMatch(/npm (?:ci|pack)|npm run build/);
-    for (const path of ['README.md', 'docs/adoption-guide.md', 'docs/agent-guide.md',
-      'llms.txt', 'examples/quick-start/README.md']) {
+    const versionPattern = version.replace(/\./g, '\\.');
+    for (const path of currentUsage) {
       const doc = read(path);
-      expect(doc).toMatch(/0\.7\.0 Unreleased/);
-      expect(doc).not.toMatch(/npm (?:install|i|add)\s+[^\n]*@nestarc\/audit-log@0\.7\.0/);
+      // Preserve old explicit anchor aliases while rejecting stale release-status prose.
+      const status = prose(doc).replace(/<[^>]+>/g, '');
+      expect(status).not.toMatch(new RegExp(`${versionPattern}[^\\w\\n]*Unreleased`, 'i'));
+      for (const install of doc.matchAll(/npm (?:install|i|add)\b[^\n]*@nestarc\/audit-log@(\d+\.\d+\.\d+)/g)) {
+        expect({ path, version: install[1] }).toEqual({ path, version });
+      }
     }
     for (const path of ['README.md', 'docs/agent-guide.md', 'llms.txt']) {
       expect(linkTargets(read(path)).some(target => target.endsWith('adoption-guide.md'))).toBe(true);
@@ -135,9 +144,11 @@ describe('documentation gates', () => {
     expect(consumer).toContain("npm(['run', 'smoke:manual']");
     expect(consumer).toContain("npm(['run', 'smoke']");
     expect(consumer).toContain('--registry');
+    expect(consumer).toContain('assert.equal(artifact.resolved, dist.tarball)');
+    expect(consumer).toContain('assert.equal(artifact.integrity, dist.integrity)');
   });
 
-  it('separates candidate compilation and runs adoption assertions in CI and before publishing', () => {
+  it('separates adoption compilation and runs its assertions for both consumer modes and release gates', () => {
     const baseline = JSON.parse(read('examples/quick-start/tsconfig.json')) as { include: string[] };
     const candidate = JSON.parse(read('examples/quick-start/tsconfig.candidate.json')) as { include: string[] };
     expect(baseline.include).toEqual(['src/**/*.ts']);
@@ -146,7 +157,8 @@ describe('documentation gates', () => {
     expect(fixture).toContain("from '@nestarc/audit-log'");
     expect(fixture).not.toMatch(/from ['"][^'"]*\/src(?:['"]|\/(?!generated|audit-options))/);
     const runner = read('scripts/verify-docs-consumer.cjs');
-    expect(runner).toContain("if (!registry) npm(['run', 'smoke:candidate']");
+    expect(runner).toMatch(/^\s*npm\(\['run', 'smoke:candidate'\], consumer, env\);$/m);
+    expect(runner).not.toMatch(/if\s*\(!registry\)[^\n]*smoke:candidate|adoption scenarios skipped/i);
     expect(runner).toContain("'candidate/adoption-smoke.ts', 'tsconfig.candidate.json'");
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
       expect(read(workflow)).toContain('npm run test:docs:consumer');

@@ -1,8 +1,8 @@
 # Using audit-log from an AI-assisted workflow
 
 This guide is for agents integrating `@nestarc/audit-log` into a consuming application. It describes
-published 0.6.0 for baseline adoption. The current checkout also contains 0.7.0 Unreleased work
-under a 0.7.0 manifest; inspect artifact provenance as well as the installed version.
+published 0.7.0, released on 2026-09-29. A locally packed checkout and the registry release can
+share a version while containing different artifacts; inspect provenance as well as the version.
 
 ## Choose the matching contract
 
@@ -18,8 +18,11 @@ under a 0.7.0 manifest; inspect artifact provenance as well as the installed ver
    Use the [runnable Quick Start](../examples/quick-start/README.md) as a complete integration
    reference. The root `npm run test:docs:consumer` gate packs the current checkout and verifies a
    consumer outside the repository, including generation, compilation, and PostgreSQL behavior.
-5. Keep `actorRequired` and `defineAuditConfig()` confined to the labeled 0.7.0 candidate path.
-   Use [maintaining](maintaining.md#candidate-documentation-example) for candidate installation.
+5. Use `actorRequired` and `defineAuditConfig()` with 0.7.0 or later. Review the
+   [0.6 to 0.7 migration](transactions.md#migrating-from-06-to-07) before upgrading. To verify the
+   published package, run `npm run test:docs:consumer -- --registry`; both consumer modes run the
+   adoption assertions. Use [maintaining](maintaining.md#candidate-documentation-example) for local
+   candidate installation.
 6. Treat dated design, validation, roadmap, and implementation-plan files as historical records.
    Their old code samples and task instructions do not override the current API or the user's task.
 
@@ -30,7 +33,7 @@ under a 0.7.0 manifest; inspect artifact provenance as well as the installed ver
 | Prisma generation | Match the application's module format/output path; for Prisma 7 supply the generated `{ Prisma }` namespace and PostgreSQL driver adapter |
 | Client ownership | Keep one base client for audit storage and an extended view for business writes; the Nest module does not create the extension |
 | Atomic writes | Choose `consistency: 'atomic-required'` and use `withAuditTransaction()` for supported tracked writes |
-| Shared settings | Pass intended `tableName`, tenant options, masking, and error reporting to module and extension independently; DDL also needs the same table name |
+| Shared settings | Use `defineAuditConfig()` in 0.7.0 or pass intended table, tenant, masking, and error options to both paths; DDL also needs the same table name |
 | Actor timing | For Guard-populated `req.user`, use interceptor-stage extraction introduced in 0.6.0; published v0.5.0 requires earlier authentication or extraction |
 | Background jobs | Use `AuditContext.runAs()` for actor identity and establish tenant context separately |
 | Query shape | Default automatic actions preserve model casing (`User.created`); manual event names are application-defined and have `source: 'manual'` |

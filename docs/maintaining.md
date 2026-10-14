@@ -1,7 +1,7 @@
 # Maintaining and releasing audit-log
 
-Applies to the current checkout (`0.7.0 Unreleased`). Start with the [README](../README.md);
-see [CHANGELOG](../CHANGELOG.md) for version changes.
+Documents development and verification for the published `0.7.0` release and local candidates.
+Start with the [README](../README.md); see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## Published ecosystem release gate
 
@@ -12,9 +12,10 @@ The fixture owns an independent manifest and lockfile, uses exact versions only,
 SHA-512 integrity before testing transaction commit/rollback, soft-delete, restore, purge, and
 cascade evidence. The runner copies the fixture outside the repository and performs a fresh
 `npm ci`, so root or sibling dependencies cannot satisfy a missing package. CI first runs the
-published tuple, then replaces only audit-log with the current checkout's real `npm pack --json`
-tarball and repeats the same tests. A separate explicit tenancy-candidate mode replaces only tenancy
-with a caller-supplied `0.16.x` `.tgz`; audit-log and soft-delete remain registry artifacts. All
+published tuple, then installs the current checkout's real `npm pack --json` audit-log tarball with
+the compatible soft-delete 0.7.4 companion and repeats the same tests. A separate explicit
+tenancy-candidate mode replaces only tenancy with a caller-supplied `0.16.x` `.tgz`;
+audit-log and soft-delete remain registry artifacts. All
 three modes use strict peer installation and assert each package's installed version, source, and
 SHA-512 integrity. Tag publishing cannot start until the audit-log candidate gate passes.
 
@@ -39,8 +40,8 @@ npm run build
 
 ### Candidate documentation example
 
-The consumer Quick Start pins the verified registry release `@nestarc/audit-log@0.6.0`. To exercise
-**0.7.0 Unreleased** APIs from the current checkout, build and pack explicitly in the repository:
+The consumer Quick Start pins the published registry release `@nestarc/audit-log@0.7.0`.
+To exercise local changes instead of the registry artifact, build and pack explicitly in the repository:
 
 ```sh
 npm ci
@@ -59,10 +60,10 @@ npm run smoke:manual
 npm run smoke
 ```
 
-The filename reflects the current manifest, not publication of the 0.7.0 changes. Record its integrity
-and origin when sharing evidence. Do not publish or install nonexistent `@0.7.0` as part of this path.
-The baseline example deliberately remains 0.6.0-compatible; candidate-specific policy scenarios are
-separate release gates. [Adoption guide](adoption-guide.md) explains the API boundary.
+The filename reflects the current manifest; it does not make a local tarball identical to the
+published 0.7.0 artifact. Record integrity and origin when sharing evidence. Both the packed and
+registry consumer gates run the released 0.7.0 policy scenarios in addition to the basic smokes.
+The [adoption guide](adoption-guide.md) explains these contracts.
 
 ### Run tests
 
@@ -104,9 +105,10 @@ The documentation consumer gate packs this checkout, verifies the shipped guide/
 extracts the example from that tarball, installs into an isolated temporary project with strict peers,
 then generates Prisma,
 applies schema setup, compiles, and runs the manual-only and HTTP/role/actor/redaction/rollback smoke tests.
-Candidate mode also compiles/runs the [N05 adoption assertions](adoption-guide.md#candidate-adoption-assertions-070-unreleased),
+Both modes also compile/run the [0.7.0 adoption assertions](adoption-guide.md#adoption-assertions-070),
 including real audit INSERT fault injection in that isolated schema. CI and the pre-publish release
-workflow run this gate. The optional `--registry` mode skips unreleased assertions and installs the example manifest's exact registry version instead; output
+workflow run the packed gate. The optional `--registry` mode installs the example manifest's exact
+published version and runs the same assertions; output
 records mode, version, resolved artifact and integrity. It uses only a
 local database named `audit_test` (default port `5433`), creates a unique schema, and removes its own
 schema and temporary project in teardown. It does not start or stop PostgreSQL for you.
@@ -120,7 +122,8 @@ unchanged at soft-delete 0.7.3 and audit-log 0.5.0. Both modes require a valid f
 - [x] Implement N05 packed candidate policy/tenant/exclusion assertions and wire them into CI/release.
 - [x] Confirm remote CI, the full peer matrix and ecosystem release gates for the release commit.
 - [x] Publish 0.7.0 and verify the actual registry artifact with compilation and smoke assertions.
-- [ ] Update the Quick Start pin, version boundaries and published ecosystem exact tuple with evidence.
+- [x] Update the Quick Start pin and current usage guides for published 0.7.0, including registry adoption assertions.
+- [ ] Update the published ecosystem exact tuple and its lockfile with coordinated registry evidence.
 - [ ] Update the separate documentation-site repository, including its version selector and adoption links.
 - [ ] Deploy that site and verify its public pages against the published package.
 

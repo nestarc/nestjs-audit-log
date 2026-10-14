@@ -1,8 +1,8 @@
 # Audit log API reference
 
-Applies to the current checkout (`0.7.0 Unreleased`). Start with the [README](../README.md);
+Applies to the published `0.7.0` release. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes. `actorRequired` and `defineAuditConfig()`
-are implemented in this checkout for **0.7.0 Unreleased**; they are not part of the released 0.6.0 API.
+were added in 0.7.0 and are not part of the 0.6.0 API.
 
 ## Entry points
 
@@ -13,7 +13,7 @@ use them for the complete current signatures.
 |---|---|
 | `AuditLogModule.forRoot(options)` | Register synchronous NestJS options and export `AuditService` |
 | `AuditLogModule.forRootAsync({ imports?, inject?, useFactory })` | Register a factory that returns options or a promise of options |
-| `defineAuditConfig(input)` | 0.7.0 Unreleased: build consistent module, optional extension, schema and partition options |
+| `defineAuditConfig(input)` | Added in 0.7.0: build consistent module, optional extension, schema and partition options |
 | `createAuditedClient(basePrisma, options)` | Extend a base client and preserve the typed transaction callback/result |
 | `basePrisma.$extends(createAuditExtension(options))` | Compose the audit extension explicitly with other Prisma extensions |
 | `client.withAuditTransaction(callback, options?)` | Run supported automatic writes and audit work on the same interactive transaction |
@@ -23,9 +23,11 @@ Module and extension configuration are independent: nothing merges them at runti
 setting `actorRequired`, `tenantRequired`, or `sensitiveFields` on the module does not configure automatic tracking.
 Pass shared values to both registration sites as shown in the [Quick Start](../README.md#quick-start).
 For custom table names, also pass the same value to schema and partition utilities.
-For the unreleased 0.7.0 candidate, the factory below builds these options together.
+The factory added in 0.7.0 builds these options together.
 
-## Common configuration factory (0.7.0 Unreleased)
+<a id="common-configuration-factory-070-unreleased"></a>
+
+## Common configuration factory
 
 `defineAuditConfig()` is a synchronous options builder. It performs no DB I/O, creates no Prisma
 client, registers no Nest module, and does not call extractors, resolvers or logging hooks.
@@ -46,7 +48,7 @@ validation; consuming APIs retain their other validation and defaults. Omitting 
 union. An input whose extension is optional at runtime returns a union that must be narrowed.
 
 ```typescript
-// Candidate checkout only; not available in released 0.6.0.
+// Available in @nestarc/audit-log 0.7.0.
 import { AuditLogModule, createAuditedClient, defineAuditConfig } from '@nestarc/audit-log';
 import { Prisma } from './generated/prisma/client';
 
@@ -116,7 +118,7 @@ overrides are the caller's responsibility and are not synchronized between regis
 | `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
 | `actorExtractor` | `(req) => AuditActor \| Promise<AuditActor>` | *required* | Extracts actor from HTTP request |
 | `actorExtractionStage` | `'middleware' \| 'interceptor'` | `'middleware'` | Added in 0.6.0: choose `interceptor` for identity populated by authentication Guards; [actor timing](context-and-tenancy.md#http-actor-extraction) |
-| `actorRequired` | `boolean` | `false` | 0.7.0 Unreleased: `log()` requires a non-blank string actor ID, including system actors; reads are unaffected |
+| `actorRequired` | `boolean` | `false` | Added in 0.7.0: `log()` requires a non-blank string actor ID, including system actors; reads are unaffected |
 | `tenantRequired` | `boolean` | `false` | When `true`, `log()` requires tenant context; `query()`/`getById()` require it unless explicit `tenantId` or `allTenants` is supplied |
 | `excludeRoutes` | `RouteInfo[]` | `[]` | Routes excluded from `AuditActorMiddleware` |
 | `registerGlobalInterceptor` | `boolean` | `true` | Set `false` to bind `AuditInterceptor` manually |
@@ -144,7 +146,7 @@ overrides are the caller's responsibility and are not synchronized between regis
 | `maxBatchRecords` | `number` | `1000` | Maximum records audited individually by `deleteMany`; a positive integer |
 | `batchOverflow` | `'reject' \| 'summary'` | `'reject'` | Behavior when `deleteMany` exceeds the cap; `'summary'` is explicit best-effort-only fallback |
 | `tableName` | `string` | `audit_logs` | Audit table used by automatic inserts |
-| `actorRequired` | `boolean` | `false` | 0.7.0 Unreleased: missing/blank actor ID rejects atomic writes before the business query; best-effort reports the policy error and skips audit rows |
+| `actorRequired` | `boolean` | `false` | Added in 0.7.0: missing/blank actor ID rejects atomic writes before the business query; best-effort reports the policy error and skips audit rows |
 | `tenantRequired` | `boolean` | `false` | Missing tenant fails closed in `atomic-required`; `best-effort` reports `audit entry skipped` and returns the business mutation |
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup |
 | `onAuditError` | `(error, ctx) => void` | — | Structured audit failure callback |
