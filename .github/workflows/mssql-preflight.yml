@@ -3,7 +3,7 @@ name: MSSQL preflight
 on:
   workflow_dispatch:
   push:
-    branches: [codex/mssql-preflight]
+    branches: [main]
     paths:
       - fixtures/mssql-preflight/**
       - .github/workflows/mssql-preflight.yml
@@ -11,6 +11,17 @@ on:
       - test/**
       - package.json
       - package-lock.json
+      - tsconfig*.json
+  pull_request:
+    branches: [main]
+    paths:
+      - fixtures/mssql-preflight/**
+      - .github/workflows/mssql-preflight.yml
+      - src/**
+      - test/**
+      - package.json
+      - package-lock.json
+      - tsconfig*.json
 
 permissions:
   contents: read
