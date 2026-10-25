@@ -6,10 +6,89 @@ benchmark and recorded 2026-09-10 run remain below with their original commands 
 
 ## 0.7.1 candidate performance checks
 
-**Results pending.** The candidate adds two performance suites that use installed public package
+The candidate adds two performance suites that use installed public package
 entry points and verify the resulting database rows. PostgreSQL compares published audit-log
 0.7.0 with the packed 0.7.1 candidate. SQL Server measures the candidate's manual audit overhead
 against an otherwise equivalent business transaction without auditing.
+
+### Recorded candidate results — 2026-10-25
+
+All correctness checks and cleanup passed: each PostgreSQL execution measured 36,000 operations
+in 72 blocks (39,600 transactions including warmups, 30,800 audit rows), and SQL Server measured
+16,000 operations in 32 blocks (17,600 transactions including warmups, 8,800 audit rows).
+The PostgreSQL comparison used published 0.7.0 and candidate 0.7.1 on the same host within each
+execution. Three executions are retained separately because hosted-runner variation was substantial.
+
+| PostgreSQL scenario | Run 1 mean change | Run 2 mean change | Run 3 mean change |
+|---|---:|---:|---:|
+| Manual, small, concurrency 1 | −1.47% | +24.45% | −1.54% |
+| Manual, small, concurrency 4 | −0.31% | −9.41% | −19.36% |
+| Manual, 64k, concurrency 1 | −2.01% | +0.86% | +8.58% |
+| Manual, 64k, concurrency 4 | +0.18% | +4.00% | −5.64% |
+| Automatic create, concurrency 1 | −2.00% | −0.51% | +3.23% |
+| Automatic update, concurrency 1 | −0.50% | −18.70% | −9.89% |
+| Automatic delete, concurrency 1 | +1.24% | +9.08% | −3.78% |
+
+Each cell is the median of four paired `(candidate mean / baseline mean − 1)` percentages;
+positive means slower. These are descriptive observations, not equivalence or significance tests.
+Run 2's small/concurrency-1 mean change of +24.45% accompanied only +0.30% in paired P50 and
++3.51% in paired P95; bursts and individual stalls affected means. Its 64k/concurrency-4 change
+persisted across its four repeats, so one additional PostgreSQL-only execution was scheduled
+with the same settings. That increase did not reproduce in run 3. Run 3 instead observed
++8.58% for 64k/concurrency-1. Run 1 also contains a slow baseline block with 12.538 ms mean and
+63.181 ms P95. No runs or slow samples were removed.
+
+The three executions do not show a consistent broad regression, but their variability cannot
+establish performance equivalence or exclude workload-specific regressions. In particular, these
+results should not be used as an automatic production performance gate. A workload requiring a
+latency budget needs measurements on controlled deployment hardware and its real data shapes.
+Tail signals remain: the paired P99 ratio for manual 64k/concurrency-1 and the P95 ratios for
+automatic create and delete increased in all three executions. Run 3's manual 64k/concurrency-1
+P99 ratio was +82.90%, and its automatic-create P99 ratio was +74.35%, despite much smaller
+P50 changes. Slow unaudited controls also occurred, but the available evidence does not isolate
+the cause. Applications sensitive to tail latency should treat these as unresolved observations.
+
+| SQL Server redacted JSON size in NVARCHAR | Concurrency | Audited mean | Paired increment | Audited P95 | Audited operations/s |
+|---|---:|---:|---:|---:|---:|
+| 256 B (128 UTF-16 code units) | 1 | 4.585 ms | +0.731 ms | 5.481 ms | 221.5 |
+| 256 B (128 UTF-16 code units) | 4 | 8.502 ms | +1.041 ms | 13.858 ms | 469.9 |
+| 128 KiB (65,536 UTF-16 code units) | 1 | 49.999 ms | +44.939 ms | 57.698 ms | 20.0 |
+| 128 KiB (65,536 UTF-16 code units) | 4 | 51.625 ms | +44.296 ms | 62.084 ms | 77.2 |
+
+SQL Server cells are medians of the four block statistics. The increment is the median of
+four paired `audited mean − transaction-only mean` deltas, which is not necessarily the
+difference of the two medians. Small-payload differences include a negative delta in one repeat
+at each concurrency. The approximately 44 ms large-payload increment occurred in all repeats;
+this includes serialization, driver transfer, the extra INSERT, JSON validation and transaction
+commit, without attributing the cost to a particular layer.
+
+The SQL Server host exposed four logical CPUs and about 15.6 GiB RAM (AMD EPYC 9V74), without
+additional Docker CPU or memory limits. SQL Server 17.0.5035.5 used FULL recovery; both database
+files were pre-sized to 1 GiB outside the timers and did not grow during measurement. PostgreSQL
+used 16.15 / Prisma 7.9.1; SQL Server used Prisma 7.10.0. All jobs used Node 24.11.1 and pool size
+four. PostgreSQL runs used Intel Xeon 8573C, AMD EPYC 9V45, and AMD EPYC 9V74 respectively.
+Absolute observations across these hosts and database suites are not directly comparable.
+
+Preserved evidence:
+
+- PostgreSQL [run 1](benchmarks/2026-10-25-release-0.7.1/postgresql-run-1.json),
+  [run 2](benchmarks/2026-10-25-release-0.7.1/postgresql-run-2.json), and
+  [run 3](benchmarks/2026-10-25-release-0.7.1/postgresql-run-3.json), including every latency.
+- SQL Server [measurements](benchmarks/2026-10-25-release-0.7.1/sqlserver.json),
+  [database cleanup](benchmarks/2026-10-25-release-0.7.1/sqlserver-runner.json),
+  [image identity](benchmarks/2026-10-25-release-0.7.1/sqlserver-image.json), and
+  [container limits](benchmarks/2026-10-25-release-0.7.1/sqlserver-container.json).
+- [Provenance](benchmarks/2026-10-25-release-0.7.1/provenance.json) maps PR head SHAs to GitHub's
+  synthetic merge checkouts and artifact identities. The two candidate tarballs have different
+  documentation but identical `package.json` and 188 `dist/` files; their runtime SHA-256 is
+  `05dabac3a6213d8d05a1be6f7d0cb5fbbba3111517bd920e79d111dbeba4466b`.
+- [First execution](https://github.com/nestarc/nestjs-audit-log/actions/runs/40183023344) completed
+  PostgreSQL; its MSSQL environment collection stopped before measurement on a missing optional
+  Docker field. The field handling was corrected. The [subsequent execution and PostgreSQL rerun](https://github.com/nestarc/nestjs-audit-log/actions/runs/40183158537)
+  passed. This report records those measured revisions; later documentation changes do not alter
+  the measured library runtime.
+
+### Workloads
 
 | Suite | Workloads | Payloads and concurrency |
 |---|---|---|
