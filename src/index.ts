@@ -120,6 +120,7 @@ export type {
 export { AUDIT_LOG_OPTIONS } from './audit-log.constants';
 
 // SQL
+export type { AuditDatabaseProvider } from './sql/provider';
 export {
   getAuditTableSQL,
   getAuditTableStatements,

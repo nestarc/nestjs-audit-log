@@ -1,10 +1,12 @@
 import type { AuditExtensionOptions } from './audit-types';
+import { assertPostgresProvider } from '../../sql/provider';
 
 const EXPERIMENTAL_TX_AUDIT_REMOVED_ERROR =
   '[@nestarc/audit-log] experimentalTxAudit was removed in v0.5.0; use consistency: "atomic-required" with withAuditTransaction(), or remove experimentalTxAudit and keep explicit consistency: "best-effort"';
 
 /** Validate options without resolving Prisma or creating an extension. */
 export function validateAuditExtensionOptions(options: AuditExtensionOptions): void {
+  assertPostgresProvider(options.provider, 'Automatic audit tracking');
   if (Object.prototype.hasOwnProperty.call(options, 'experimentalTxAudit')) {
     throw new Error(EXPERIMENTAL_TX_AUDIT_REMOVED_ERROR);
   }

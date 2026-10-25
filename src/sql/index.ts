@@ -1,6 +1,10 @@
 import { validateAuditTableName } from './table-name';
+import { assertPostgresProvider, resolveAuditProvider } from './provider';
+import type { AuditDatabaseProvider } from './provider';
+import { getSqlServerAuditTableStatements } from './sqlserver';
 
 export interface AuditTableSQLOptions {
+  provider?: AuditDatabaseProvider;
   tableName?: string;
   partitioned?: boolean;
   enforcement?: 'trigger' | 'rule';
@@ -8,6 +12,7 @@ export interface AuditTableSQLOptions {
 }
 
 export interface EnsurePartitionsOptions {
+  provider?: AuditDatabaseProvider;
   tableName?: string;
   ahead?: number;
 }
@@ -217,6 +222,9 @@ function partitionStatements(names: AuditObjectNames, ahead = 1): string[] {
 export function getAuditTableStatements(
   options: AuditTableSQLOptions = {},
 ): string[] {
+  if (resolveAuditProvider(options.provider) === 'sqlserver') {
+    return getSqlServerAuditTableStatements(options);
+  }
   const tableName = validateAuditTableName(options.tableName);
   const names = deriveAuditObjectNames(tableName);
   const enforcement = options.enforcement ?? 'trigger';
@@ -233,8 +241,16 @@ export function getAuditTableStatements(
   return statements;
 }
 
+/**
+ * SQL Server output requires sqlcmd or SSMS SQLCMD mode for fail-fast execution.
+ * Use getAuditTableStatements/applyAuditTableSchema for Prisma.
+ */
 export function getAuditTableSQL(options: AuditTableSQLOptions = {}): string {
-  return getAuditTableStatements(options).join('\n\n');
+  const statements = getAuditTableStatements(options);
+  if (resolveAuditProvider(options.provider) === 'sqlserver') {
+    return `:ON ERROR EXIT\n${statements.join('\nGO\n')}\nGO\n`;
+  }
+  return statements.join('\n\n');
 }
 
 async function getTableRelkind(
@@ -252,6 +268,8 @@ export async function applyAuditTableSchema(
   prisma: any,
   options: AuditTableSQLOptions = {},
 ): Promise<void> {
+  // Validate provider-specific options before even performing PostgreSQL catalog I/O.
+  const statements = getAuditTableStatements(options);
   const tableName = validateAuditTableName(options.tableName);
   if (options.partitioned) {
     const relkind = await getTableRelkind(prisma, tableName);
@@ -268,7 +286,7 @@ export async function applyAuditTableSchema(
     }
   }
 
-  for (const stmt of getAuditTableStatements(options)) {
+  for (const stmt of statements) {
     await prisma.$executeRawUnsafe(stmt);
   }
 }
@@ -285,6 +303,7 @@ export async function ensurePartitions(
   prisma: any,
   options: EnsurePartitionsOptions = {},
 ): Promise<string[]> {
+  assertPostgresProvider(options.provider, 'ensurePartitions');
   const tableName = validateAuditTableName(options.tableName);
   const names = deriveAuditObjectNames(tableName);
   const ahead = options.ahead ?? 1;

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Add explicit `provider: 'sqlserver'` for manual `AuditService.log(input, tx?)` and schema utilities.
+  Manual events use the supplied transaction directly, preserve actor/tenant/redaction policy, and
+  bind JSON text without PostgreSQL casts. Omitting `provider` keeps PostgreSQL behavior.
+- Add SQL Server flat-table DDL with Unicode `NVARCHAR(MAX)` storage, JSON checks, UTC timestamps,
+  a `(created_at, id)` clustered index, and UPDATE/DELETE rejection triggers. Install batches
+  separately, validate existing layouts, and restore trigger enforcement on reapplication.
+- Carry `provider` through `defineAuditConfig()` and reject unsupported SQL Server automatic
+  tracking, reads, export, retention, partitions, GIN indexes, and rule enforcement before database
+  access. See the [SQL Server guide](docs/sql-server.md) for configuration and current boundaries.
+
 ## [0.7.0] - 2026-09-29
 
 ### Added

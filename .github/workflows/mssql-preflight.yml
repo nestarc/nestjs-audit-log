@@ -7,6 +7,10 @@ on:
     paths:
       - fixtures/mssql-preflight/**
       - .github/workflows/mssql-preflight.yml
+      - src/**
+      - test/**
+      - package.json
+      - package-lock.json
 
 permissions:
   contents: read
@@ -52,6 +56,17 @@ jobs:
       - name: Install exact fixture dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Build and pack the library candidate
+        working-directory: .
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          mkdir -p fixtures/mssql-preflight/results/package
+          npm pack --pack-destination fixtures/mssql-preflight/results/package
+
+      - name: Install the packed library candidate
+        run: npm install --no-save --package-lock=false --no-audit --no-fund ./results/package/nestarc-audit-log-*.tgz
+
       - name: Record server image and verify architecture
         run: |
           mkdir -p results
@@ -71,6 +86,12 @@ jobs:
           '
 
       - name: Run real database probes
+        run: npm test
+
+      - name: Verify the public library on SQL Server
+        env:
+          MSSQL_PROBE: library-probe.mjs
+          MSSQL_REPORT_PATH: results/library/report.json
         run: npm test
 
       - name: Collect SQL Server logs

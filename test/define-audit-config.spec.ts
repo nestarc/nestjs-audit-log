@@ -86,7 +86,7 @@ describe('defineAuditConfig', () => {
   });
 
   const sharedFields: Array<keyof AuditConfigSharedOptions> = [
-    'tableName', 'prismaModule', 'tenantRequired', 'tenantResolver', 'actorRequired',
+    'provider', 'tableName', 'prismaModule', 'tenantRequired', 'tenantResolver', 'actorRequired',
     'sensitiveFields', 'sensitiveFieldsByModel', 'logger', 'onAuditError',
   ];
   it.each(sharedFields)('rejects misplaced shared field %s even when undefined in JavaScript', key => {
@@ -128,5 +128,31 @@ describe('defineAuditConfig', () => {
     expect(() => defineAuditConfig({ module: { actorExtractor }, shared: { tableName: 'bad;table' } })).toThrow('Invalid audit tableName');
     const config = defineAuditConfig({ module: { actorExtractor }, extension: { consistency: 'best-effort', batchOverflow: 'summary' } });
     expect(config.extensionOptions.batchOverflow).toBe('summary');
+  });
+
+  it('propagates the SQL Server provider to module and storage options', () => {
+    const config = defineAuditConfig({
+      module: { actorExtractor },
+      shared: { provider: 'sqlserver', tableName: 'history.events' },
+    });
+    expect(config.moduleOptions).toMatchObject({ provider: 'sqlserver', tableName: 'history.events' });
+    expect(config.schemaOptions).toEqual({ provider: 'sqlserver', tableName: 'history.events' });
+    expect(config.partitionOptions).toEqual(config.schemaOptions);
+    expect(config.extensionOptions).toBeUndefined();
+    expect(getAuditTableSQL(config.schemaOptions)).toContain('[history].[events]');
+  });
+
+  it('rejects unsupported SQL Server settings before any runtime work', () => {
+    const shared = { provider: 'sqlserver' as const };
+    expect(() => defineAuditConfig({ module: { actorExtractor }, shared,
+      extension: { consistency: 'atomic-required' } })).toThrow('Automatic audit tracking');
+    for (const schema of [{ partitioned: true }, { ginIndex: true }, { enforcement: 'rule' as const }]) {
+      expect(() => defineAuditConfig({ module: { actorExtractor }, shared, schema })).toThrow();
+    }
+    expect(() => defineAuditConfig({ module: { actorExtractor }, shared: { provider: 'mssql' as any } })).toThrow('provider');
+    expect(() => defineAuditConfig({ module: { actorExtractor }, shared: {
+      ...shared, tableName: `${'s'.repeat(129)}.events`,
+    } })).toThrow();
+    expect(actorExtractor).not.toHaveBeenCalled();
   });
 });

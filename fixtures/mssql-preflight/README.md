@@ -1,6 +1,6 @@
 # SQL Server 2025 and Prisma 7.10.0 preflight
 
-This isolated fixture tests the database and driver assumptions needed before implementing MSSQL support in `@nestarc/audit-log`. It does not import the library or claim that `AuditService` supports MSSQL.
+This isolated fixture tests SQL Server and driver assumptions, then verifies the packed `@nestarc/audit-log` candidate's manual logging and schema installation. `probe.mjs` remains the independent driver baseline; `library-probe.mjs` imports the installed package and exercises its public API.
 
 The probes use real Prisma model writes and parameterized raw audit inserts to check:
 
@@ -30,6 +30,14 @@ The connection uses encryption with `trustServerCertificate: true` for this isol
 
 The runner performs package checks, client generation, a bounded SQL readiness check, server version verification, database creation, `prisma db push`, the probes, and cleanup. No separate SQL installation command is needed after the server is running.
 
+To run the library integration probe, build and pack the repository root, install that tarball into this fixture with `npm install --no-save --package-lock=false <tarball>`, then run:
+
+```sh
+MSSQL_PROBE=library-probe.mjs MSSQL_REPORT_PATH=results/library/report.json npm test
+```
+
+The library probe verifies module registration, configuration propagation, DDL reapplication, manual commit/rollback, context policies, long values, append-only triggers, and rejection of unsupported APIs. It rejects a symlinked source checkout so the test exercises the distributable package. CI builds and installs this tarball automatically.
+
 ## Reproducibility and evidence
 
 Prisma CLI, client and MSSQL adapter are exactly `7.10.0`; `mssql` is exactly `12.2.0`. The committed lockfile fixes the remaining dependency graph. The report also records the adapter's resolved `tedious` version and generated-client version.
@@ -42,7 +50,8 @@ Results are written under `results/` and uploaded by CI even when probes fail:
 - `runner-report.json`: setup steps and database cleanup outcome.
 - `image.json`: image identity, digest and architecture from the actual container.
 - `sqlserver.log`: server diagnostic log from CI.
+- `library/report.json` and `library/runner-report.json`: packed-library outcomes and isolated database cleanup.
 
 `MSSQL_REPORT_PATH` can choose a different probe report path; the runner report is written beside it. Keep the image digest with results when reproducing a run because a tag alone is not immutable.
 
-These probes use an administrative test account. They do not validate the library's actor/tenant policies, its public API, least-privilege production deployment, MSSQL query/retention APIs, or every SQL Server 2025 build. Those remain separate implementation and release checks.
+These probes use an administrative test account. They do not validate least-privilege production deployment or every SQL Server 2025 build. MSSQL query, automatic tracking and retention APIs remain unsupported and are checked for explicit rejection.

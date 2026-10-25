@@ -7,6 +7,7 @@ import {
 } from '../interfaces/audit-entry.interface';
 import { AuditLogModuleOptions } from '../interfaces/audit-log-options.interface';
 import { PrismaModuleLike } from '../prisma/prisma-namespace';
+import { AuditDatabaseProvider, assertPostgresProvider, resolveAuditProvider } from '../sql/provider';
 import {
   decodeAuditCursor,
   encodeAuditCursor,
@@ -24,14 +25,17 @@ const EMPTY_SCAN_CHECKPOINT = encodeAuditCursor(
 
 /** @internal */
 export class AuditScanService {
+  private readonly provider: AuditDatabaseProvider;
   constructor(
     private readonly options: AuditLogModuleOptions,
     private readonly Prisma: PrismaModuleLike['Prisma'],
     private readonly tableRef: unknown | null,
-  ) {}
+  ) {
+    this.provider = resolveAuditProvider(options.provider);
+  }
 
   scan(options: AuditScanOptions): AsyncIterable<AuditScanPage> {
-    this.validateScanOptions(options);
+    if (this.provider === 'postgresql') this.validateScanOptions(options);
     return this.scanPages(options);
   }
 
@@ -41,11 +45,13 @@ export class AuditScanService {
       scanOptions,
     ) => this.scan(scanOptions),
   ): Readable {
-    this.validateScanOptions(options);
-    if (options.columns !== undefined && options.columns !== 'v1') {
-      throw new TypeError(
-        '[@nestarc/audit-log] CSV columns must be the supported version v1.',
-      );
+    if (this.provider === 'postgresql') {
+      this.validateScanOptions(options);
+      if (options.columns !== undefined && options.columns !== 'v1') {
+        throw new TypeError(
+          '[@nestarc/audit-log] CSV columns must be the supported version v1.',
+        );
+      }
     }
     return Readable.from(this.csvChunks(options, scan), { objectMode: false });
   }
@@ -53,6 +59,7 @@ export class AuditScanService {
   private async *scanPages(
     options: AuditScanOptions,
   ): AsyncGenerator<AuditScanPage> {
+    assertPostgresProvider(this.provider, 'AuditService.scan');
     this.throwIfAborted(options.signal);
     const baseConditions = this.buildScanConditions(options);
     const highWatermark = await this.resolveScanHighWatermark(
@@ -132,6 +139,7 @@ export class AuditScanService {
     options: AuditCsvOptions,
     scan: (options: AuditScanOptions) => AsyncIterable<AuditScanPage>,
   ): AsyncGenerator<string> {
+    assertPostgresProvider(this.provider, 'AuditService.exportCsv');
     this.throwIfAborted(options.signal);
     if (options.includeBom) yield '\uFEFF';
     yield serializeAuditCsvHeader();

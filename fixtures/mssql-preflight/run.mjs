@@ -8,6 +8,7 @@ import sql from 'mssql';
 
 const fixtureRoot = path.dirname(fileURLToPath(import.meta.url));
 const database = `audit_preflight_${randomUUID().replaceAll('-', '')}`;
+const probe = process.env.MSSQL_PROBE || 'probe.mjs';
 const probeReportPath = path.resolve(
   fixtureRoot,
   process.env.MSSQL_REPORT_PATH || 'results/report.json',
@@ -20,6 +21,7 @@ const report = {
   status: 'running',
   client: { platform: process.platform, architecture: process.arch, node: process.version },
   database,
+  probe,
   steps: [],
   cleanup: { status: 'not-created' },
 };
@@ -157,6 +159,7 @@ try {
   await mkdir(path.dirname(probeReportPath), { recursive: true });
   // A setup failure must never leave a previous run's successful probe as evidence.
   await rm(probeReportPath, { force: true });
+  if (!['probe.mjs', 'library-probe.mjs'].includes(probe)) throw failure('MSSQL_PROBE_INVALID');
   const configuration = readConfiguration();
   const databaseUrl = `sqlserver://${configuration.server}:${configuration.port};database=${database};schema=dbo;user={${configuration.user}};password={${configuration.password}};encrypt=true;trustServerCertificate=true`;
   secrets = [configuration.password, encodeURIComponent(configuration.password), databaseUrl];
@@ -194,7 +197,7 @@ try {
     [prismaCli, 'db', 'push', '--config', 'prisma.config.ts'], environment, 120_000,
   ));
   await step('run-real-database-probes', () => runChild(
-    ['--import', 'tsx', 'probe.mjs'], environment, 180_000,
+    ['--import', 'tsx', probe], environment, 180_000,
   ));
   report.status = 'passed';
 } catch (error) {

@@ -18,7 +18,8 @@ import { snapshotAuditActor } from '../utils/actor';
 import { reportAuditError } from '../prisma/audit-extension/audit-errors';
 import { resolvePrismaNamespace } from '../prisma/prisma-namespace';
 import { getSensitiveFieldsFor, redactObject } from '../prisma/diff';
-import { validateAuditTableName } from '../sql/table-name';
+import { getSqlServerTableName, validateAuditTableName } from '../sql/table-name';
+import { AuditDatabaseProvider, resolveAuditProvider } from '../sql/provider';
 import { AuditMaintenanceService } from './audit-maintenance.service';
 import { AuditQueryService } from './audit-query.service';
 import { AuditScanService } from './audit-scan.service';
@@ -47,6 +48,7 @@ export interface AuditPruneResult {
 
 @Injectable()
 export class AuditService {
+  private readonly provider: AuditDatabaseProvider;
   private readonly Prisma: ReturnType<typeof resolvePrismaNamespace>;
   private readonly tableName: string;
   private readonly tableRef: unknown | null;
@@ -58,12 +60,14 @@ export class AuditService {
     @Inject(AUDIT_LOG_OPTIONS)
     private readonly options: AuditLogModuleOptions,
   ) {
+    this.provider = resolveAuditProvider(options.provider);
     this.Prisma = resolvePrismaNamespace({
       prismaModule: options.prismaModule,
     });
     this.tableName = validateAuditTableName(options.tableName);
-    this.tableRef =
-      this.tableName === 'audit_logs' ? null : this.Prisma.raw!(this.tableName);
+    this.tableRef = this.provider === 'sqlserver'
+      ? this.Prisma.raw!(getSqlServerTableName(options.tableName).quoted)
+      : this.tableName === 'audit_logs' ? null : this.Prisma.raw!(this.tableName);
     this.queryService = new AuditQueryService(
       options,
       this.Prisma,
@@ -134,6 +138,26 @@ export class AuditService {
       : null;
 
     const Prisma = this.Prisma;
+    if (this.provider === 'sqlserver') {
+      await client.$executeRaw(Prisma.sql!`
+        INSERT INTO ${this.tableRef}
+          ([tenant_id], [actor_id], [actor_type], [actor_ip], [action],
+           [target_type], [target_id], [source], [metadata], [result])
+        VALUES (
+          ${tenantId},
+          ${actor?.id ?? null},
+          ${actor?.type ?? 'system'},
+          ${actor?.ip ?? null},
+          ${input.action},
+          ${input.targetType ?? null},
+          ${input.targetId ?? null},
+          ${'manual'},
+          ${metadataJson},
+          ${input.result ?? 'success'}
+        )
+      `);
+      return;
+    }
     const insertSql = this.tableRef
       ? Prisma.sql!`
       INSERT INTO ${this.tableRef}
