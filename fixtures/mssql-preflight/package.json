@@ -1,0 +1,25 @@
+{
+  "name": "@nestarc/audit-log-mssql-preflight",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Real SQL Server 2025 and Prisma 7.10.0 feasibility probes before audit-log implementation",
+  "engines": {
+    "node": "^24.0.0"
+  },
+  "scripts": {
+    "test": "node run.mjs",
+    "generate": "prisma generate",
+    "probe": "node --import tsx probe.mjs"
+  },
+  "dependencies": {
+    "@prisma/adapter-mssql": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "mssql": "12.2.0"
+  },
+  "devDependencies": {
+    "prisma": "7.10.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

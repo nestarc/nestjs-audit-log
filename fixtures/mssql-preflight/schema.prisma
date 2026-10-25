@@ -1,0 +1,16 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "./generated/client"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "sqlserver"
+}
+
+model ProbeBusiness {
+  id     String @id @db.NVarChar(80)
+  marker String @db.NVarChar(200)
+
+  @@map("probe_business")
+}
