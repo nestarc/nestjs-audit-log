@@ -5,6 +5,11 @@ packed 0.7.1 artifacts with the published 0.7.0 baseline. See [CHANGELOG](../CHA
 differences. The existing local source
 benchmark and recorded 2026-09-10 run remain below with their original commands and version context.
 
+New runs require Node 22.23.4+ in the 22.x line or 24.22.1+ in the 24.x line; performance CI is
+configured for 24.22.1 and the runtime security gate described in [maintaining](maintaining.md#prerequisites).
+The Node 24.11.1 measurements below retain their original provenance and numbers. They do not
+verify the security or performance of the patched runtime; report new executions separately.
+
 ## 0.7.1 performance checks
 
 Two performance suites use installed public package entry points and verify the resulting
@@ -100,8 +105,8 @@ Preserved evidence:
 The SQL Server large JSON value occupies 131,072 bytes, or 128 KiB, in `NVARCHAR` storage.
 It is not the same payload as PostgreSQL's approximately 64 KiB UTF-8 payload string.
 PostgreSQL runs on PostgreSQL 16 with the repository's locked Prisma 7 dependencies; SQL Server
-uses SQL Server 2025 CU10 and Prisma CLI, client, and MSSQL adapter 7.10.0. Both CI jobs use
-Linux x64 Ubuntu 24.04 and Node 24.11.1, but run on separate hosted machines. These workloads,
+uses SQL Server 2025 CU10 and Prisma CLI, client, and MSSQL adapter 7.10.0. The recorded CI executions
+used Linux x64 Ubuntu 24.04 and Node 24.11.1 on separate hosted machines. These workloads,
 payload definitions, drivers, and timing boundaries do not support a direct cross-database
 latency or throughput ranking.
 
@@ -147,7 +152,7 @@ report beside it. Its artifact also includes image identity and the correctness 
 
 ### Reproduce PostgreSQL locally
 
-Use Node 24, npm registry access, and Docker with the repository's disposable PostgreSQL test
+Use Node 24.22.1+ within the 24.x line, npm registry access, and Docker with the repository's disposable PostgreSQL test
 database. Run from the repository root after other tests have finished:
 
 ```sh
@@ -168,7 +173,7 @@ benchmark creates its own schema and business table; it does not require `prisma
 
 ### Reproduce SQL Server locally
 
-Use Node 24, npm registry access, and a disposable SQL Server 2025 instance. The supplied test
+Use Node 24.22.1+ within the 24.x line, npm registry access, and a disposable SQL Server 2025 instance. The supplied test
 account must be able to create, configure, and drop a database. The runner always chooses a new
 database name; do not adapt this benchmark to an application database. The CI workflow starts
 the Linux x64 CU10 container with a new random password and records the image digest. For a local

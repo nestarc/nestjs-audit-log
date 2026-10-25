@@ -7,6 +7,9 @@ actorRequired and defineAuditConfig were introduced in 0.7.0. Locally packed can
 from the registry artifact even when their versions match. Check the installed package source,
 declarations and [CHANGELOG](CHANGELOG.md) before choosing examples.
 
+Require Node 22.23.4+ within 22.x or 24.22.1+ within 24.x; see [runtime requirements](README.md#requirements).
+The package's engines metadata does not replace the host runtime or restart running applications.
+
 Version 0.7.1 supports explicit provider: 'sqlserver' for manual logging and flat-table DDL.
 The Quick Start uses PostgreSQL. SQL Server automatic tracking,
 queries, export, retention and partitions are unsupported; use the dedicated guide below.

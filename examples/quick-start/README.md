@@ -9,7 +9,10 @@ separately compiled `candidate` directory tests additional released adoption con
 
 ## Install version 0.7.1
 
-Requirements: Node.js 22.13+ in the 22.x line or Node.js 24.x, npm, and a disposable PostgreSQL database.
+Requirements: Node.js 22.23.4+ in the 22.x line or 24.22.1+ in the 24.x line, npm, and a disposable PostgreSQL database.
+Use a patched Node executable as described in the [runtime requirements](../../README.md#requirements).
+Updating this example's npm dependencies does not update the host runtime; rebuild deployment
+artifacts or images and restart application processes after upgrading Node.
 Copy this entire directory into your own workspace, including `prisma/migrations` and `.env.example`.
 You can download the repository source and copy just this directory; you do not need root dependencies
 or a library build. From the copied directory:

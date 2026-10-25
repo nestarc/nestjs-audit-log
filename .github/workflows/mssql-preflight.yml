@@ -16,6 +16,7 @@ on:
     branches: [main]
     paths:
       - fixtures/mssql-preflight/**
+      - scripts/verify-node-security.cjs
       - .github/workflows/mssql-preflight.yml
       - src/**
       - test/**
@@ -26,6 +27,7 @@ on:
     branches: [main]
     paths:
       - fixtures/mssql-preflight/**
+      - scripts/verify-node-security.cjs
       - .github/workflows/mssql-preflight.yml
       - src/**
       - test/**
@@ -57,9 +59,14 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '24.11.1'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: fixtures/mssql-preflight/package-lock.json
+
+      - name: Verify patched Node runtime and Brotli decoding
+        timeout-minutes: 1
+        working-directory: .
+        run: node scripts/verify-node-security.cjs
 
       - name: Start disposable SQL Server with an ephemeral password
         run: |

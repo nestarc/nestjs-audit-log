@@ -33,12 +33,25 @@ substituted only as an explicitly supplied packed tarball.
 
 ### Prerequisites
 
-- Node.js 22.13+ within the 22.x line, or Node.js 24.x
+- Node.js 22.23.4+ within the 22.x line, or 24.22.1+ within the 24.x line
 - Docker (for E2E tests)
+
+CI pins Node 22.23.4 and 24.22.1 for its supported runtime lanes; release, MSSQL, and performance
+jobs use 24.22.1. The runtime gate `node scripts/verify-node-security.cjs` checks the version floor,
+rejection of the upstream CVE-2026-111497 malformed block-switch input through synchronous,
+asynchronous, and fragmented Brotli decoding, and a valid Unicode Brotli round trip.
+Workflow configuration describes the checks to execute; record their actual results for the
+tested commit in the release or PR.
+
+The version floor follows the [Node.js security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+Package metadata does not upgrade a host or an already-running process. Update Node in development
+and deployment environments, rebuild deployment artifacts or images, and restart workloads on the
+patched runtime; changing npm dependencies alone is insufficient.
 
 ### Setup
 
 ```bash
+node scripts/verify-node-security.cjs
 npm ci
 npm run build
 ```
@@ -75,6 +88,9 @@ and module configuration in the [SQL Server guide](sql-server.md).
 ### Run tests
 
 ```bash
+# Runtime version and Brotli regression checks
+node scripts/verify-node-security.cjs
+
 # Static quality gates
 npm run lint
 npm run typecheck
@@ -136,7 +152,8 @@ it does not establish that the registry artifact exists.
    expectations together. The files inside the npm tarball must describe the target version's
    installation and APIs without candidate-only or local-pack-only instructions. Updating the
    repository after publication does not change an existing registry tarball.
-2. Verify that exact commit with the full CI matrix, packed documentation consumer, published and
+2. Verify the patched runtime with `node scripts/verify-node-security.cjs`, then verify that exact
+   commit with the full CI matrix, packed documentation consumer, published and
    packed ecosystem suites, and MSSQL preflight. Inspect the actual package for declarations,
    linked guides, examples, and benchmark evidence. Run PostgreSQL regression and SQL Server
    manual logging performance checks; record the commit, runtime, database, workload, sample

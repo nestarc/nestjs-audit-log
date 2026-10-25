@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 Version 0.7.1 adds SQL Server manual audit logging. See the
 [release notes](docs/releases/0.7.1.md) for validation and support boundaries.
 
+### Security
+
+- Require Node.js 22.23.4+ within 22.x or 24.22.1+ within 24.x for the upstream
+  [CVE-2026-111497 Brotli decoder fix](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+  Pin CI runtimes and add a version/Brotli regression gate. Package installation does not upgrade
+  a running Node process; update deployment runtimes, rebuild artifacts or images, and restart applications.
+
 ### Added
 
 - Add explicit `provider: 'sqlserver'` for manual `AuditService.log(input, tx?)` and schema utilities.

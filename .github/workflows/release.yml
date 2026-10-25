@@ -42,11 +42,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: |
             package-lock.json
             fixtures/published-ecosystem/package-lock.json
+
+      - name: Verify patched Node runtime and Brotli decoding
+        timeout-minutes: 1
+        run: node scripts/verify-node-security.cjs
 
       - name: Install audit-log dependencies
         run: npm ci
@@ -91,9 +95,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: '24.22.1'
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      - name: Verify patched Node runtime and Brotli decoding
+        timeout-minutes: 1
+        run: node scripts/verify-node-security.cjs
 
       - name: Verify release ref
         run: |

@@ -13,7 +13,11 @@ Each expected SQL failure is checked for its intended cause as well as the final
 
 ## Run
 
-Use Node 24 and a disposable SQL Server 2025 test server. The bootstrap account needs permission to create and drop databases; the least-privilege smoke additionally creates and removes SQL logins and database users. The runner always generates a new `audit_preflight_<random>` database, applies only the fixture schema and removes that database in its cleanup path. It does not use a caller-provided database name. Abrupt termination of the runner itself can leave the generated database or smoke logins behind; their names are recorded in the reports.
+Use Node 24.22.1+ within the 24.x line and a disposable SQL Server 2025 test server. The bootstrap account needs permission to create and drop databases; the least-privilege smoke additionally creates and removes SQL logins and database users. The runner always generates a new `audit_preflight_<random>` database, applies only the fixture schema and removes that database in its cleanup path. It does not use a caller-provided database name. Abrupt termination of the runner itself can leave the generated database or smoke logins behind; their names are recorded in the reports.
+
+From the repository root, run `node scripts/verify-node-security.cjs` before the fixture. The gate
+checks the patched Node version and Brotli regression cases. Installing fixture dependencies does
+not update the Node executable used to run them.
 
 ```sh
 cd fixtures/mssql-preflight
@@ -54,7 +58,7 @@ Passwords are random per invocation and never saved in the reports. The child cl
 
 Prisma CLI, client and MSSQL adapter are exactly `7.10.0`; `mssql` is exactly `12.2.0`. The committed lockfile fixes the remaining dependency graph. The report also records the adapter's resolved `tedious` version and generated-client version.
 
-The dedicated [GitHub Actions workflow](../../.github/workflows/mssql-preflight.yml) uses Node `24.11.1`, an x64 Ubuntu 24.04 runner and `mcr.microsoft.com/mssql/server:2025-CU10-ubuntu-24.04`. It checks the pulled image architecture and records its actual digest. The server port is bound only to loopback. A random password is generated for each run and masked in CI logs; credentials are not committed to the repository. The container is removed after the run.
+The dedicated [GitHub Actions workflow](../../.github/workflows/mssql-preflight.yml) is configured for Node `24.22.1`, an x64 Ubuntu 24.04 runner and `mcr.microsoft.com/mssql/server:2025-CU10-ubuntu-24.04`. It runs the runtime security gate, checks the pulled image architecture and records its actual digest. The server port is bound only to loopback. A random password is generated for each run and masked in CI logs; credentials are not committed to the repository. The container is removed after the run. Existing reports retain the Node version used when they were collected.
 
 Results are written under `results/` and uploaded by CI even when probes fail:
 

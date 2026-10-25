@@ -47,7 +47,12 @@ audited client; see [tracking boundaries](docs/transactions.md).
 - An existing NestJS application using NestJS 10, 11, or 12.0.1+
 - Prisma 7 (primary), with Prisma 5/6 legacy peer compatibility
 - PostgreSQL
-- Node.js 22.13+ within the 22.x line, or Node.js 24.x
+- Node.js 22.23.4+ within the 22.x line, or 24.22.1+ within the 24.x line
+
+These minimum versions include the Node.js fix for CVE-2026-111497 in its bundled Brotli decoder.
+See the [October 2026 Node.js security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+Updating npm dependencies or the package's `engines` field does not replace the running Node
+binary. Update the deployment runtime, rebuild images or deployment artifacts, and restart processes.
 
 NestJS 12's core packages are ESM-only. This package remains CommonJS-compatible on the supported
 Node.js versions through Node's `require(esm)` interoperability. NestJS 12.0.0 is excluded because

@@ -12,7 +12,7 @@
     "smoke:candidate": "tsc -p tsconfig.candidate.json && node dist-candidate/candidate/adoption-smoke.js"
   },
   "engines": {
-    "node": "^22.13.0 || ^24.0.0"
+    "node": "^22.23.4 || ^24.22.1"
   },
   "dependencies": {
     "@nestarc/audit-log": "0.7.1",

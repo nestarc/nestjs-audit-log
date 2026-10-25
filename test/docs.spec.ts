@@ -396,12 +396,12 @@ describe('documentation gates', () => {
     const ci = read('.github/workflows/ci.yml');
     const release = read('.github/workflows/release.yml');
 
-    expect(packageJson.engines.node).toBe('^22.13.0 || ^24.0.0');
+    expect(packageJson.engines.node).toBe('^22.23.4 || ^24.22.1');
     expect(readme).toContain(
-      'Node.js 22.13+ within the 22.x line, or Node.js 24.x',
+      'Node.js 22.23.4+ within the 22.x line, or 24.22.1+ within the 24.x line',
     );
     expect(changelog).toContain('final Node.js 20-compatible release');
-    expect(ci).toContain("node-version: ['22.13', '24']");
+    expect(ci).toContain("node-version: ['22.23.4', '24.22.1']");
     expect(ci).not.toContain("node-version: '20.19'");
     expect(`${ci}\n${release}`).not.toMatch(
       /actions\/(?:checkout|setup-node)@v[1-6]\b/,
@@ -409,6 +409,30 @@ describe('documentation gates', () => {
     expect(`${ci}\n${release}`).toContain('actions/checkout@v7');
     expect(`${ci}\n${release}`).toContain('actions/setup-node@v7');
     expect(release).toContain('softprops/action-gh-release@v3');
+
+    const ownedManifests = ['package.json', 'examples/quick-start/package.json',
+      'fixtures/mssql-preflight/package.json', 'fixtures/published-ecosystem/package.json'];
+    for (const path of ownedManifests) {
+      const manifest = JSON.parse(read(path)) as { engines: { node: string } };
+      expect(manifest.engines.node).toBe(path.startsWith('fixtures/')
+        ? '^24.22.1' : '^22.23.4 || ^24.22.1');
+      const lockPath = path.replace('package.json', 'package-lock.json');
+      if (existsSync(join(root, lockPath))) {
+        const lock = JSON.parse(read(lockPath)) as { packages: Record<string, { engines: { node: string } }> };
+        expect(lock.packages[''].engines.node).toBe(manifest.engines.node);
+      }
+    }
+    for (const name of readdirSync(join(root, '.github/workflows')).filter(name => name.endsWith('.yml'))) {
+      const workflow = read(`.github/workflows/${name}`);
+      const setupCount = [...workflow.matchAll(/uses: actions\/setup-node@v7/g)].length;
+      const gateCount = [...workflow.matchAll(/run: node scripts\/verify-node-security\.cjs/g)].length;
+      expect(gateCount).toBe(setupCount);
+      for (const match of workflow.matchAll(/^\s+node-version:\s*(.+)$/gm)) {
+        expect(["'22.23.4'", "'24.22.1'", "['22.23.4', '24.22.1']", '${{ matrix.node-version }}'])
+          .toContain(match[1]);
+      }
+    }
+    expect(ci).not.toMatch(/matrix\.node-version\s*(?:==|!=)\s*'24'/);
   });
 
   it('documents v0.2.0 release notes in CHANGELOG', () => {
