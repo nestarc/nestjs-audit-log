@@ -1,13 +1,14 @@
 # Audit logging benchmark
 
-The published Quick Start uses `0.7.0`; the new checks below evaluate the unreleased `0.7.1`
-candidate. See [CHANGELOG](../CHANGELOG.md) for version differences. The existing local source
+Documents performance verification for version `0.7.1`. The recorded checks below compare
+packed 0.7.1 artifacts with the published 0.7.0 baseline. See [CHANGELOG](../CHANGELOG.md) for version
+differences. The existing local source
 benchmark and recorded 2026-09-10 run remain below with their original commands and version context.
 
-## 0.7.1 candidate performance checks
+## 0.7.1 performance checks
 
-The candidate adds two performance suites that use installed public package
-entry points and verify the resulting database rows. PostgreSQL compares published audit-log
+Two performance suites use installed public package entry points and verify the resulting
+database rows. PostgreSQL compares published audit-log
 0.7.0 with the packed 0.7.1 candidate. SQL Server measures the candidate's manual audit overhead
 against an otherwise equivalent business transaction without auditing.
 

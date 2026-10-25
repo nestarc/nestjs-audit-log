@@ -120,6 +120,12 @@ jobs:
           MSSQL_REPORT_PATH: results/library/report.json
         run: npm test
 
+      - name: Verify separate installer and least-privilege runtime identities
+        env:
+          MSSQL_PROBE: least-privilege-probe.mjs
+          MSSQL_REPORT_PATH: results/least-privilege/report.json
+        run: npm test
+
       - name: Measure manual audit transaction overhead
         if: inputs.run_benchmark == true
         env:

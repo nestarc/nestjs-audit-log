@@ -1,6 +1,6 @@
 # Actor context, decorators, and tenant scope
 
-Applies to the published `0.7.0` release. Start with the [README](../README.md);
+Documents version `0.7.1`. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## HTTP actor extraction

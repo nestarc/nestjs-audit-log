@@ -1,8 +1,8 @@
 # Maintaining and releasing audit-log
 
-Documents development and verification for published `0.7.0` and the unreleased `0.7.1` candidate.
+Documents development, verification, and publication procedures for version `0.7.1`.
 Start with the [README](../README.md); see [CHANGELOG](../CHANGELOG.md) for version changes.
-The [0.7.1 release notes](releases/0.7.1.md) track SQL Server support, validation, and remaining release checks.
+The [0.7.1 release notes](releases/0.7.1.md) describe SQL Server support, validation, and current limits.
 
 ## Published ecosystem release gate
 
@@ -45,7 +45,7 @@ npm run build
 
 ### Candidate documentation example
 
-The consumer Quick Start pins the published registry release `@nestarc/audit-log@0.7.0`.
+The consumer Quick Start pins the documented version `@nestarc/audit-log@0.7.1`.
 To exercise local changes instead of the registry artifact, build and pack explicitly in the repository:
 
 ```sh
@@ -65,11 +65,11 @@ npm run smoke:manual
 npm run smoke
 ```
 
-The filename reflects the 0.7.1 candidate manifest; it does not identify a published registry release.
+The filename reflects the 0.7.1 manifest; a local tarball is not proof of npm publication.
 Record integrity and origin when sharing evidence. Both the packed and
 registry consumer gates run the released 0.7.0 policy scenarios in addition to the basic smokes.
 The [adoption guide](adoption-guide.md) explains these contracts.
-This example uses PostgreSQL. For the candidate's manual SQL Server APIs, use the existing client
+This example uses PostgreSQL. For the manual SQL Server APIs, use the existing client
 and module configuration in the [SQL Server guide](sql-server.md).
 
 ### Run tests
@@ -93,7 +93,7 @@ npm run test:e2e:teardown
 # Packed README consumer (uses an isolated schema in the local audit_test database)
 npm run docker:up -- --wait --wait-timeout 60
 npm run test:docs:consumer
-# Same packaged example using the pinned registry release instead of the candidate
+# After the pinned version is available from npm, verify its registry artifact
 npm run test:docs:consumer -- --registry
 
 # Published ecosystem tuple and explicit packed candidates
@@ -114,8 +114,8 @@ then generates Prisma,
 applies schema setup, compiles, and runs the manual-only and HTTP/role/actor/redaction/rollback smoke tests.
 Both modes also compile/run the [0.7.0 adoption assertions](adoption-guide.md#adoption-assertions-070),
 including real audit INSERT fault injection in that isolated schema. CI and the pre-publish release
-workflow run the packed gate. The optional `--registry` mode installs the example manifest's exact
-published version and runs the same assertions; output
+workflow run the packed gate. After publication, the optional `--registry` mode installs the example
+manifest's exact version from npm and runs the same assertions; output
 records mode, version, resolved artifact and integrity. It uses only a
 local database named `audit_test` (default port `5433`), creates a unique schema, and removes its own
 schema and temporary project in teardown. It does not start or stop PostgreSQL for you.
@@ -124,23 +124,34 @@ The audit-log candidate mode installs exact `@nestarc/soft-delete@0.7.4` in its 
 consumer to satisfy audit-log 0.7's peer contract. The checked-in published tuple remains
 unchanged at soft-delete 0.7.3 and audit-log 0.5.0. Both modes require a valid full peer graph.
 
-## 0.7.1 candidate verification and publication
+## 0.7.1 verification and publication
 
-The 0.7.1 candidate keeps the existing soft-delete 0.7.4 peer range compatible while adding opt-in
-manual SQL Server logging. Keep the registry Quick Start on 0.7.0 until the new registry artifact
-is published and verified. Do not change the published ecosystem fixture as part of candidate preparation.
+Version 0.7.1 keeps the existing soft-delete 0.7.4 peer range compatible while adding opt-in manual
+SQL Server logging. Keep the checked-in published ecosystem fixture unchanged during release
+preparation. A versioned source document or dated changelog entry describes the target package;
+it does not establish that the registry artifact exists.
 
-Before publication, verify the candidate commit through the full CI matrix, packed documentation
-consumer, published and candidate ecosystem suites, and MSSQL preflight. Run performance checks
-for PostgreSQL regression and SQL Server manual logging, recording the commit, runtime, database,
-workload, sample count, latency, throughput, and raw result files. Review results in
-[benchmarks](benchmarks.md); a passing correctness probe alone is not a performance result.
-Record completed checks and remaining work in the [candidate release notes](releases/0.7.1.md).
-
-After publication, verify the actual registry artifact with strict peer installation and consumer
-smokes, then update the Quick Start pin, published-version prose, and release status together.
-Update a coordinated published ecosystem tuple in a separate PR with its lockfile and integrity
-evidence. Update and deploy the separate documentation site, then verify the public pages.
+1. Before creating a release tag, finalize the package and lockfile version, dated changelog entry,
+   README, usage guides, release notes, Quick Start dependency pin, and documentation-test
+   expectations together. The files inside the npm tarball must describe the target version's
+   installation and APIs without candidate-only or local-pack-only instructions. Updating the
+   repository after publication does not change an existing registry tarball.
+2. Verify that exact commit with the full CI matrix, packed documentation consumer, published and
+   packed ecosystem suites, and MSSQL preflight. Inspect the actual package for declarations,
+   linked guides, examples, and benchmark evidence. Run PostgreSQL regression and SQL Server
+   manual logging performance checks; record the commit, runtime, database, workload, sample
+   count, latency, throughput, and raw measurements in [benchmarks](benchmarks.md). Correctness
+   probes alone do not establish performance.
+3. Publish only after explicit authorization. Confirm the intended commit is on `main` and its
+   checks are successful, then create the matching `v<package-version>` tag. A tag triggers the
+   release workflow, whose PostgreSQL ecosystem and MSSQL gates must pass before the publishing
+   job runs. That job verifies the tag/version and main ancestry, reruns its validation, and
+   publishes to npm before creating the GitHub Release.
+4. After npm publication succeeds, run `npm run test:docs:consumer -- --registry` against the
+   example's exact version and verify its registry origin and integrity. Record the publication
+   outcome in the release or PR. Update a coordinated published ecosystem tuple in a separate
+   PR with its lockfile and integrity evidence. Update and deploy the separate documentation
+   site, then verify its public pages against the registry package.
 
 ## 0.7.0 publication and external documentation checklist
 

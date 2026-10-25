@@ -17,14 +17,16 @@ const guides = [
   'docs/export-and-streams.md',
   'docs/benchmarks.md',
   'docs/maintaining.md',
+  'docs/sql-server.md',
+  'docs/releases/0.7.1.md',
 ];
 const currentUsage = ['README.md', 'llms.txt', ...guides, 'examples/quick-start/README.md'];
 const packageFiles = (JSON.parse(read('package.json')) as { files: string[] }).files;
-// A development manifest may advance before the next package is published.
-// Registry verification separately checks the pinned release's artifact and integrity.
+// A dated changelog describes the version these files will accompany, not registry availability.
+// The --registry consumer check verifies publication separately after npm publish succeeds.
 const latestRelease = read('CHANGELOG.md').match(/^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}\r?$/m);
 if (!latestRelease) throw new Error('CHANGELOG must identify a dated release for the Quick Start.');
-const publishedVersion = latestRelease[1];
+const documentedVersion = latestRelease[1];
 
 function selectedForPackage(path: string): boolean {
   // npm includes the root README and license even when omitted from `files`.
@@ -106,19 +108,19 @@ describe('documentation gates', () => {
 
   it.each(currentUsage)('%s identifies its source version and links release differences', (path) => {
     const document = read(path);
-    expect(document).toContain(publishedVersion);
+    expect(document).toContain(documentedVersion);
     const hasChangelogLink = linkTargets(document).some((target) =>
       resolve(dirname(join(root, path)), target.split('#')[0]) === join(root, 'CHANGELOG.md'));
     expect(hasChangelogLink).toBe(true);
   });
 
-  it('aligns the registry adoption path with the current published release', () => {
+  it('aligns the installation examples with the documented package version', () => {
     const example = JSON.parse(read('examples/quick-start/package.json')) as {
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
     };
     const version = example.dependencies['@nestarc/audit-log'];
-    expect(version).toBe(publishedVersion);
+    expect(version).toBe(documentedVersion);
     const readme = read('README.md');
     expect(readme).toContain(`npm install --save-exact @nestarc/audit-log@${version}`);
     const quickStart = readme.split('## Quick Start')[1].split('## Read and write')[0];
@@ -338,8 +340,8 @@ describe('documentation gates', () => {
     expect(packageJson.version).toBe('0.7.1');
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages['']?.version).toBe(packageJson.version);
-    expect(changelog).toContain(`## [${packageJson.version}] - Unreleased`);
-    expect(publishedVersion).toBe('0.7.0');
+    expect(changelog).toContain(`## [${packageJson.version}] - 2026-10-25`);
+    expect(documentedVersion).toBe(packageJson.version);
     expect(changelog).toContain('## [0.7.0] - 2026-09-29');
     expect(changelog).toContain('## [0.6.0] - 2026-09-10');
     expect(read('docs/maintaining.md')).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);

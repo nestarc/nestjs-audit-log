@@ -5,11 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.7.1] - Unreleased
+## [0.7.1] - 2026-10-25
 
-The 0.7.1 candidate adds SQL Server manual audit logging. Published 0.7.0 remains the
-registry Quick Start version while release verification is in progress. See the
-[candidate release notes](docs/releases/0.7.1.md) for validation and support boundaries.
+Version 0.7.1 adds SQL Server manual audit logging. See the
+[release notes](docs/releases/0.7.1.md) for validation and support boundaries.
 
 ### Added
 

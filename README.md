@@ -9,17 +9,17 @@ Record who changed a Prisma model, what changed, and when in a NestJS applicatio
 before/after diffs and manual business events in an append-only PostgreSQL audit trail, then query,
 export, or deliver the records to an external service.
 
-The Quick Start uses **published `@nestarc/audit-log@0.7.0`**, released on 2026-09-29.
-This release includes `actorRequired`, `defineAuditConfig()`, and guards for unsupported returning
+This README documents **`@nestarc/audit-log@0.7.1`**. The Quick Start pins that version.
+It includes `actorRequired`, `defineAuditConfig()`, and guards for unsupported returning
 bulk operations. See [CHANGELOG](CHANGELOG.md) and the
 [0.6 to 0.7 migration guide](docs/transactions.md#migrating-from-06-to-07).
 Maintainers can also verify a [locally packed candidate](docs/maintaining.md#candidate-documentation-example);
 verify its source and integrity separately from the registry artifact even when the version matches.
 
-**0.7.1 candidate, unreleased:** the current source also supports
+Version 0.7.1 also supports
 [SQL Server manual audit logging](docs/sql-server.md) with explicit `provider: 'sqlserver'`,
-same-transaction events, and SQL Server DDL. See the [candidate release notes](docs/releases/0.7.1.md)
-for validation and current limits. This support is not in published 0.7.0. The Quick Start and
+same-transaction events, and SQL Server DDL. See the [0.7.1 release notes](docs/releases/0.7.1.md)
+for validation and current limits. This support is not in 0.7.0. The Quick Start and
 automatic tracking examples below remain PostgreSQL-specific.
 
 Start with [a manual business event or one tracked model](docs/adoption-guide.md) in an existing app.
@@ -68,10 +68,10 @@ The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that m
 
 ### 1. Install and generate Prisma
 
-In your existing NestJS application, install the verified release and Prisma 7 runtime dependencies:
+In your existing NestJS application, install version 0.7.1 and Prisma 7 runtime dependencies:
 
 ```bash
-npm install --save-exact @nestarc/audit-log@0.7.0
+npm install --save-exact @nestarc/audit-log@0.7.1
 npm install @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
 npm install --save-dev prisma@7
 ```
@@ -350,11 +350,11 @@ and [export guarantees](docs/export-and-streams.md).
 | Understand transactions, bulk operations, soft-delete, and the v0.5 migration | [Tracking contracts](docs/transactions.md) |
 | Set actors, reasons, correlation metadata, and tenant scope | [Context and tenancy](docs/context-and-tenancy.md) |
 | Create tables, manage partitions, prune, and configure privileges | [Storage and retention](docs/storage-and-retention.md) |
-| Use 0.7.1 candidate SQL Server manual events and table installation | [SQL Server guide](docs/sql-server.md) |
+| Use SQL Server manual events and table installation | [SQL Server guide](docs/sql-server.md) |
 | Export CSV or deliver logs to HTTP, object storage, Datadog, or Splunk | [Export and streams](docs/export-and-streams.md) |
 | Use the package from an AI-assisted workflow | [Agent guide](docs/agent-guide.md) |
 | Check release changes | [CHANGELOG](CHANGELOG.md) |
-| Review the 0.7.1 candidate and remaining release checks | [Candidate release notes](docs/releases/0.7.1.md) |
+| Review 0.7.1 changes, validation, and support limits | [0.7.1 release notes](docs/releases/0.7.1.md) |
 
 AI agents can start with [the agent guide](docs/agent-guide.md), [llms.txt](llms.txt), the runnable example,
 and the public TypeScript exports

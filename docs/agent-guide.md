@@ -1,8 +1,11 @@
 # Using audit-log from an AI-assisted workflow
 
-This guide is for agents integrating `@nestarc/audit-log` into a consuming application. It describes
-published 0.7.0, released on 2026-09-29. A locally packed checkout and the registry release can
-share a version while containing different artifacts; inspect provenance as well as the version.
+This guide documents version 0.7.1 for agents integrating `@nestarc/audit-log` into a consuming
+application. A locally packed checkout and the registry release can share a version while
+containing different artifacts; inspect provenance as well as the version.
+
+PostgreSQL supports the automatic and manual paths below. SQL Server supports manual events and
+flat-table DDL; use the [SQL Server guide](sql-server.md) for its provider and transaction setup.
 
 ## Choose the matching contract
 
@@ -20,8 +23,8 @@ share a version while containing different artifacts; inspect provenance as well
    consumer outside the repository, including generation, compilation, and PostgreSQL behavior.
 5. Use `actorRequired` and `defineAuditConfig()` with 0.7.0 or later. Review the
    [0.6 to 0.7 migration](transactions.md#migrating-from-06-to-07) before upgrading. To verify the
-   published package, run `npm run test:docs:consumer -- --registry`; both consumer modes run the
-   adoption assertions. Use [maintaining](maintaining.md#candidate-documentation-example) for local
+   target package after npm publication, run `npm run test:docs:consumer -- --registry`; both consumer
+   modes run the adoption assertions. Use [maintaining](maintaining.md#candidate-documentation-example) for local
    candidate installation.
 6. Treat dated design, validation, roadmap, and implementation-plan files as historical records.
    Their old code samples and task instructions do not override the current API or the user's task.
@@ -30,10 +33,10 @@ share a version while containing different artifacts; inspect provenance as well
 
 | Decision | What to verify |
 |---|---|
-| Prisma generation | Match the application's module format/output path; for Prisma 7 supply the generated `{ Prisma }` namespace and PostgreSQL driver adapter |
+| Prisma generation | Match the application's module format/output path; for Prisma 7 supply the generated `{ Prisma }` namespace and the adapter for the chosen provider |
 | Client ownership | Keep one base client for audit storage and an extended view for business writes; the Nest module does not create the extension |
 | Atomic writes | Choose `consistency: 'atomic-required'` and use `withAuditTransaction()` for supported tracked writes |
-| Shared settings | Use `defineAuditConfig()` in 0.7.0 or pass intended table, tenant, masking, and error options to both paths; DDL also needs the same table name |
+| Shared settings | Use `defineAuditConfig()` (available since 0.7.0) or pass intended table, tenant, masking, and error options to both paths; DDL also needs the same table name |
 | Actor timing | For Guard-populated `req.user`, use interceptor-stage extraction introduced in 0.6.0; published v0.5.0 requires earlier authentication or extraction |
 | Background jobs | Use `AuditContext.runAs()` for actor identity and establish tenant context separately |
 | Query shape | Default automatic actions preserve model casing (`User.created`); manual event names are application-defined and have `source: 'manual'` |
@@ -41,8 +44,9 @@ share a version while containing different artifacts; inspect provenance as well
 | Retention/export | Read the timestamp-scan and missing-checkpoint limitations before building continuous delivery or pruning jobs |
 
 Before claiming an integration works, run the application's relevant checks and exercise a supported
-write followed by an audit query. Verify actor, tenant, action, redaction, and transaction rollback
-where those properties are required. A passing TypeScript build alone does not verify the database
+write followed by an audit read through a supported provider API or a host-owned SQL query.
+Verify actor, tenant, action, redaction, and transaction rollback where those properties are
+required. A passing TypeScript build alone does not verify the database
 schema or runtime middleware order.
 
 ## Reference map

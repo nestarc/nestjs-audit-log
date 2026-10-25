@@ -55,7 +55,10 @@ async function main() {
       'candidate/adoption-smoke.ts', 'tsconfig.candidate.json',
       'src/main.ts', 'src/setup.ts', 'src/smoke.ts', 'src/audit-options.ts', 'src/manual-role.ts', 'src/manual-smoke.ts'];
     for (const expected of ['README.md', 'llms.txt', 'dist/index.js', 'dist/index.d.ts',
-      'docs/benchmarks/2026-09-10-local.json',
+      'docs/benchmarks/2026-09-10-local.json', 'docs/releases/0.7.1.md',
+      ...['postgresql-run-1.json', 'postgresql-run-2.json', 'postgresql-run-3.json',
+        'sqlserver.json', 'sqlserver-runner.json', 'sqlserver-image.json', 'sqlserver-container.json', 'provenance.json']
+        .map(name => `docs/benchmarks/2026-10-25-release-0.7.1/${name}`),
       ...guides.map(name => `docs/${name}.md`),
       ...exampleFiles.map(name => `examples/quick-start/${name}`)]) {
       assert.ok(pack.files.some(file => file.path === expected), `Missing published file: ${expected}`);
