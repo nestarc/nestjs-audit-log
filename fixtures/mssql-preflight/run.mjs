@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sql from 'mssql';
@@ -154,6 +154,9 @@ async function verifyPackages() {
 }
 
 try {
+  await mkdir(path.dirname(probeReportPath), { recursive: true });
+  // A setup failure must never leave a previous run's successful probe as evidence.
+  await rm(probeReportPath, { force: true });
   const configuration = readConfiguration();
   const databaseUrl = `sqlserver://${configuration.server}:${configuration.port};database=${database};schema=dbo;user={${configuration.user}};password={${configuration.password}};encrypt=true;trustServerCertificate=true`;
   secrets = [configuration.password, encodeURIComponent(configuration.password), databaseUrl];
@@ -167,7 +170,6 @@ try {
     DATABASE_URL: databaseUrl,
   };
   const prismaCli = path.join(fixtureRoot, 'node_modules/prisma/build/index.js');
-  await mkdir(path.dirname(probeReportPath), { recursive: true });
   await step('verify-exact-prisma-packages', verifyPackages);
   await step('generate-client', () => runChild(
     [prismaCli, 'generate', '--config', 'prisma.config.ts'], environment, 60_000,
