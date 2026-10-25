@@ -1,7 +1,134 @@
 # Audit logging benchmark
 
-These instructions apply to the `0.7.0` release checkout; see [CHANGELOG](../CHANGELOG.md) for version differences.
-The recorded run below predates 0.7.0 and retains its original version context.
+The published Quick Start uses `0.7.0`; the new checks below evaluate the unreleased `0.7.1`
+candidate. See [CHANGELOG](../CHANGELOG.md) for version differences. The existing local source
+benchmark and recorded 2026-09-10 run remain below with their original commands and version context.
+
+## 0.7.1 candidate performance checks
+
+**Results pending.** The candidate adds two performance suites that use installed public package
+entry points and verify the resulting database rows. PostgreSQL compares published audit-log
+0.7.0 with the packed 0.7.1 candidate. SQL Server measures the candidate's manual audit overhead
+against an otherwise equivalent business transaction without auditing.
+
+| Suite | Workloads | Payloads and concurrency |
+|---|---|---|
+| PostgreSQL manual | One `User.create()` transaction without audit, with published 0.7.0 manual logging, or with candidate 0.7.1 manual logging | Small metadata and a metadata payload string of at least 65,536 UTF-8 bytes, approximately 64 KiB; concurrency 1 and 4 |
+| PostgreSQL automatic | Published 0.7.0 versus candidate 0.7.1, one create, update, or delete per `atomic-required` transaction | The same small business rows; concurrency 1 |
+| SQL Server manual | One `ProbeBusiness.create()` transaction without audit versus the same transaction with candidate `AuditService.log(input, tx)` | Complete redacted metadata JSON of 128 or 65,536 UTF-16 code units; concurrency 1 and 4 |
+
+The SQL Server large JSON value occupies 131,072 bytes, or 128 KiB, in `NVARCHAR` storage.
+It is not the same payload as PostgreSQL's approximately 64 KiB UTF-8 payload string.
+PostgreSQL runs on PostgreSQL 16 with the repository's locked Prisma 7 dependencies; SQL Server
+uses SQL Server 2025 CU10 and Prisma CLI, client, and MSSQL adapter 7.10.0. Both CI jobs use
+Linux x64 Ubuntu 24.04 and Node 24.11.1, but run on separate hosted machines. These workloads,
+payload definitions, drivers, and timing boundaries do not support a direct cross-database
+latency or throughput ranking.
+
+### Sampling and correctness
+
+Each block uses 50 warmup transactions followed by 500 measured transactions, across four
+repeats. The 500 samples are the block's total across its workers, not a per-worker count.
+Both suites use a pool maximum of four connections. PostgreSQL runs the unaudited manual
+control first, then alternates the baseline/candidate order `AB, BA, AB, BA` across repeats.
+SQL Server uses transaction/manual-audit pair order `AB, BA, BA, AB`.
+
+PostgreSQL per-operation latency includes actor context setup, pool acquisition, the business
+write, audit work when enabled, and transaction commit. SQL Server starts its latency timer
+inside the actor context and includes transaction acquisition, the business write, audit-call
+input construction, policy checks, redaction, serialization, INSERT, and commit. Fixture and
+metadata preparation, DDL, verification queries, and cleanup are outside both latency timers.
+Throughput uses measured worker-batch wall time, including worker scheduling and actor context,
+rather than the sum of individual latencies.
+
+Reports preserve every measured latency and each repeat's mean, P50, P95, P99, and operations
+per second. Row checks verify business outcomes, expected audit counts and actions, and
+metadata/redaction where applicable. Missing or incorrect audit rows fail a run. PostgreSQL
+uses a unique schema and removes it after disconnecting; the SQL Server runner creates and
+removes a fresh disposable database. Both report cleanup outcomes. Preserve the package
+version and artifact integrity, Git revision, runtime and database versions, workload settings,
+raw measurements, and cleanup result with any published figures.
+
+### Run through GitHub Actions
+
+The `Database performance` workflow in `.github/workflows/performance.yml` runs on matching
+benchmark or workflow changes in a pull request targeting `main`, and supports manual dispatch
+when the workflow is available. A branch push alone does not trigger it. The workflow installs
+dependencies, generates the PostgreSQL client, packs the candidate, and runs both suites.
+Its SQL Server job reuses MSSQL preflight with `run_benchmark: true`, so driver and packed-library
+correctness probes run before measurement. The standalone `MSSQL preflight` workflow also accepts
+that boolean input for a manual run.
+
+Download both jobs' artifacts. PostgreSQL writes package provenance to
+`benchmarks/results/package-evidence.json` and measurements to
+`benchmarks/results/postgresql-manual-regression.json`. SQL Server writes measurements to
+`fixtures/mssql-preflight/results/benchmark/report.json`, with the runner's setup and cleanup
+report beside it. Its artifact also includes image identity and the correctness probe reports.
+
+### Reproduce PostgreSQL locally
+
+Use Node 24, npm registry access, and Docker with the repository's disposable PostgreSQL test
+database. Run from the repository root after other tests have finished:
+
+```sh
+npm ci
+npm run docker:up -- --wait --wait-timeout 60
+DATABASE_URL=postgresql://test:test@localhost:5433/audit_test npx prisma generate
+BENCH_WARMUP=50 BENCH_ITERATIONS=500 BENCH_REPEATS=4 \
+  DATABASE_URL=postgresql://test:test@localhost:5433/audit_test npm run bench:regression
+npm run docker:down
+```
+
+Run teardown even after a failure, once no other test is using the database. The wrapper accepts
+only the dedicated localhost `test:test` database `audit_test` on port 5432 or 5433. It installs
+exact published 0.7.0 and the candidate tarball into separate temporary consumers with strict
+peers, verifies registry/tarball integrity, and supplies both installed package paths to the
+benchmark. It builds the candidate automatically and removes those consumers afterward. The
+benchmark creates its own schema and business table; it does not require `prisma db push`.
+
+### Reproduce SQL Server locally
+
+Use Node 24, npm registry access, and a disposable SQL Server 2025 instance. The supplied test
+account must be able to create, configure, and drop a database. The runner always chooses a new
+database name; do not adapt this benchmark to an application database. The CI workflow starts
+the Linux x64 CU10 container with a new random password and records the image digest. For a local
+run, provide the password of your already-running test server without committing it:
+
+```sh
+npm ci
+npm run build
+npm pack --pack-destination /tmp
+cd fixtures/mssql-preflight
+npm ci --no-audit --no-fund
+npm install --no-save --package-lock=false --no-audit --no-fund /tmp/nestarc-audit-log-0.7.1.tgz
+export MSSQL_HOST=127.0.0.1 MSSQL_PORT=1433 MSSQL_USER=sa
+read -rs MSSQL_PASSWORD
+export MSSQL_PASSWORD
+MSSQL_PROBE=manual-benchmark.mjs MSSQL_REPORT_PATH=results/benchmark/report.json \
+  BENCH_WARMUP=50 BENCH_ITERATIONS=500 BENCH_REPEATS=4 npm test
+```
+
+The runner generates the exact 7.10.0 Prisma client, applies its fixture schema, and removes its
+disposable database in cleanup. Stop a locally provisioned SQL Server container separately after
+the run. Check both the benchmark and runner reports before accepting a result; an interrupted
+process can prevent cleanup from finishing.
+
+### Interpret candidate results
+
+There is no universal latency or throughput threshold in these scripts. A successful result
+means the workload completed with valid audit evidence and cleanup; it does not establish a
+production service level or statistical significance. Compare paired baseline and candidate
+observations within each suite, retain all repeats, and investigate changes rather than selecting
+the fastest run. Candidate PostgreSQL changes should be assessed against published 0.7.0;
+SQL Server deltas describe the added cost of manual auditing in that workload.
+
+The workloads use closed-loop workers at fixed concurrency. They do not measure maximum server
+capacity, remote database latency, long transactions, bulk writes, or production read/index
+workloads. Audit rows accumulate, caches warm, and hosted-runner scheduling and database growth
+can shift timings despite balanced ordering. P99 at 500 samples depends on about five tail
+observations. Keep these limits alongside any eventual performance figures.
+
+## Existing local source benchmark
 
 This benchmark measures sequential `User.create()`, `User.update()`, and `User.delete()` latency using the current local package sources. It measures four modes independently:
 

@@ -282,7 +282,7 @@ async function verifyScenario(records, metadata, scenarioActor, mode) {
   const expectedIds = records.map(record => record.id).sort();
   assert.deepEqual(business.map(row => row.id).sort(), expectedIds, 'Business rows match every warmup and measured operation');
   const audit = await prisma.$queryRaw(Prisma.sql`
-    SELECT [target_id], [action], [source], [result], [actor_type], [tenant_id],
+    SELECT [target_id], [target_type], [action], [source], [result], [actor_type], [actor_ip], [tenant_id],
            DATALENGTH([metadata]) AS [metadata_bytes]
     FROM ${Prisma.raw(`[dbo].${identifier(tableName)}`)} WHERE [actor_id] = ${scenarioActor.id}
   `);
@@ -291,9 +291,11 @@ async function verifyScenario(records, metadata, scenarioActor, mode) {
     assert.deepEqual(audit.map(row => row.target_id).sort(), expectedIds, 'Every business row has exactly one matching audit row');
     for (const row of audit) {
       assert.equal(row.action, 'ProbeBusiness.created');
+      assert.equal(row.target_type, 'ProbeBusiness');
       assert.equal(row.source, 'manual');
       assert.equal(row.result, 'success');
       assert.equal(row.actor_type, scenarioActor.type);
+      assert.equal(row.actor_ip, scenarioActor.ip);
       assert.equal(row.tenant_id, tenantId);
       assert.equal(Number(row.metadata_bytes), metadata.nvarcharBytes, 'Every metadata value has its full expected Unicode byte length');
     }

@@ -92,7 +92,11 @@ jobs:
         run: |
           mkdir -p results
           image_id=$(docker inspect --format '{{.Image}}' "$SQLSERVER_CONTAINER_ID")
-          docker inspect --format '{"memoryLimitBytes":{{json .HostConfig.Memory}},"nanoCpuLimit":{{json .HostConfig.NanoCpus}},"storageOptions":{{json .HostConfig.StorageOpt}}}' "$SQLSERVER_CONTAINER_ID" > results/container-resources.json
+          docker inspect --format '{{json .HostConfig}}' "$SQLSERVER_CONTAINER_ID" | node --input-type=module -e '
+            import fs from "node:fs";
+            const host = JSON.parse(fs.readFileSync(0, "utf8"));
+            console.log(JSON.stringify({ memoryLimitBytes: host.Memory ?? null, nanoCpuLimit: host.NanoCpus ?? null, storageOptions: host.StorageOpt ?? null }));
+          ' > results/container-resources.json
           docker image inspect "$image_id" --format '{"id":{{json .Id}},"os":{{json .Os}},"architecture":{{json .Architecture}},"repoDigests":{{json .RepoDigests}}}' > results/image.json
           node --input-type=module -e '
             import fs from "node:fs";
