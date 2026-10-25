@@ -16,6 +16,10 @@ bulk operations. See [CHANGELOG](CHANGELOG.md) and the
 Maintainers can also verify a [locally packed candidate](docs/maintaining.md#candidate-documentation-example);
 verify its source and integrity separately from the registry artifact even when the version matches.
 
+**Unreleased:** the current source also supports [SQL Server manual audit logging](docs/sql-server.md)
+with explicit `provider: 'sqlserver'`, same-transaction events, and SQL Server DDL. This support is
+not in published 0.7.0. The Quick Start and automatic tracking examples below remain PostgreSQL-specific.
+
 Start with [a manual business event or one tracked model](docs/adoption-guide.md) in an existing app.
 The guide follows a role change through actor/tenant attribution and an authorized history query.
 
@@ -344,6 +348,7 @@ and [export guarantees](docs/export-and-streams.md).
 | Understand transactions, bulk operations, soft-delete, and the v0.5 migration | [Tracking contracts](docs/transactions.md) |
 | Set actors, reasons, correlation metadata, and tenant scope | [Context and tenancy](docs/context-and-tenancy.md) |
 | Create tables, manage partitions, prune, and configure privileges | [Storage and retention](docs/storage-and-retention.md) |
+| Use unreleased SQL Server manual events and table installation | [SQL Server guide](docs/sql-server.md) |
 | Export CSV or deliver logs to HTTP, object storage, Datadog, or Splunk | [Export and streams](docs/export-and-streams.md) |
 | Use the package from an AI-assisted workflow | [Agent guide](docs/agent-guide.md) |
 | Check release changes | [CHANGELOG](CHANGELOG.md) |

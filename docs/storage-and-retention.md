@@ -1,7 +1,15 @@
 # Audit storage, retention, and database permissions
 
-Applies to the published `0.7.0` release. Start with the [README](../README.md);
+The PostgreSQL instructions below apply to published `0.7.0`. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
+
+**Unreleased SQL Server DDL:** schema utilities accept `provider: 'sqlserver'` for a flat audit
+table with `NVARCHAR(MAX)` JSON text, UTC timestamps, and UPDATE/DELETE rejection triggers.
+Unqualified table names use `dbo`; custom schemas must already exist. `getAuditTableStatements()`
+and `applyAuditTableSchema()` keep trigger batches separate; `getAuditTableSQL()` emits `GO`
+separators and `:ON ERROR EXIT` for sqlcmd or SSMS SQLCMD mode. SQL Server rejects partitioning, GIN indexes, rule enforcement, and
+`prune()`/`ensurePartitions()` before database access. See the [SQL Server guide](sql-server.md)
+for installation, existing-table checks, permissions, and manual transactions.
 
 ## Schema utilities
 

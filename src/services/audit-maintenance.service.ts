@@ -2,6 +2,7 @@ import { AuditLogModuleOptions } from '../interfaces/audit-log-options.interface
 import { PrismaModuleLike } from '../prisma/prisma-namespace';
 import { deriveAuditObjectNames } from '../sql';
 import { validateAuditTableName } from '../sql/table-name';
+import { AuditDatabaseProvider, assertPostgresProvider, resolveAuditProvider } from '../sql/provider';
 import { decodeAuditCursor } from './audit-cursor';
 import type {
   AuditPruneOptions,
@@ -17,14 +18,18 @@ type AuditPartitionRow = {
 
 /** @internal */
 export class AuditMaintenanceService {
+  private readonly provider: AuditDatabaseProvider;
   constructor(
     private readonly options: AuditLogModuleOptions,
     private readonly Prisma: PrismaModuleLike['Prisma'],
     private readonly tableName: string,
     private readonly tableRef: unknown | null,
-  ) {}
+  ) {
+    this.provider = resolveAuditProvider(options.provider);
+  }
 
   async prune(options: AuditPruneOptions): Promise<AuditPruneResult> {
+    assertPostgresProvider(this.provider, 'AuditService.prune');
     this.validatePruneOptions(options);
     const client = options.client ?? this.options.prisma;
     const Prisma = this.Prisma;

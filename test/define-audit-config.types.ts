@@ -2,7 +2,7 @@
 import {
   AuditLogModule, createAuditedClient, defineAuditConfig, applyAuditTableSchema, ensurePartitions,
 } from '../src';
-import type { AuditConfigInput } from '../src';
+import type { AuditConfigInput, AuditDatabaseProvider } from '../src';
 
 export function configExamples(base: {
   user: { findUnique(args: { where: { id: string } }): Promise<{ id: string } | null> };
@@ -12,6 +12,13 @@ export function configExamples(base: {
   const module = { actorExtractor: () => ({ id: 'user-1', type: 'user' as const }) };
   const manual = defineAuditConfig({ module });
   const absent: undefined = manual.extensionOptions;
+  const provider: AuditDatabaseProvider = 'sqlserver';
+  const sqlserver = defineAuditConfig({ shared: { provider, tableName: 'dbo.events' }, module });
+  AuditLogModule.forRoot({ ...sqlserver.moduleOptions, prisma: base });
+  // @ts-expect-error Provider belongs in shared so DDL and writes cannot diverge.
+  defineAuditConfig({ module, schema: { provider } });
+  // @ts-expect-error Only Prisma's canonical provider names are accepted.
+  defineAuditConfig({ module, shared: { provider: 'mssql' } });
   AuditLogModule.forRoot({ ...manual.moduleOptions, prisma: base });
   AuditLogModule.forRootAsync({ useFactory: async () => ({ ...manual.moduleOptions, prisma: base }) });
   const automatic = defineAuditConfig({ module, extension: { consistency: 'atomic-required', trackedModels: ['User'] } });

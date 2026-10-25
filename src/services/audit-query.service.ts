@@ -6,6 +6,7 @@ import {
 } from '../interfaces/audit-entry.interface';
 import { AuditLogModuleOptions } from '../interfaces/audit-log-options.interface';
 import { PrismaModuleLike } from '../prisma/prisma-namespace';
+import { AuditDatabaseProvider, assertPostgresProvider, resolveAuditProvider } from '../sql/provider';
 import { resolveTenantId } from '../utils/tenant';
 import {
   decodeAuditCursor,
@@ -22,15 +23,19 @@ function isUuid(value: string): boolean {
 
 /** @internal */
 export class AuditQueryService {
+  private readonly provider: AuditDatabaseProvider;
   private unscopedQueryWarned = false;
 
   constructor(
     private readonly options: AuditLogModuleOptions,
     private readonly Prisma: PrismaModuleLike['Prisma'],
     private readonly tableRef: unknown | null,
-  ) {}
+  ) {
+    this.provider = resolveAuditProvider(options.provider);
+  }
 
   async query(options: AuditQueryOptions): Promise<AuditQueryResult> {
+    assertPostgresProvider(this.provider, 'AuditService.query');
     this.validateQueryPagination(options);
     const Prisma = this.Prisma;
     const baseConditions: unknown[] = [];
@@ -155,6 +160,7 @@ export class AuditQueryService {
     id: string,
     options: AuditGetByIdOptions = {},
   ): Promise<AuditEntry | null> {
+    assertPostgresProvider(this.provider, 'AuditService.getById');
     const normalizedId = id.toLowerCase();
     if (!isUuid(normalizedId)) {
       return null;

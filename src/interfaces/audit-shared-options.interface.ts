@@ -1,3 +1,5 @@
+import type { AuditDatabaseProvider } from '../sql/provider';
+
 /** Minimal logger compatible with console and NestJS LoggerService. */
 export interface AuditLogger {
   warn(message: string): void;
@@ -26,6 +28,8 @@ export interface AuditErrorContext {
  * call sites or use defineAuditConfig() when both paths should share behavior.
  */
 export interface AuditSharedOptions {
+  /** Defaults to PostgreSQL. SQL Server currently supports manual logging only. */
+  provider?: AuditDatabaseProvider;
   tableName?: string;
   /** Require a non-blank string actor ID for audit writes. Defaults to false. */
   actorRequired?: boolean;

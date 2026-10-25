@@ -3,7 +3,9 @@ import type { AuditSharedOptions } from './interfaces/audit-shared-options.inter
 import type { AuditExtensionOptions } from './prisma/audit-extension/audit-types';
 import { validateAuditExtensionOptions } from './prisma/audit-extension/validate-options';
 import type { AuditTableSQLOptions, EnsurePartitionsOptions } from './sql';
-import { validateAuditTableName } from './sql/table-name';
+import { getAuditTableStatements } from './sql';
+import { getSqlServerTableName, validateAuditTableName } from './sql/table-name';
+import { resolveAuditProvider } from './sql/provider';
 
 /** Settings applied to both manual and automatic audit paths. */
 export type AuditConfigSharedOptions = AuditSharedOptions & Pick<
@@ -14,7 +16,7 @@ export type AuditConfigSharedOptions = AuditSharedOptions & Pick<
 type Forbidden<K extends PropertyKey> = { [P in K]?: never };
 type ModuleSettings = Omit<AuditLogModuleOptions, keyof AuditConfigSharedOptions | 'prisma'>;
 type ExtensionSettings = Omit<AuditExtensionOptions, keyof AuditConfigSharedOptions>;
-type SchemaSettings = Omit<AuditTableSQLOptions, 'tableName'>;
+type SchemaSettings = Omit<AuditTableSQLOptions, 'tableName' | 'provider'>;
 
 export type AuditConfigModuleOptions = ModuleSettings &
   Forbidden<keyof AuditConfigSharedOptions | 'prisma'>;
@@ -34,12 +36,12 @@ export interface AuditConfig<T extends AuditExtensionOptions | undefined = Audit
   moduleOptions: Omit<AuditLogModuleOptions, 'prisma'>;
   extensionOptions: T;
   schemaOptions: AuditTableSQLOptions;
-  partitionOptions: Pick<EnsurePartitionsOptions, 'tableName'>;
+  partitionOptions: Pick<EnsurePartitionsOptions, 'tableName' | 'provider'>;
 }
 
 // Exhaustive key maps keep the runtime placement checks aligned with public types.
 const sharedKeys: Record<keyof AuditConfigSharedOptions, true> = {
-  tableName: true, prismaModule: true, actorRequired: true, tenantRequired: true,
+  provider: true, tableName: true, prismaModule: true, actorRequired: true, tenantRequired: true,
   tenantResolver: true, sensitiveFields: true, sensitiveFieldsByModel: true,
   logger: true, onAuditError: true,
 };
@@ -107,15 +109,25 @@ export function defineAuditConfig(input: AuditConfigInput): AuditConfig {
   if (input.extension !== undefined) checkSection(input.extension, 'extension', extensionKeys);
   if (input.schema !== undefined) checkSection(input.schema, 'schema', schemaKeys);
   const shared = input.shared ?? {};
-  validateAuditTableName(shared.tableName);
-  if (input.extension !== undefined) validateAuditExtensionOptions(input.extension);
-  const tableOptions = 'tableName' in shared ? { tableName: shared.tableName } : {};
+  const provider = resolveAuditProvider(shared.provider);
+  if (provider === 'sqlserver') getSqlServerTableName(shared.tableName);
+  else validateAuditTableName(shared.tableName);
+  if (input.extension !== undefined) {
+    validateAuditExtensionOptions({ ...shared, ...input.extension });
+  }
+  const tableOptions = {
+    ...('tableName' in shared ? { tableName: shared.tableName } : {}),
+    ...('provider' in shared ? { provider: shared.provider } : {}),
+  };
+  const schemaOptions = { ...tableOptions, ...cloneSettings(input.schema ?? {}) };
+  // Fail on unsupported SQL Server storage settings at configuration time, without I/O.
+  if (provider === 'sqlserver') getAuditTableStatements(schemaOptions);
   return {
     moduleOptions: { ...cloneShared(shared), ...cloneSettings(input.module) },
     extensionOptions: input.extension === undefined
       ? undefined
       : { ...cloneShared(shared), ...cloneSettings(input.extension) },
-    schemaOptions: { ...tableOptions, ...cloneSettings(input.schema ?? {}) },
+    schemaOptions,
     partitionOptions: { ...tableOptions },
   };
 }

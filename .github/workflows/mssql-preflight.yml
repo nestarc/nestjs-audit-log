@@ -1,0 +1,125 @@
+name: MSSQL preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - fixtures/mssql-preflight/**
+      - .github/workflows/mssql-preflight.yml
+      - src/**
+      - test/**
+      - package.json
+      - package-lock.json
+      - tsconfig*.json
+  pull_request:
+    branches: [main]
+    paths:
+      - fixtures/mssql-preflight/**
+      - .github/workflows/mssql-preflight.yml
+      - src/**
+      - test/**
+      - package.json
+      - package-lock.json
+      - tsconfig*.json
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: SQL Server 2025 CU10 and Prisma 7.10.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      MSSQL_HOST: 127.0.0.1
+      MSSQL_PORT: '1433'
+      MSSQL_USER: sa
+      MSSQL_IMAGE_REFERENCE: mcr.microsoft.com/mssql/server:2025-CU10-ubuntu-24.04
+      MSSQL_SERVER_PLATFORM: linux/amd64
+
+    defaults:
+      run:
+        working-directory: fixtures/mssql-preflight
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.11.1'
+          cache: npm
+          cache-dependency-path: fixtures/mssql-preflight/package-lock.json
+
+      - name: Start disposable SQL Server with an ephemeral password
+        run: |
+          MSSQL_PASSWORD=$(node --input-type=module -e 'import { randomBytes } from "node:crypto"; process.stdout.write(`Aa1!${randomBytes(32).toString("base64url")}`)')
+          echo "::add-mask::$MSSQL_PASSWORD"
+          echo "MSSQL_PASSWORD=$MSSQL_PASSWORD" >> "$GITHUB_ENV"
+          export MSSQL_SA_PASSWORD="$MSSQL_PASSWORD"
+          export ACCEPT_EULA=Y
+          export MSSQL_PID=Developer
+          container_id=$(docker run --detach --name audit-mssql-preflight \
+            --env ACCEPT_EULA --env MSSQL_PID --env MSSQL_SA_PASSWORD \
+            --publish 127.0.0.1:1433:1433 "$MSSQL_IMAGE_REFERENCE")
+          echo "SQLSERVER_CONTAINER_ID=$container_id" >> "$GITHUB_ENV"
+
+      - name: Install exact fixture dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build and pack the library candidate
+        working-directory: .
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          mkdir -p fixtures/mssql-preflight/results/package
+          npm pack --pack-destination fixtures/mssql-preflight/results/package
+
+      - name: Install the packed library candidate
+        run: npm install --no-save --package-lock=false --no-audit --no-fund ./results/package/nestarc-audit-log-*.tgz
+
+      - name: Record server image and verify architecture
+        run: |
+          mkdir -p results
+          image_id=$(docker inspect --format '{{.Image}}' "$SQLSERVER_CONTAINER_ID")
+          docker image inspect "$image_id" --format '{"id":{{json .Id}},"os":{{json .Os}},"architecture":{{json .Architecture}},"repoDigests":{{json .RepoDigests}}}' > results/image.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import assert from "node:assert/strict";
+            const image = JSON.parse(fs.readFileSync("results/image.json", "utf8"));
+            assert.equal(image.os, "linux");
+            assert.equal(image.architecture, "amd64");
+            assert.equal(process.platform, "linux");
+            assert.equal(process.arch, "x64");
+            assert.ok(image.repoDigests.length > 0);
+            fs.appendFileSync(process.env.GITHUB_ENV, `MSSQL_IMAGE_DIGEST=${image.repoDigests[0]}\n`);
+            console.log(JSON.stringify(image, null, 2));
+          '
+
+      - name: Run real database probes
+        run: npm test
+
+      - name: Verify the public library on SQL Server
+        env:
+          MSSQL_PROBE: library-probe.mjs
+          MSSQL_REPORT_PATH: results/library/report.json
+        run: npm test
+
+      - name: Collect SQL Server logs
+        if: always() && env.SQLSERVER_CONTAINER_ID != ''
+        run: |
+          mkdir -p results
+          docker logs "$SQLSERVER_CONTAINER_ID" > results/sqlserver.log 2>&1
+
+      - name: Remove disposable SQL Server
+        if: always() && env.SQLSERVER_CONTAINER_ID != ''
+        run: docker rm --force "$SQLSERVER_CONTAINER_ID"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mssql-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: fixtures/mssql-preflight/results/
+          if-no-files-found: error
+          retention-days: 14

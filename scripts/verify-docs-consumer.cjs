@@ -47,7 +47,7 @@ async function main() {
     const [pack] = JSON.parse(npm(['pack', '--json', '--pack-destination', temp], root, process.env, true));
     assert.equal(pack.name, '@nestarc/audit-log');
     const guides = ['agent-guide', 'adoption-guide', 'api-reference', 'transactions', 'context-and-tenancy',
-      'storage-and-retention', 'export-and-streams', 'benchmarks', 'maintaining'];
+      'storage-and-retention', 'sql-server', 'export-and-streams', 'benchmarks', 'maintaining'];
     const exampleFiles = ['README.md', 'package.json', '.env.example', 'tsconfig.json', 'prisma.config.ts',
       'prisma/schema.prisma', 'prisma/migrations/20260910000000_users/migration.sql',
       'prisma/migrations/20260929000000_user_roles/migration.sql',
