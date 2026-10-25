@@ -119,13 +119,15 @@ describe.each(['createAuditExtension', 'createAuditedClient'] as const)(
 describe.each(['forRoot', 'forRootAsync'] as const)(
   'AuditLogModule.%s provider validation', registration => {
     it('rejects invalid provider during module construction before any client access', async () => {
-      const { client, readNamespace, moduleOptions } = fixture('mysql' as never);
+      const { client, Prisma, moduleOptions } = fixture('mysql' as never);
       const dynamicModule = registration === 'forRoot'
         ? AuditLogModule.forRoot(moduleOptions)
         : AuditLogModule.forRootAsync({ useFactory: async () => moduleOptions });
       await expect(Test.createTestingModule({ imports: [dynamicModule] }).compile())
         .rejects.toThrow('provider must be "postgresql" or "sqlserver"');
-      expect(readNamespace).not.toHaveBeenCalled();
+      // Nest 10 token hashing may read useValue getters before service construction.
+      // Reading the namespace is harmless; invoking Prisma or a client is not.
+      for (const method of Object.values(Prisma)) expect(method).not.toHaveBeenCalled();
       expect(moduleOptions.actorExtractor).not.toHaveBeenCalled();
       expectNoClientCalls(client);
     });

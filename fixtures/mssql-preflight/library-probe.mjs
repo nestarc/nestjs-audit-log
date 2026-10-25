@@ -45,6 +45,8 @@ const forbiddenClient = new Proxy({}, {
 // Never serialize raw Prisma errors, parameters, connection strings, or payloads.
 function safeError(error) {
   const result = { name: String(error?.name ?? 'Error').slice(0, 80) };
+  const errorClass = error?.constructor?.name;
+  if (typeof errorClass === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(errorClass)) result.errorClass = errorClass;
   if (/^[A-Za-z0-9_-]{1,60}$/.test(String(error?.code ?? ''))) result.code = String(error.code);
   if (error instanceof assert.AssertionError) result.assertion = String(error.message).split('\n')[0].slice(0, 180);
   const codes = new Set();
@@ -191,7 +193,9 @@ async function main() {
     for (const name of ['prisma', 'client', 'adapter']) assert.equal(versions[name], '7.10.0', `${name} is pinned to 7.10.0`);
     await import('reflect-metadata');
     library = await import('@nestarc/audit-log');
-    ({ Test } = await import('@nestjs/testing'));
+    // tsx can create separate ESM/CJS Nest class identities. Match the installed
+    // CommonJS library's Nest loading so Reflector remains the same DI token.
+    ({ Test } = require('@nestjs/testing'));
     for (const name of ['AuditService', 'AuditLogModule', 'AuditContext', 'defineAuditConfig', 'getAuditTableStatements', 'getAuditTableSQL', 'applyAuditTableSchema', 'ensurePartitions', 'createAuditExtension']) {
       assert.equal(typeof library[name], 'function', `${name} is exported by the installed package`);
     }
