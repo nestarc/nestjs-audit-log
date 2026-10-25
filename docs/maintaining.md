@@ -1,7 +1,8 @@
 # Maintaining and releasing audit-log
 
-Documents development and verification for the published `0.7.0` release and local candidates.
+Documents development and verification for published `0.7.0` and the unreleased `0.7.1` candidate.
 Start with the [README](../README.md); see [CHANGELOG](../CHANGELOG.md) for version changes.
+The [0.7.1 release notes](releases/0.7.1.md) track SQL Server support, validation, and remaining release checks.
 
 ## Published ecosystem release gate
 
@@ -18,6 +19,10 @@ tenancy-candidate mode replaces only tenancy with a caller-supplied `0.16.x` `.t
 audit-log and soft-delete remain registry artifacts. All
 three modes use strict peer installation and assert each package's installed version, source, and
 SHA-512 integrity. Tag publishing cannot start until the audit-log candidate gate passes.
+
+The release workflow also requires the reusable MSSQL preflight workflow. It tests the driver
+baseline and packed audit-log candidate on SQL Server 2025 with Prisma 7.10.0 before publication.
+Both the PostgreSQL ecosystem gate and MSSQL gate must succeed before the publishing job starts.
 
 Do not make this fixture follow `latest`, a semver range, a workspace, or a sibling checkout. After
 one of the three packages is published, update the manifest, lockfile, the README tuple, and registry
@@ -52,7 +57,7 @@ npm pack --pack-destination /tmp
 Copy `examples/quick-start` into a separate writable directory, then install the emitted artifact there:
 
 ```sh
-npm install --save-exact /tmp/nestarc-audit-log-0.7.0.tgz --strict-peer-deps
+npm install --save-exact /tmp/nestarc-audit-log-0.7.1.tgz --strict-peer-deps
 cp .env.example .env
 # Set DATABASE_URL to a disposable local PostgreSQL database/schema.
 npm run db:setup
@@ -60,10 +65,12 @@ npm run smoke:manual
 npm run smoke
 ```
 
-The filename reflects the current manifest; it does not make a local tarball identical to the
-published 0.7.0 artifact. Record integrity and origin when sharing evidence. Both the packed and
+The filename reflects the 0.7.1 candidate manifest; it does not identify a published registry release.
+Record integrity and origin when sharing evidence. Both the packed and
 registry consumer gates run the released 0.7.0 policy scenarios in addition to the basic smokes.
 The [adoption guide](adoption-guide.md) explains these contracts.
+This example uses PostgreSQL. For the candidate's manual SQL Server APIs, use the existing client
+and module configuration in the [SQL Server guide](sql-server.md).
 
 ### Run tests
 
@@ -116,6 +123,24 @@ schema and temporary project in teardown. It does not start or stop PostgreSQL f
 The audit-log candidate mode installs exact `@nestarc/soft-delete@0.7.4` in its temporary
 consumer to satisfy audit-log 0.7's peer contract. The checked-in published tuple remains
 unchanged at soft-delete 0.7.3 and audit-log 0.5.0. Both modes require a valid full peer graph.
+
+## 0.7.1 candidate verification and publication
+
+The 0.7.1 candidate keeps the existing soft-delete 0.7.4 peer range compatible while adding opt-in
+manual SQL Server logging. Keep the registry Quick Start on 0.7.0 until the new registry artifact
+is published and verified. Do not change the published ecosystem fixture as part of candidate preparation.
+
+Before publication, verify the candidate commit through the full CI matrix, packed documentation
+consumer, published and candidate ecosystem suites, and MSSQL preflight. Run performance checks
+for PostgreSQL regression and SQL Server manual logging, recording the commit, runtime, database,
+workload, sample count, latency, throughput, and raw result files. Review results in
+[benchmarks](benchmarks.md); a passing correctness probe alone is not a performance result.
+Record completed checks and remaining work in the [candidate release notes](releases/0.7.1.md).
+
+After publication, verify the actual registry artifact with strict peer installation and consumer
+smokes, then update the Quick Start pin, published-version prose, and release status together.
+Update a coordinated published ecosystem tuple in a separate PR with its lockfile and integrity
+evidence. Update and deploy the separate documentation site, then verify the public pages.
 
 ## 0.7.0 publication and external documentation checklist
 

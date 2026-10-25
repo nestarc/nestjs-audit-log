@@ -1,7 +1,7 @@
 {
   "name": "@nestarc/audit-log",
-  "version": "0.7.0",
-  "description": "Audit logging module for NestJS with automatic Prisma change tracking and append-only PostgreSQL storage",
+  "version": "0.7.1",
+  "description": "NestJS audit logging with automatic PostgreSQL tracking and transactional manual logging for PostgreSQL and SQL Server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "homepage": "https://nestarc.dev/packages/audit-log/",
@@ -23,6 +23,7 @@
     "docs/context-and-tenancy.md",
     "docs/storage-and-retention.md",
     "docs/sql-server.md",
+    "docs/releases/0.7.1.md",
     "docs/export-and-streams.md",
     "docs/benchmarks.md",
     "docs/benchmarks",
@@ -38,6 +39,7 @@
     "prisma",
     "prisma-extension",
     "postgresql",
+    "sqlserver",
     "before-after-diff",
     "nestjs-module",
     "saas"
@@ -64,6 +66,7 @@
     "docker:up": "docker compose -f test/e2e/docker-compose.yml up -d",
     "docker:down": "docker compose -f test/e2e/docker-compose.yml down",
     "bench": "npx ts-node benchmarks/audit-overhead.ts",
+    "bench:regression": "npm run build && node scripts/run-postgresql-benchmark.cjs",
     "test:e2e:setup": "npm run docker:up -- --wait --wait-timeout 60 && npm run prisma:test:push && npm run prisma:test:generate",
     "test:e2e:full": "node scripts/run-e2e.cjs",
     "test:e2e:teardown": "npm run docker:down"

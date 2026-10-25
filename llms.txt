@@ -7,7 +7,7 @@ actorRequired and defineAuditConfig are available in 0.7.0. Locally packed candi
 from the registry artifact even when their versions match. Check the installed package source,
 declarations and [CHANGELOG](CHANGELOG.md) before choosing examples.
 
-Unreleased source supports explicit provider: 'sqlserver' for manual logging and flat-table DDL.
+The unreleased 0.7.1 candidate supports explicit provider: 'sqlserver' for manual logging and flat-table DDL.
 Published 0.7.0 and the Quick Start remain PostgreSQL-only. SQL Server automatic tracking,
 queries, export, retention and partitions are unsupported; use the dedicated guide below.
 
@@ -21,13 +21,14 @@ queries, export, retention and partitions are unsupported; use the dedicated gui
 - [Transactions](docs/transactions.md): atomic-required, unsupported operations, and lifecycle integration.
 - [Actor and tenancy](docs/context-and-tenancy.md): authenticated actors, jobs, and explicit query scope.
 - [Storage and retention](docs/storage-and-retention.md): privileges, partitions, and maintenance.
-- [SQL Server manual logging](docs/sql-server.md): unreleased provider configuration, same-transaction events, DDL batches, and support boundaries.
+- [SQL Server manual logging](docs/sql-server.md): 0.7.1 candidate provider configuration, same-transaction events, DDL batches, and support boundaries.
 - [Export and streams](docs/export-and-streams.md): checkpoints, delivery retries, and late-commit limitations.
 - [Changelog](CHANGELOG.md): version changes.
 - [Candidate installation](docs/maintaining.md#candidate-documentation-example): build/pack and isolated consumer checks.
 
 ## Release references
 
+- [0.7.1 candidate release notes](docs/releases/0.7.1.md): manual SQL Server support, verification, current limits, and release checklist; not yet published.
 - [0.7.0 release](https://github.com/nestarc/nestjs-audit-log/releases/tag/v0.7.0)
 - [Official documentation](https://nestarc.dev/packages/audit-log/)
 - [npm package](https://www.npmjs.com/package/@nestarc/audit-log)

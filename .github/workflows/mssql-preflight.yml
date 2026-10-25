@@ -2,6 +2,16 @@ name: MSSQL preflight
 
 on:
   workflow_dispatch:
+    inputs:
+      run_benchmark:
+        description: Also measure manual transaction overhead
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      run_benchmark:
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -30,7 +40,7 @@ jobs:
   preflight:
     name: SQL Server 2025 CU10 and Prisma 7.10.0
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       MSSQL_HOST: 127.0.0.1
       MSSQL_PORT: '1433'
@@ -82,6 +92,7 @@ jobs:
         run: |
           mkdir -p results
           image_id=$(docker inspect --format '{{.Image}}' "$SQLSERVER_CONTAINER_ID")
+          docker inspect --format '{"memoryLimitBytes":{{json .HostConfig.Memory}},"nanoCpuLimit":{{json .HostConfig.NanoCpus}},"storageOptions":{{json .HostConfig.StorageOpt}}}' "$SQLSERVER_CONTAINER_ID" > results/container-resources.json
           docker image inspect "$image_id" --format '{"id":{{json .Id}},"os":{{json .Os}},"architecture":{{json .Architecture}},"repoDigests":{{json .RepoDigests}}}' > results/image.json
           node --input-type=module -e '
             import fs from "node:fs";
@@ -103,6 +114,16 @@ jobs:
         env:
           MSSQL_PROBE: library-probe.mjs
           MSSQL_REPORT_PATH: results/library/report.json
+        run: npm test
+
+      - name: Measure manual audit transaction overhead
+        if: inputs.run_benchmark == true
+        env:
+          MSSQL_PROBE: manual-benchmark.mjs
+          MSSQL_REPORT_PATH: results/benchmark/report.json
+          BENCH_WARMUP: '50'
+          BENCH_ITERATIONS: '500'
+          BENCH_REPEATS: '4'
         run: npm test
 
       - name: Collect SQL Server logs

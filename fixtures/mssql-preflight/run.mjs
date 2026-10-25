@@ -159,7 +159,7 @@ try {
   await mkdir(path.dirname(probeReportPath), { recursive: true });
   // A setup failure must never leave a previous run's successful probe as evidence.
   await rm(probeReportPath, { force: true });
-  if (!['probe.mjs', 'library-probe.mjs'].includes(probe)) throw failure('MSSQL_PROBE_INVALID');
+  if (!['probe.mjs', 'library-probe.mjs', 'manual-benchmark.mjs'].includes(probe)) throw failure('MSSQL_PROBE_INVALID');
   const configuration = readConfiguration();
   const databaseUrl = `sqlserver://${configuration.server}:${configuration.port};database=${database};schema=dbo;user={${configuration.user}};password={${configuration.password}};encrypt=true;trustServerCertificate=true`;
   secrets = [configuration.password, encodeURIComponent(configuration.password), databaseUrl];
@@ -197,7 +197,7 @@ try {
     [prismaCli, 'db', 'push', '--config', 'prisma.config.ts'], environment, 120_000,
   ));
   await step('run-real-database-probes', () => runChild(
-    ['--import', 'tsx', probe], environment, 180_000,
+    ['--import', 'tsx', probe], environment, probe === 'manual-benchmark.mjs' ? 600_000 : 180_000,
   ));
   report.status = 'passed';
 } catch (error) {

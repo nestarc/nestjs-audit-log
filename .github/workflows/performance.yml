@@ -1,0 +1,67 @@
+name: Database performance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - benchmarks/**
+      - scripts/run-postgresql-benchmark.cjs
+      - fixtures/mssql-preflight/manual-benchmark.mjs
+      - fixtures/mssql-preflight/run.mjs
+      - .github/workflows/mssql-preflight.yml
+      - .github/workflows/performance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  mssql:
+    name: SQL Server manual audit overhead
+    uses: ./.github/workflows/mssql-preflight.yml
+    with:
+      run_benchmark: true
+
+  postgresql:
+    name: PostgreSQL published-versus-candidate performance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: audit_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d audit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5433/audit_test
+      BENCH_WARMUP: '50'
+      BENCH_ITERATIONS: '500'
+      BENCH_REPEATS: '4'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.11.1'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Compare published and candidate packages
+        run: npm run bench:regression
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: postgresql-performance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: benchmarks/results/
+          if-no-files-found: error
+          retention-days: 30

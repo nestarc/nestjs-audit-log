@@ -1,9 +1,10 @@
 # SQL Server manual audit logging
 
-**Unreleased source feature.** Published `@nestarc/audit-log@0.7.0` supports PostgreSQL. Install a
+**0.7.1 candidate, unreleased.** Published `@nestarc/audit-log@0.7.0` supports PostgreSQL. Install a
 [locally packed candidate](maintaining.md#candidate-documentation-example) to use the SQL Server
-APIs described here. The development target is SQL Server 2025 with Prisma CLI, client, and
-`@prisma/adapter-mssql` pinned to `7.10.0`.
+APIs described here. The verified target is SQL Server 2025 with Prisma CLI, client, and
+`@prisma/adapter-mssql` pinned to `7.10.0`. See the [candidate release notes](releases/0.7.1.md)
+for verification results and the [CHANGELOG](../CHANGELOG.md) for version changes.
 
 SQL Server support covers manual `AuditService.log()` calls and audit table installation. Passing
 the business transaction's `tx` to `log()` writes the event on that transaction. Omitting `provider`

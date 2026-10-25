@@ -9,6 +9,10 @@ permissions:
   contents: read
 
 jobs:
+  mssql-release-gate:
+    name: SQL Server release gate
+    uses: ./.github/workflows/mssql-preflight.yml
+
   ecosystem-release-gate:
     name: Ecosystem release gate
     runs-on: ubuntu-latest
@@ -54,7 +58,7 @@ jobs:
         run: npm run test:e2e:ecosystem:candidate
 
   release:
-    needs: ecosystem-release-gate
+    needs: [ecosystem-release-gate, mssql-release-gate]
     runs-on: ubuntu-latest
     environment: npm
     permissions:
