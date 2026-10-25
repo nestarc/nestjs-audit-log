@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Real SQL Server 2025 and Prisma 7.10.0 feasibility probes before audit-log implementation",
   "engines": {
-    "node": "^24.0.0"
+    "node": "^24.22.1"
   },
   "scripts": {
     "test": "node run.mjs",

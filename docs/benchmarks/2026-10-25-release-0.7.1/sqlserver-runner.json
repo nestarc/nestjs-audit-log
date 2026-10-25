@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "kind": "sqlserver-prisma-preflight-runner",
+  "startedAt": "2026-10-25T10:04:16.084Z",
+  "status": "passed",
+  "client": {
+    "platform": "linux",
+    "architecture": "x64",
+    "node": "v24.11.1"
+  },
+  "database": "audit_preflight_b9bbac92738b4446b8485732ca0c65d9",
+  "probe": "manual-benchmark.mjs",
+  "steps": [
+    {
+      "name": "verify-exact-prisma-packages",
+      "status": "passed",
+      "durationMs": 1
+    },
+    {
+      "name": "generate-client",
+      "status": "passed",
+      "durationMs": 742
+    },
+    {
+      "name": "server-readiness",
+      "status": "passed",
+      "durationMs": 173
+    },
+    {
+      "name": "verify-sqlserver-2025",
+      "status": "passed",
+      "durationMs": 2
+    },
+    {
+      "name": "create-dedicated-database",
+      "status": "passed",
+      "durationMs": 161
+    },
+    {
+      "name": "push-business-schema",
+      "status": "passed",
+      "durationMs": 1461
+    },
+    {
+      "name": "run-real-database-probes",
+      "status": "passed",
+      "durationMs": 194447
+    }
+  ],
+  "cleanup": {
+    "status": "passed"
+  },
+  "packages": {
+    "prisma": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "@prisma/adapter-mssql": "7.10.0",
+    "mssql": "12.2.0"
+  },
+  "server": {
+    "productVersion": "17.0.5035.5",
+    "majorVersion": "17",
+    "edition": "Enterprise Developer Edition (64-bit)"
+  },
+  "finishedAt": "2026-10-25T10:07:33.193Z"
+}

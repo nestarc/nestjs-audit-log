@@ -1,10 +1,10 @@
 # Audit log API reference
 
-Applies to the published `0.7.0` release unless marked **Unreleased**. Start with the [README](../README.md);
+Documents version `0.7.1`. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes. `actorRequired` and `defineAuditConfig()`
 were added in 0.7.0 and are not part of the 0.6.0 API.
 
-**Unreleased SQL Server support:** `AuditDatabaseProvider` is `'postgresql' | 'sqlserver'`.
+**SQL Server support in 0.7.1:** `AuditDatabaseProvider` is `'postgresql' | 'sqlserver'`.
 Omitted `provider` selects PostgreSQL. Explicit `provider: 'sqlserver'` enables manual `log()` and
 flat-table DDL only; automatic tracking, read/export APIs, retention, and partitions are rejected
 before database access. See the [SQL Server guide](sql-server.md) for configuration and transaction usage.
@@ -40,7 +40,7 @@ Existing independent registration APIs remain supported.
 
 | Input section | Accepted settings |
 |---|---|
-| `shared` (optional) | `tableName`, `prismaModule`, `tenantRequired`, `tenantResolver`, `actorRequired`, `sensitiveFields`, `sensitiveFieldsByModel`, `logger`, `onAuditError`; **Unreleased:** `provider` |
+| `shared` (optional) | `tableName`, `prismaModule`, `tenantRequired`, `tenantResolver`, `actorRequired`, `sensitiveFields`, `sensitiveFieldsByModel`, `logger`, `onAuditError`, `provider` |
 | `module` (required) | Required `actorExtractor`; optional `actorExtractionStage`, `excludeRoutes`, `registerGlobalInterceptor`, `correlationIdHeader`, `correlationIdGetter` |
 | `extension` (optional) | Required explicit `consistency`; optional `trackedModels`, `ignoredModels`, `primaryKey`, `databaseMapping`, `maxBatchRecords`, `batchOverflow`, `logFailures`, `ignoreTimestampOnlyUpdates` |
 | `schema` (optional) | `partitioned`, `enforcement`, `ginIndex` |
@@ -107,7 +107,7 @@ AuditLogModule.forRoot({ ...manualConfig.moduleOptions, prisma: base });
 Use `applyAuditTableSchema(setupClient, config.schemaOptions)` in a separate setup/migration step.
 For a partitioned table, use
 `ensurePartitions(maintenanceClient, { ...config.partitionOptions, ahead: 1 })` in maintenance.
-`tableName` and, in the unreleased source, `provider` flow from shared settings to these utilities; tenant and actor policies remain
+`tableName` and `provider` flow from shared settings to these utilities; tenant and actor policies remain
 write/query settings. Calling the factory never applies schema or schedules maintenance.
 
 Arrays and plain configuration objects are copied independently for the input and each output,
@@ -121,7 +121,7 @@ overrides are the caller's responsibility and are not synchronized between regis
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
-| `provider` | `'postgresql' \| 'sqlserver'` | `'postgresql'` | **Unreleased:** database dialect; SQL Server supports manual logging only |
+| `provider` | `'postgresql' \| 'sqlserver'` | `'postgresql'` | Database dialect; SQL Server supports manual logging only |
 | `actorExtractor` | `(req) => AuditActor \| Promise<AuditActor>` | *required* | Extracts actor from HTTP request |
 | `actorExtractionStage` | `'middleware' \| 'interceptor'` | `'middleware'` | Added in 0.6.0: choose `interceptor` for identity populated by authentication Guards; [actor timing](context-and-tenancy.md#http-actor-extraction) |
 | `actorRequired` | `boolean` | `false` | Added in 0.7.0: `log()` requires a non-blank string actor ID, including system actors; reads are unaffected |
@@ -130,7 +130,7 @@ overrides are the caller's responsibility and are not synchronized between regis
 | `registerGlobalInterceptor` | `boolean` | `true` | Set `false` to bind `AuditInterceptor` manually |
 | `correlationIdHeader` | `string` | `x-request-id` | Header copied into `metadata.correlationId` |
 | `correlationIdGetter` | `(req) => string \| undefined` | — | Custom correlation ID source |
-| `tableName` | `string` | `audit_logs` | Audit table name used by module-side APIs; **Unreleased SQL Server:** unqualified names resolve to `dbo` |
+| `tableName` | `string` | `audit_logs` | Audit table name used by module-side APIs; SQL Server unqualified names resolve to `dbo` |
 | `tenantResolver` | `() => string \| null` | — | Replaces the optional `@nestarc/tenancy` lookup; returning `null` does not fall back |
 | `sensitiveFields` | `string[]` | `[]` | Metadata keys redacted recursively in objects and arrays for manual logs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Model-specific metadata redaction keys |
@@ -140,7 +140,7 @@ overrides are the caller's responsibility and are not synchronized between regis
 
 ## Prisma extension options
 
-**Unreleased:** extension options also accept `provider`, defaulting to `'postgresql'`.
+Extension options also accept `provider`, defaulting to `'postgresql'`.
 `'sqlserver'` is rejected at extension creation, including when supplied through `defineAuditConfig()`.
 
 | Option | Type | Default | Description |

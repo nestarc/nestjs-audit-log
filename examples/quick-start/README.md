@@ -1,15 +1,18 @@
 # Run the audit-log Quick Start
 
-This standalone example pins **published `@nestarc/audit-log@0.7.0`** (released 2026-09-29).
+This standalone example documents and pins **`@nestarc/audit-log@0.7.1`**.
 No repository build is required. The default `src` build contains the introductory app; the
 separately compiled `candidate` directory tests additional released adoption contracts, including
 `defineAuditConfig` and `actorRequired`. See the
 [changelog](../../CHANGELOG.md), [adoption guide](../../docs/adoption-guide.md) and
 [candidate instructions](../../docs/maintaining.md#candidate-documentation-example).
 
-## Install the published version
+## Install version 0.7.1
 
-Requirements: Node.js 22.13+ in the 22.x line or Node.js 24.x, npm, and a disposable PostgreSQL database.
+Requirements: Node.js 22.23.4+ in the 22.x line or 24.22.1+ in the 24.x line, npm, and a disposable PostgreSQL database.
+Use a patched Node executable as described in the [runtime requirements](../../README.md#requirements).
+Updating this example's npm dependencies does not update the host runtime; rebuild deployment
+artifacts or images and restart application processes after upgrading Node.
 Copy this entire directory into your own workspace, including `prisma/migrations` and `.env.example`.
 You can download the repository source and copy just this directory; you do not need root dependencies
 or a library build. From the copied directory:
@@ -39,8 +42,9 @@ unique user emails. Keep the generated lockfile for repeat installs with `npm ci
 
 The already published **0.7.0 registry tarball** contains an older copy of this example that still
 pins 0.6.0. The 0.6.0 tarball has a local file dependency and only the original creation smoke.
-If extracting either bundled example, run `npm pkg set 'dependencies.@nestarc/audit-log=0.7.0'`
-before installing. Use this directory from the current repository for the updated instructions
+If extracting either older bundled example for use with 0.7.1, run
+`npm pkg set 'dependencies.@nestarc/audit-log=0.7.1'` before installing.
+Use this directory from the current repository for the updated instructions
 and complete smoke flows; changing the repository does not modify either published tarball.
 
 ## Expected first records
@@ -119,12 +123,13 @@ With the local `audit_test` database running, execute from the repository root:
 
 ```sh
 npm run test:docs:consumer
+# After 0.7.1 is available from npm:
 npm run test:docs:consumer -- --registry
 ```
 
 The first command packs the current checkout and extracts this example from that candidate tarball,
 then installs with strict peers outside the repository. The second uses the same updated example
-against its pinned 0.7.0 registry dependency and verifies its origin/integrity against npm metadata.
+against its pinned 0.7.1 registry dependency and verifies its origin/integrity against npm metadata.
 Both run setup, the manual and HTTP smokes, and the adoption assertions below. Each prints artifact
 origin/integrity and removes only its own unique temporary schema/directory, including on failure.
 Here, `candidate` identifies the locally packed artifact mode; it does not mean the tested APIs are
@@ -140,7 +145,7 @@ Both consumer modes run `smoke:candidate`, which compiles with
 It requires the gate's unique local `audit_test` schema and the 0.7.0
 `defineAuditConfig`/`actorRequired` APIs. It is compiled separately from the introductory app.
 Use `npm run test:docs:consumer` from the repository root to get installation, schema isolation and
-teardown, or add `-- --registry` to run the same assertions against published 0.7.0.
+teardown, or add `-- --registry` after publication to run the same assertions against npm version 0.7.1.
 
 The [scenario-to-assertion map](../../docs/adoption-guide.md#adoption-assertions-070)
 explains the eight named results: concurrent HTTP/worker identities, masking/tenant policies,

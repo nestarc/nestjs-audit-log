@@ -1,7 +1,7 @@
 # Adopt audit logging one workflow at a time
 
-These recipes use **published `@nestarc/audit-log@0.7.0`**, released on 2026-09-29.
-`actorRequired` and `defineAuditConfig()` are available in this release. See
+These recipes document **`@nestarc/audit-log@0.7.1`**.
+`actorRequired` and `defineAuditConfig()` were introduced in 0.7.0. See
 [CHANGELOG](../CHANGELOG.md) and the [0.6 to 0.7 migration](transactions.md#migrating-from-06-to-07).
 
 Start with an existing NestJS + Prisma + PostgreSQL application. Choose one business event when
@@ -195,7 +195,7 @@ tenant from trusted job data. The HTTP smoke also verifies a separate `worker-de
 
 ## Shared configuration in 0.7.0
 
-With the published 0.7.0 package, you can replace independent option objects with the
+The configuration API introduced in 0.7.0 lets you replace independent option objects with the
 [configuration factory](api-reference.md#common-configuration-factory).
 Use `shared.actorRequired: true` to require a non-blank actor ID for manual and automatic writes.
 The factory does not authenticate, create clients, register Nest modules or apply DDL. Direct
@@ -214,7 +214,8 @@ npm run smoke
 Use only a disposable test database/schema. Both smokes leave demonstration records there.
 [Expected output and setup](../examples/quick-start/README.md) describe actor, tenant, redaction,
 role before/after and rollback assertions. Maintainers run these same packaged examples through
-`npm run test:docs:consumer` (local candidate) and `npm run test:docs:consumer -- --registry` (published 0.7.0).
+`npm run test:docs:consumer` (local tarball) and, after publication,
+`npm run test:docs:consumer -- --registry` (the example's exact 0.7.1 registry dependency).
 The [consumer gate](maintaining.md#run-tests) installs outside the repository with strict peers and
 removes its temporary schema. This verifies the example, not every write path in your application.
 
@@ -244,7 +245,7 @@ The baseline `smoke:manual` also verifies a successful manual-only role change a
 rollback without creating an automatic extension. The adoption suite prints `mode: "candidate-adoption"`,
 all eight scenario names, and `result: "passed"` only after every assertion succeeds. The consumer
 runner separately prints installed version, mode, resolved artifact and integrity. Candidate mode
-installs the local tarball; registry mode installs the published 0.7.0 release. Use the runner's mode
+installs the local tarball; registry mode installs the example's exact 0.7.1 dependency from npm. Use the runner's mode
 and artifact metadata, not the suite's legacy output label, to distinguish the two sources.
 
 To adapt these assertions, use your test authentication, tenant resolver and models. For example,

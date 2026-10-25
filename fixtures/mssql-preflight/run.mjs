@@ -29,6 +29,7 @@ const report = {
 let bootstrap;
 let createdDatabase = false;
 let secrets = [];
+let preparedLogins = [];
 
 function failure(code) {
   return Object.assign(new Error(code), { code });
@@ -159,7 +160,7 @@ try {
   await mkdir(path.dirname(probeReportPath), { recursive: true });
   // A setup failure must never leave a previous run's successful probe as evidence.
   await rm(probeReportPath, { force: true });
-  if (!['probe.mjs', 'library-probe.mjs'].includes(probe)) throw failure('MSSQL_PROBE_INVALID');
+  if (!['probe.mjs', 'library-probe.mjs', 'least-privilege-probe.mjs', 'manual-benchmark.mjs'].includes(probe)) throw failure('MSSQL_PROBE_INVALID');
   const configuration = readConfiguration();
   const databaseUrl = `sqlserver://${configuration.server}:${configuration.port};database=${database};schema=dbo;user={${configuration.user}};password={${configuration.password}};encrypt=true;trustServerCertificate=true`;
   secrets = [configuration.password, encodeURIComponent(configuration.password), databaseUrl];
@@ -196,8 +197,23 @@ try {
   await step('push-business-schema', () => runChild(
     [prismaCli, 'db', 'push', '--config', 'prisma.config.ts'], environment, 120_000,
   ));
+  if (probe === 'least-privilege-probe.mjs') {
+    await step('reserve-smoke-login-names', async () => {
+      const token = database.slice('audit_preflight_'.length);
+      const names = [`audit_lp_installer_${token}`, `audit_lp_runtime_${token}`];
+      for (const name of names) assert.match(name, /^audit_lp_(installer|runtime)_[a-f0-9]{32}$/);
+      const existing = await bootstrap.request()
+        .input('installer', sql.NVarChar(128), names[0])
+        .input('runtime', sql.NVarChar(128), names[1])
+        .query('SELECT [name] FROM sys.server_principals WHERE [name] IN (@installer, @runtime)');
+      assert.equal(existing.recordset.length, 0, 'Smoke login names must not already exist');
+      // Only these newly reserved names may be removed if the child times out or crashes.
+      preparedLogins = names;
+      report.principalCleanup = { status: 'pending' };
+    });
+  }
   await step('run-real-database-probes', () => runChild(
-    ['--import', 'tsx', probe], environment, 180_000,
+    ['--import', 'tsx', probe], environment, probe === 'manual-benchmark.mjs' ? 600_000 : 180_000,
   ));
   report.status = 'passed';
 } catch (error) {
@@ -215,6 +231,25 @@ try {
     } catch (error) {
       report.status = 'failed';
       report.cleanup = { status: 'failed', error: safeError(error) };
+    }
+  }
+  if (preparedLogins.length && bootstrap) {
+    try {
+      for (const name of preparedLogins) {
+        assert.match(name, /^audit_lp_(installer|runtime)_[a-f0-9]{32}$/);
+        await bootstrap.request().input('login', sql.NVarChar(128), name).query(
+          `IF EXISTS (SELECT 1 FROM sys.server_principals WHERE [name] = @login) DROP LOGIN [${name}]`,
+        );
+      }
+      const remaining = await bootstrap.request()
+        .input('installer', sql.NVarChar(128), preparedLogins[0])
+        .input('runtime', sql.NVarChar(128), preparedLogins[1])
+        .query('SELECT [name] FROM sys.server_principals WHERE [name] IN (@installer, @runtime)');
+      assert.equal(remaining.recordset.length, 0, 'No smoke login remains after runner cleanup');
+      report.principalCleanup = { status: 'passed', checkedLogins: preparedLogins.length };
+    } catch (error) {
+      report.status = 'failed';
+      report.principalCleanup = { status: 'failed', error: safeError(error) };
     }
   }
   if (bootstrap) {

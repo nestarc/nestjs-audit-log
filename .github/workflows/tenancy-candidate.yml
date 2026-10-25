@@ -45,6 +45,16 @@ jobs:
           ref: ${{ inputs.tenancy-ref }}
           path: .tenancy-candidate
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: npm
+          cache-dependency-path: .tenancy-candidate/package-lock.json
+
+      - name: Verify patched Node runtime and Brotli decoding
+        timeout-minutes: 1
+        run: node scripts/verify-node-security.cjs
+
       - name: Verify exact tenancy commit
         working-directory: .tenancy-candidate
         run: |
@@ -52,12 +62,6 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
         env:
           EXPECTED_SHA: ${{ inputs.tenancy-ref }}
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: .tenancy-candidate/package-lock.json
 
       - name: Pack tenancy 0.16.0 candidate
         id: tenancy

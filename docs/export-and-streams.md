@@ -1,7 +1,10 @@
 # Audit export and durable delivery
 
-Applies to the published `0.7.0` release. Start with the [README](../README.md);
+Documents the PostgreSQL export and stream APIs in version `0.7.1`. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
+
+SQL Server supports manual logging and table installation; its export and stream APIs are not
+supported. See the [SQL Server guide](sql-server.md) for that provider's current scope.
 
 ## Streaming export and CSV
 

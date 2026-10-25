@@ -1,8 +1,11 @@
 # Automatic tracking and transaction contracts
 
-Applies to the published `0.7.0` release, including the returning-operation guard described below.
+Documents version `0.7.1`, including the returning-operation guard described below.
 Start with the [README](../README.md); see [CHANGELOG](../CHANGELOG.md) for version changes.
 The guard was added in 0.7.0 and is not part of the 0.6.0 release.
+
+Automatic tracking in this guide is PostgreSQL-specific. For SQL Server manual events on the
+business transaction, use the [SQL Server guide](sql-server.md#commit-the-event-with-the-business-write).
 
 ## Scope of automatic tracking
 

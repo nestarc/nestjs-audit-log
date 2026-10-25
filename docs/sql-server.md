@@ -1,9 +1,14 @@
 # SQL Server manual audit logging
 
-**Unreleased source feature.** Published `@nestarc/audit-log@0.7.0` supports PostgreSQL. Install a
-[locally packed candidate](maintaining.md#candidate-documentation-example) to use the SQL Server
-APIs described here. The development target is SQL Server 2025 with Prisma CLI, client, and
-`@prisma/adapter-mssql` pinned to `7.10.0`.
+Documents the SQL Server APIs in `@nestarc/audit-log@0.7.1`. Install that package version into
+your existing NestJS application, then configure the SQL Server client and module below.
+The verified target is SQL Server 2025 with Prisma CLI, client, and
+`@prisma/adapter-mssql` pinned to `7.10.0`. See the [0.7.1 release notes](releases/0.7.1.md)
+for verification results and the [CHANGELOG](../CHANGELOG.md) for version changes.
+
+```sh
+npm install --save-exact @nestarc/audit-log@0.7.1
+```
 
 SQL Server support covers manual `AuditService.log()` calls and audit table installation. Passing
 the business transaction's `tx` to `log()` writes the event on that transaction. Omitting `provider`
@@ -117,6 +122,49 @@ The generated flat table uses:
 
 No tenant, actor, action, or target index is generated over `NVARCHAR(MAX)`. Design any additional
 search columns and indexes for your workload in a separate migration.
+
+## Separate installation and runtime identities
+
+Use a deployment identity for DDL and a separate application identity for manual logging. The
+MSSQL workflow includes a least-privilege smoke suite with separate SQL logins and database users:
+
+| Identity | Scope in the smoke suite |
+|---|---|
+| Bootstrap administrator | Create the disposable database, users and dedicated schema; grant permissions; verify rows and remove test resources |
+| Installer | Database `CONNECT` and `CREATE TABLE`, plus `ALTER` on the dedicated audit schema; no `sysadmin`, `db_owner` or `db_ddladmin` membership |
+| Runtime | Database `CONNECT`, business-table `INSERT` and `SELECT`, and audit-table `INSERT`; no audit-table read, mutation or DDL permissions |
+
+The audit schema is owned by `dbo`, not either restricted identity. The installer runs
+`applyAuditTableSchema()` and reapplies it using its own authenticated connection. SQL Server
+requires database `CREATE TABLE` and schema `ALTER` for table creation; DML trigger creation uses
+the target table's `ALTER` permission. See Microsoft's [CREATE TABLE permissions](https://learn.microsoft.com/en-us/sql/t-sql/statements/create-table-transact-sql?view=sql-server-ver17#permissions)
+and [CREATE TRIGGER permissions](https://learn.microsoft.com/en-us/sql/t-sql/statements/create-trigger-transact-sql?view=sql-server-ver17#permissions).
+
+For existing users and a dedicated schema created by your deployment administrator, the grant
+shape is:
+
+```sql
+GRANT CONNECT TO [audit_installer];
+GRANT CREATE TABLE TO [audit_installer];
+GRANT ALTER ON SCHEMA::[audit_history] TO [audit_installer];
+-- Run applyAuditTableSchema with tableName: 'audit_history.audit_logs' as audit_installer.
+
+GRANT CONNECT TO [app_runtime];
+GRANT INSERT ON OBJECT::[audit_history].[audit_logs] TO [app_runtime];
+-- Grant the application's required business-table permissions separately.
+```
+
+The smoke suite grants business-table `SELECT` for Prisma's returned business row, without
+granting audit-table `SELECT`. It verifies effective permissions and actual login identities,
+then tests commit, caller rollback, audit INSERT failure and a successful follow-up write.
+Administrator connections perform the audit-row assertions. Runtime attempts to read, update,
+delete, truncate, alter or drop the audit table, disable its triggers or install a new audit table
+must fail while the existing table, rows and triggers remain intact.
+
+This verifies the stated permission profile on the documented SQL Server/Prisma environment.
+Applications with additional models or operations need their corresponding business permissions;
+the suite is not a verification of every production identity or authentication method. Each run
+uses random credentials and cleans up only its own logins, users, schema and disposable database.
 
 ## Commit the event with the business write
 

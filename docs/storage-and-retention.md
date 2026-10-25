@@ -1,9 +1,9 @@
 # Audit storage, retention, and database permissions
 
-The PostgreSQL instructions below apply to published `0.7.0`. Start with the [README](../README.md);
+The PostgreSQL instructions below document version `0.7.1`. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
 
-**Unreleased SQL Server DDL:** schema utilities accept `provider: 'sqlserver'` for a flat audit
+**SQL Server DDL in 0.7.1:** schema utilities accept `provider: 'sqlserver'` for a flat audit
 table with `NVARCHAR(MAX)` JSON text, UTC timestamps, and UPDATE/DELETE rejection triggers.
 Unqualified table names use `dbo`; custom schemas must already exist. `getAuditTableStatements()`
 and `applyAuditTableSchema()` keep trigger batches separate; `getAuditTableSQL()` emits `GO`
