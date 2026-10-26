@@ -11,15 +11,42 @@ export type AuditErrorPhase =
   | 'insert'
   | 'post-read'
   | 'tenant-resolution'
-  | 'context';
+  | 'context'
+  | 'validation'
+  | 'serialization';
+
+/** Stable diagnostic classifications; the original thrown error is preserved. */
+export type AuditErrorCode =
+  | 'AUDIT_CONTEXT_INVALID'
+  | 'AUDIT_TENANT_INVALID'
+  | 'AUDIT_INPUT_INVALID'
+  | 'AUDIT_SERIALIZATION_FAILED'
+  | 'AUDIT_METADATA_TOO_LARGE'
+  | 'AUDIT_INSERT_FAILED'
+  | 'AUDIT_TRANSACTION_FAILED';
 
 export interface AuditErrorContext {
   phase: AuditErrorPhase;
+  code?: AuditErrorCode;
+  provider?: AuditDatabaseProvider;
+  durationMs?: number;
   model?: string;
   operation?: string;
   action?: string;
   targetId?: string | null;
   tenantId?: string | null;
+}
+
+/** No event payload, identifiers or raw errors are included in operation telemetry. */
+export interface AuditOperationEvent {
+  readonly provider: AuditDatabaseProvider;
+  readonly operation: 'log' | 'transaction';
+  readonly status: 'success' | 'failure';
+  readonly durationMs: number;
+  /** A successful external log is an INSERT completion, not a commit notification. */
+  readonly transaction: 'external' | 'standalone' | 'managed';
+  readonly phase?: AuditErrorPhase;
+  readonly code?: AuditErrorCode;
 }
 
 /**
@@ -35,6 +62,7 @@ export interface AuditSharedOptions {
   actorRequired?: boolean;
   tenantRequired?: boolean;
   tenantResolver?: () => string | null;
-  onAuditError?: (error: unknown, ctx: AuditErrorContext) => void;
+  /** Return values are ignored; returned thenable rejections are safely observed. */
+  onAuditError?: (error: unknown, ctx: AuditErrorContext) => unknown;
   logger?: AuditLogger;
 }

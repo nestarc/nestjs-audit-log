@@ -6,6 +6,7 @@ import {
   AuditContextStore,
 } from '../services/audit-context';
 import { AuditErrorContext } from '../interfaces/audit-shared-options.interface';
+import { errorMessage, invokeAuditObserver } from '../prisma/audit-extension/audit-errors';
 
 // Keep the request and extractor out of the public context store. Weak keys let
 // rejected requests and routes without an interceptor be collected normally.
@@ -74,34 +75,21 @@ export class AuditActorMiddleware implements NestMiddleware {
     const ctx: AuditErrorContext = { phase: 'context' };
     const logger = this.options.logger ?? console;
 
-    if (this.options.onAuditError) {
-      try {
-        this.options.onAuditError(error, ctx);
-        return;
-      } catch (callbackError) {
-        try {
-          logger.error(
-            `[@nestarc/audit-log] onAuditError callback threw: ${
-              callbackError instanceof Error
-                ? callbackError.message
-                : String(callbackError)
-            }`,
-          );
-        } catch {
-          // Reporting must never block request handling.
-        }
-        return;
-      }
+    const onAuditError = this.options.onAuditError;
+    if (onAuditError) {
+      invokeAuditObserver(
+        (reportedError, context) => onAuditError.call(this.options, reportedError, context),
+        [error, ctx],
+        callbackError => logger.error(
+          `[@nestarc/audit-log] onAuditError callback threw: ${errorMessage(callbackError)}`,
+        ),
+      );
+      return;
     }
 
-    try {
-      logger.error(
-        `[@nestarc/audit-log] audit context failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    } catch {
-      // Reporting must never block request handling.
-    }
+    invokeAuditObserver(
+      () => logger.error(`[@nestarc/audit-log] audit context failed: ${errorMessage(error)}`),
+      [],
+    );
   }
 }

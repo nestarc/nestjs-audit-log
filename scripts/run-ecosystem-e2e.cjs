@@ -25,8 +25,24 @@ function parseArguments(argv) {
   const mode = modeArgument?.startsWith('--') ? modeArgument.slice(2) : '';
   if (!MODES.has(mode)) {
     throw new Error(
-      'Usage: node scripts/run-ecosystem-e2e.cjs --published|--audit-log-candidate|--tenancy-candidate [--tenancy-tarball /absolute/path/to/candidate.tgz]',
+      'Usage: node scripts/run-ecosystem-e2e.cjs --published | --audit-log-candidate --soft-delete-version X.Y.Z | --tenancy-candidate --tenancy-tarball /absolute/path/to/candidate.tgz',
     );
+  }
+  if (mode === 'audit-log-candidate') {
+    if (argv.length !== 3 || argv[1] !== '--soft-delete-version' || !argv[2]) {
+      throw new Error(
+        '--audit-log-candidate requires --soft-delete-version with an exact stable X.Y.Z version',
+      );
+    }
+    const softDeleteVersion = argv[2];
+    const versionMatch = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(softDeleteVersion);
+    if (
+      versionMatch?.[0] !== softDeleteVersion ||
+      !softDeleteVersion.split('.').every(part => Number.isSafeInteger(Number(part)))
+    ) {
+      throw new Error('--soft-delete-version must be a canonical exact stable version (X.Y.Z)');
+    }
+    return { mode, tenancyTarball: null, softDeleteVersion };
   }
   if (mode === 'tenancy-candidate') {
     if (argv.length !== 3 || argv[1] !== '--tenancy-tarball' || !argv[2]) {
@@ -34,12 +50,12 @@ function parseArguments(argv) {
         '--tenancy-candidate requires --tenancy-tarball with an explicit .tgz file',
       );
     }
-    return { mode, tenancyTarball: path.resolve(argv[2]) };
+    return { mode, tenancyTarball: path.resolve(argv[2]), softDeleteVersion: null };
   }
   if (argv.length !== 1) {
     throw new Error(`${modeArgument} does not accept candidate artifact options`);
   }
-  return { mode, tenancyTarball: null };
+  return { mode, tenancyTarball: null, softDeleteVersion: null };
 }
 
 function validateTenancyTarball(tarballPath) {
@@ -110,7 +126,7 @@ function createStrictEnvironment(extra = {}) {
 }
 
 function main(argv = process.argv.slice(2)) {
-  const { mode, tenancyTarball } = parseArguments(argv);
+  const { mode, tenancyTarball, softDeleteVersion } = parseArguments(argv);
   const repositoryRoot = path.resolve(__dirname, '..');
   const fixtureSource = path.join(repositoryRoot, 'fixtures', 'published-ecosystem');
   const temporaryPrefix = `audit-log-ecosystem-${mode}-`;
@@ -148,8 +164,8 @@ function main(argv = process.argv.slice(2)) {
       const tarballPath = path.join(packageDirectory, pack.filename);
       logCandidate(pack.name, pack.version, pack.integrity, tarballPath);
       replaceFixtureDependency(fixtureCopy, AUDIT_LOG_PACKAGE, `file:${tarballPath}`);
-      // Keep the published baseline intact; 0.7 candidates require this companion release.
-      replaceFixtureDependency(fixtureCopy, '@nestarc/soft-delete', '0.7.4');
+      // The caller selects the companion tuple; the published baseline stays intact.
+      replaceFixtureDependency(fixtureCopy, '@nestarc/soft-delete', softDeleteVersion);
       verificationEnvironment = createStrictEnvironment({
         AUDIT_LOG_CANDIDATE_INTEGRITY: pack.integrity,
         AUDIT_LOG_CANDIDATE_VERSION: pack.version,

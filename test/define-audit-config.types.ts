@@ -15,6 +15,41 @@ export function configExamples(base: {
   const provider: AuditDatabaseProvider = 'sqlserver';
   const sqlserver = defineAuditConfig({ shared: { provider, tableName: 'dbo.events' }, module });
   AuditLogModule.forRoot({ ...sqlserver.moduleOptions, prisma: base });
+  const sqlserverAbsent: undefined = sqlserver.extensionOptions;
+  const dynamicProvider: AuditDatabaseProvider = Math.random() > 0.5 ? 'sqlserver' : 'postgresql';
+  const dynamic = defineAuditConfig({ shared: { provider: dynamicProvider }, module,
+    schema: { partitioned: false, ginIndex: false, enforcement: 'trigger' } });
+  const dynamicAbsent: undefined = dynamic.extensionOptions;
+  const undefinedExtension: undefined = undefined;
+  const explicitManual = defineAuditConfig({ module, extension: undefinedExtension });
+  const explicitAbsent: undefined = explicitManual.extensionOptions;
+  // @ts-expect-error SQL Server does not support automatic tracking.
+  defineAuditConfig({ shared: { provider: 'sqlserver' }, module, extension: { consistency: 'atomic-required' } });
+  // @ts-expect-error SQL Server does not support partitioned audit tables.
+  defineAuditConfig({ shared: { provider: 'sqlserver' }, module, schema: { partitioned: true } });
+  // @ts-expect-error SQL Server does not support PostgreSQL GIN indexes.
+  defineAuditConfig({ shared: { provider: 'sqlserver' }, module, schema: { ginIndex: true } });
+  // @ts-expect-error SQL Server append-only enforcement uses triggers, not PostgreSQL rules.
+  defineAuditConfig({ shared: { provider: 'sqlserver' }, module, schema: { enforcement: 'rule' } });
+  // @ts-expect-error Narrow a dynamic provider before enabling automatic tracking.
+  defineAuditConfig({ shared: { provider: dynamicProvider }, module, extension: { consistency: 'atomic-required' } });
+  const explicitPostgres = defineAuditConfig({ shared: { provider: 'postgresql' }, module,
+    extension: { consistency: 'atomic-required' }, schema: { partitioned: true, ginIndex: true, enforcement: 'rule' } });
+  createAuditedClient(base, explicitPostgres.extensionOptions);
+  const strictManual = defineAuditConfig({
+    shared: { provider: dynamicProvider, actorRequired: true, tenantRequired: true },
+    module: { ...module, strictManualValidation: true, maxMetadataBytes: 16_384,
+      onAuditOperation(event) {
+        const operation: 'log' | 'transaction' = event.operation;
+        void operation;
+        // @ts-expect-error Operation telemetry deliberately contains no event metadata.
+        void event.metadata;
+      },
+    },
+  });
+  AuditLogModule.forRoot({ ...strictManual.moduleOptions, prisma: base });
+  // @ts-expect-error Strict manual validation is configured in module, not shared.
+  defineAuditConfig({ module, shared: { strictManualValidation: true } });
   // @ts-expect-error Provider belongs in shared so DDL and writes cannot diverge.
   defineAuditConfig({ module, schema: { provider } });
   // @ts-expect-error Only Prisma's canonical provider names are accepted.
@@ -51,5 +86,5 @@ export function configExamples(base: {
   defineAuditConfig({ module, extension: { consistency: 'atomic-required', sensitiveFields: [] } });
   // @ts-expect-error Schema tableName belongs in shared.
   defineAuditConfig({ module, schema: { tableName: 'events' } });
-  return { absent, result, model, setup, partitions };
+  return { absent, sqlserverAbsent, dynamicAbsent, explicitAbsent, result, model, setup, partitions };
 }

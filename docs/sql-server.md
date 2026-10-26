@@ -1,17 +1,28 @@
-# SQL Server manual audit logging
+# SQL Server manual audit logging and history
 
-Documents the SQL Server APIs in `@nestarc/audit-log@0.7.1`. Install that package version into
-your existing NestJS application, then configure the SQL Server client and module below.
+Documents the SQL Server APIs for release target `@nestarc/audit-log@0.8.0`. Use an explicitly built
+tarball before registry publication; see the [installation guide](maintaining.md#candidate-documentation-example).
+Then configure the SQL Server client and module below.
 The verified target is SQL Server 2025 with Prisma CLI, client, and
-`@prisma/adapter-mssql` pinned to `7.10.0`. See the [0.7.1 release notes](releases/0.7.1.md)
+`@prisma/adapter-mssql` pinned to `7.10.0`. See the [0.8.0 release notes](releases/0.8.0.md)
 for verification results and the [CHANGELOG](../CHANGELOG.md) for version changes.
 
+For a complete runnable application, start with the [SQL Server Quick Start](../examples/sql-server-quick-start/README.md).
+It targets 0.8.0, generates Prisma, applies storage, and verifies commit, rollback,
+actor/tenant attribution, masking, and authorized history through application-owned SQL.
+Use the fragments below when integrating into an existing application.
+
+The [0.8.0 feature guide](product-quality.md) documents managed manual transactions, history reads,
+storage inspection, and optional read indexes. These additions are absent from 0.7.1.
+
 ```sh
-npm install --save-exact @nestarc/audit-log@0.7.1
+# After 0.8.0 is available in the registry:
+npm install --save-exact @nestarc/audit-log@0.8.0
 ```
 
-SQL Server support covers manual `AuditService.log()` calls and audit table installation. Passing
-the business transaction's `tx` to `log()` writes the event on that transaction. Omitting `provider`
+SQL Server supports manual `AuditService.log()` calls, managed manual transactions, tenant-scoped
+history reads and storage utilities. Passing the business transaction's `tx` to `log()` writes
+the event on that transaction. Omitting `provider`
 continues to select PostgreSQL; the package does not infer the database from a Prisma client.
 
 ## Configure the existing client and Nest module
@@ -197,6 +208,11 @@ audit record. A caught JavaScript policy error does not force rollback. `log(inp
 uses the configured base client and cannot make a separate business write atomic. Worker code can
 supply an actor through `AuditContext.runAs()` as described in [context and tenancy](context-and-tenancy.md).
 
+For a new transaction owned by the audit helper, use
+`audit.withManualTransaction(prisma.base, async ({ tx, log }) => { ... })`. Its bound `log(input)`
+cannot omit `tx`, and a caught audit failure still prevents commit. See the
+[managed manual transaction contract](product-quality.md#own-the-manual-transaction).
+
 ## Append-only enforcement and supported scope
 
 Statement-level UPDATE and DELETE triggers reject mutations affecting existing audit rows with
@@ -209,11 +225,38 @@ table's `INSERT` permission and any separately justified read permission, withou
 | API or option | SQL Server behavior |
 |---|---|
 | `AuditService.log(input, tx?)` | Supported manual parameterized INSERT |
+| `AuditService.withManualTransaction(client, callback, options?)` | Supported managed manual transaction with a bound writer |
+| `query`, `getById` | Supported tenant-scoped history reads with full-precision cursors and exact text filters |
+| `getCapabilities` | Reports provider API support without database I/O |
 | `getAuditTableStatements`, `getAuditTableSQL`, `applyAuditTableSchema` | Supported flat-table DDL with trigger enforcement |
+| `inspectSqlServerAuditStorage` | Read-only catalog inspection; visible metadata does not prove enforcement |
+| `getSqlServerAuditReadIndexStatements`, `applySqlServerAuditReadIndexes` | Optional additive read indexes, applied using an installer identity |
 | `createAuditExtension`, `createAuditedClient`, factory `extension` | Rejected during configuration |
-| `query`, `getById`, `prune`, `ensurePartitions` | Rejected before database access |
+| `prune`, `ensurePartitions` | Rejected before database access |
 | `scan`, `exportCsv` | Fail on iteration/stream consumption before database access or output |
 | `partitioned: true`, `ginIndex: true`, `enforcement: 'rule'` | Rejected before DDL execution |
 
-The PostgreSQL stream store and PostgreSQL query, export, and retention guides remain
-PostgreSQL-specific. A successfully created SQL Server audit table does not enable those APIs.
+The PostgreSQL stream store, scan/export and retention APIs remain PostgreSQL-specific.
+A successfully created SQL Server audit table does not enable those APIs.
+
+## Read tenant-scoped history
+
+Use `audit.query({ tenantId, targetType, targetId, limit: 50, includeTotal: false })` or
+`audit.getById(id, { tenantId })` after authorizing that tenant in the host application. Queries
+use parameterized exact binary text comparisons; cursor tokens preserve SQL Server timestamp
+precision. See [history pagination](product-quality.md#read-sql-server-history) and the
+[API reference](api-reference.md#auditservicequeryoptions) for filters and result contracts.
+Use [storage inspection](product-quality.md#inspect-storage-before-a-deployment) before an
+intentional [read-index migration](product-quality.md#add-read-indexes-explicitly).
+
+## Read the first event with application-owned SQL
+
+Application-owned SQL remains an alternative, including for consumers on 0.7.1. The
+[runnable history example](../examples/sql-server-quick-start/src/history.ts) checks the principal's
+permission and tenant membership before executing a bounded, parameterized query with tenant and
+target predicates. Its smoke verifies that another tenant cannot see the event. The fixed demo
+principal is test data; supply your authenticated identity and authorization in an application.
+
+Keep audit INSERT privileges separate from reader SELECT privileges when the deployment requires
+that split. A raw SQL filter does not authorize a caller, and the example's latest-50 query is not
+a general pagination or export implementation.

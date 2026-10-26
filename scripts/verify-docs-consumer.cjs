@@ -47,19 +47,22 @@ async function main() {
     const [pack] = JSON.parse(npm(['pack', '--json', '--pack-destination', temp], root, process.env, true));
     assert.equal(pack.name, '@nestarc/audit-log');
     const guides = ['agent-guide', 'adoption-guide', 'api-reference', 'transactions', 'context-and-tenancy',
-      'storage-and-retention', 'sql-server', 'export-and-streams', 'benchmarks', 'maintaining'];
+      'storage-and-retention', 'sql-server', 'product-quality', 'export-and-streams', 'benchmarks', 'maintaining'];
     const exampleFiles = ['README.md', 'package.json', '.env.example', 'tsconfig.json', 'prisma.config.ts',
       'prisma/schema.prisma', 'prisma/migrations/20260910000000_users/migration.sql',
       'prisma/migrations/20260929000000_user_roles/migration.sql',
       'src/prisma.service.ts', 'src/prisma.module.ts', 'src/app.module.ts', 'src/user.controller.ts',
       'candidate/adoption-smoke.ts', 'tsconfig.candidate.json',
+      'product-quality/consumer-smoke.ts', 'tsconfig.product-quality.json',
       'src/main.ts', 'src/setup.ts', 'src/smoke.ts', 'src/audit-options.ts', 'src/manual-role.ts', 'src/manual-smoke.ts'];
     for (const expected of ['README.md', 'llms.txt', 'dist/index.js', 'dist/index.d.ts',
-      'docs/benchmarks/2026-09-10-local.json', 'docs/releases/0.7.1.md',
+      'docs/benchmarks/2026-09-10-local.json', 'docs/releases/0.7.1.md', `docs/releases/${pack.version}.md`,
       ...['postgresql-run-1.json', 'postgresql-run-2.json', 'postgresql-run-3.json',
         'sqlserver.json', 'sqlserver-runner.json', 'sqlserver-image.json', 'sqlserver-container.json', 'provenance.json']
         .map(name => `docs/benchmarks/2026-10-25-release-0.7.1/${name}`),
       ...guides.map(name => `docs/${name}.md`),
+      ...['README.md', 'package.json', '.env.example', 'prisma/schema.prisma',
+        'src/setup.ts', 'src/smoke.ts'].map(name => `examples/sql-server-quick-start/${name}`),
       ...exampleFiles.map(name => `examples/quick-start/${name}`)]) {
       assert.ok(pack.files.some(file => file.path === expected), `Missing published file: ${expected}`);
     }
@@ -69,6 +72,8 @@ async function main() {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const registryVersion = manifest.dependencies['@nestarc/audit-log'];
     assert.match(registryVersion, /^\d+\.\d+\.\d+$/, 'The consumer default must pin a release.');
+    assert.equal(registryVersion, pack.version, 'The example targets the version being prepared for release.');
+    // Replace the release target before resolving a lock: a candidate need not exist on npm yet.
     if (!registry) manifest.dependencies['@nestarc/audit-log'] = `file:${path.join(temp, pack.filename)}`;
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     url.searchParams.set('schema', schema);
@@ -92,6 +97,7 @@ async function main() {
     npm(['run', 'smoke:manual'], consumer, env);
     npm(['run', 'smoke'], consumer, env);
     npm(['run', 'smoke:candidate'], consumer, env);
+    npm(['run', 'smoke:product-quality'], consumer, env);
     console.log(JSON.stringify({ package: pack.name, version: registry ? registryVersion : pack.version, mode: registry ? 'registry' : 'candidate',
       resolved: artifact.resolved, integrity: artifact.integrity,
       node: process.version, result: 'documentation consumer passed' }));

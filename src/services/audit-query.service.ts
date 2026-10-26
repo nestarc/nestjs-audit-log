@@ -6,13 +6,14 @@ import {
 } from '../interfaces/audit-entry.interface';
 import { AuditLogModuleOptions } from '../interfaces/audit-log-options.interface';
 import { PrismaModuleLike } from '../prisma/prisma-namespace';
-import { AuditDatabaseProvider, assertPostgresProvider, resolveAuditProvider } from '../sql/provider';
+import { resolveAuditProvider } from '../sql/provider';
 import { resolveTenantId } from '../utils/tenant';
 import {
   decodeAuditCursor,
   encodeAuditCursor,
   escapeLikePattern,
 } from './audit-cursor';
+import { SqlServerAuditQuery } from './audit-sqlserver-query';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -23,7 +24,7 @@ function isUuid(value: string): boolean {
 
 /** @internal */
 export class AuditQueryService {
-  private readonly provider: AuditDatabaseProvider;
+  private readonly sqlServerQuery: SqlServerAuditQuery | undefined;
   private unscopedQueryWarned = false;
 
   constructor(
@@ -31,15 +32,17 @@ export class AuditQueryService {
     private readonly Prisma: PrismaModuleLike['Prisma'],
     private readonly tableRef: unknown | null,
   ) {
-    this.provider = resolveAuditProvider(options.provider);
+    this.sqlServerQuery = resolveAuditProvider(options.provider) === 'sqlserver'
+      ? new SqlServerAuditQuery(options, Prisma, tableRef)
+      : undefined;
   }
 
   async query(options: AuditQueryOptions): Promise<AuditQueryResult> {
-    assertPostgresProvider(this.provider, 'AuditService.query');
     this.validateQueryPagination(options);
     const Prisma = this.Prisma;
     const baseConditions: unknown[] = [];
     const tenantId = this.resolveQueryTenantId(options);
+    if (this.sqlServerQuery) return this.sqlServerQuery.query(options, tenantId);
     const limit = options.limit ?? 50;
     const offset = options.offset ?? 0;
 
@@ -160,15 +163,15 @@ export class AuditQueryService {
     id: string,
     options: AuditGetByIdOptions = {},
   ): Promise<AuditEntry | null> {
-    assertPostgresProvider(this.provider, 'AuditService.getById');
     const normalizedId = id.toLowerCase();
     if (!isUuid(normalizedId)) {
       return null;
     }
 
     const Prisma = this.Prisma;
-    const conditions: unknown[] = [Prisma.sql!`id = ${normalizedId}::uuid`];
     const tenantId = this.resolveQueryTenantId(options);
+    if (this.sqlServerQuery) return this.sqlServerQuery.getById(normalizedId, tenantId);
+    const conditions: unknown[] = [Prisma.sql!`id = ${normalizedId}::uuid`];
     if (tenantId !== null) {
       conditions.push(Prisma.sql!`tenant_id = ${tenantId}`);
     }

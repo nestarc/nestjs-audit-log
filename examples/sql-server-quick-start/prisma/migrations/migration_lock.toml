@@ -1,0 +1,2 @@
+# Prisma's migration engine canonical provider differs from the schema keyword.
+provider = "mssql"

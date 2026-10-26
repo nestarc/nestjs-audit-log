@@ -1,11 +1,15 @@
 # Automatic tracking and transaction contracts
 
-Documents version `0.7.1`, including the returning-operation guard described below.
+Documents release target `0.8.0`, including the returning-operation guard described below.
 Start with the [README](../README.md); see [CHANGELOG](../CHANGELOG.md) for version changes.
 The guard was added in 0.7.0 and is not part of the 0.6.0 release.
 
 Automatic tracking in this guide is PostgreSQL-specific. For SQL Server manual events on the
 business transaction, use the [SQL Server guide](sql-server.md#commit-the-event-with-the-business-write).
+Version 0.8.0 adds `AuditService.withManualTransaction()` for PostgreSQL and SQL Server. It binds
+manual events to an owned transaction and prevents commit after a caught audit failure. See the
+[managed manual transaction guide](product-quality.md#own-the-manual-transaction). Caller-owned
+`log(input, tx)` still requires errors to propagate out of its ordinary transaction callback.
 
 ## Scope of automatic tracking
 
@@ -45,6 +49,7 @@ It supplies no child-record evidence for those changes. `@NoAudit()` remains an 
 | `atomic-required` + `withAuditTransaction()` | Same official Prisma interactive `tx` | Same `tx`; audit read/insert failure rolls back the business mutation |
 | Supported tracked operation in `atomic-required` outside the helper | Rejected before execution | Not attempted |
 | Explicit `best-effort` | Uses Prisma's `query(args)`, so the business write remains in the caller `$transaction` | Independent base-client insert; does not join the caller transaction |
+| Managed manual `AuditService.withManualTransaction()` | Use its supplied `tx` | Bound writer uses the same `tx`; a caught audit failure still prevents commit |
 | Manual logging with `AuditService.log(input, tx)` | Caller-controlled | Participates in the provided transaction |
 | Manual logging with `AuditService.log(input)` | Caller-controlled | Independent write via the base client |
 
@@ -183,8 +188,13 @@ No schema migration is required for this guard.
 `@nestarc/soft-delete` can route rewritten lifecycle mutations through the same official transaction.
 Apply extensions in the fixed order tenancy → audit-log → soft-delete. The integration fragment
 below assumes those packages' extension factories, `tenancyService`, and the public DMMF supplied
-as `prismaDmmf` are initialized according to their documentation. Install the [tested package tuple](../README.md#tested-ecosystem-versions)
-when reproducing the release fixture:
+as `prismaDmmf` are initialized according to their documentation. Check the
+[ecosystem compatibility status](../README.md#tested-ecosystem-versions) before using this with
+0.8.0: a historical tested tuple does not establish compatible peer ranges for a new minor version.
+The [optional compatibility workflow](maintaining.md#optional-ecosystem-compatibility) requires
+an explicit exact published soft-delete version for a packed audit-log candidate. Strict peer and
+lifecycle checks must pass before claiming a supported tuple; audit-log 0.8.0 with soft-delete
+0.7.4 remains unsupported. This integration does not gate standalone audit-log publication.
 
 ```typescript
 const prisma = basePrisma
@@ -221,5 +231,5 @@ exceeded. Lifecycle events remain notifications, not authoritative audit integra
 invent cascade semantics; configured database foreign-key behavior still applies.
 
 The [consumer-owned fixture](https://github.com/nestarc/nestjs-audit-log/blob/main/fixtures/published-ecosystem/test/ecosystem.e2e.cjs) contains the full
-integration setup and assertions. See [maintaining](maintaining.md#published-ecosystem-release-gate)
+integration setup and assertions. See [maintaining](maintaining.md#optional-ecosystem-compatibility)
 for the published tuple and packed-candidate verification process.

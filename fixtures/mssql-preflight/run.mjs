@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sql from 'mssql';
@@ -30,6 +31,7 @@ let bootstrap;
 let createdDatabase = false;
 let secrets = [];
 let preparedLogins = [];
+let exampleDirectory;
 
 function failure(code) {
   return Object.assign(new Error(code), { code });
@@ -160,7 +162,7 @@ try {
   await mkdir(path.dirname(probeReportPath), { recursive: true });
   // A setup failure must never leave a previous run's successful probe as evidence.
   await rm(probeReportPath, { force: true });
-  if (!['probe.mjs', 'library-probe.mjs', 'least-privilege-probe.mjs', 'manual-benchmark.mjs'].includes(probe)) throw failure('MSSQL_PROBE_INVALID');
+  if (!['probe.mjs', 'library-probe.mjs', 'least-privilege-probe.mjs', 'example-probe.mjs', 'manual-benchmark.mjs'].includes(probe)) throw failure('MSSQL_PROBE_INVALID');
   const configuration = readConfiguration();
   const databaseUrl = `sqlserver://${configuration.server}:${configuration.port};database=${database};schema=dbo;user={${configuration.user}};password={${configuration.password}};encrypt=true;trustServerCertificate=true`;
   secrets = [configuration.password, encodeURIComponent(configuration.password), databaseUrl];
@@ -175,9 +177,11 @@ try {
   };
   const prismaCli = path.join(fixtureRoot, 'node_modules/prisma/build/index.js');
   await step('verify-exact-prisma-packages', verifyPackages);
-  await step('generate-client', () => runChild(
-    [prismaCli, 'generate', '--config', 'prisma.config.ts'], environment, 60_000,
-  ));
+  if (probe !== 'example-probe.mjs') {
+    await step('generate-client', () => runChild(
+      [prismaCli, 'generate', '--config', 'prisma.config.ts'], environment, 60_000,
+    ));
+  }
   bootstrap = await step('server-readiness', () => connectWhenReady(configuration));
   await step('verify-sqlserver-2025', async () => {
     const result = await bootstrap.request().query(`
@@ -194,9 +198,18 @@ try {
     createdDatabase = true;
     report.cleanup.status = 'pending';
   });
-  await step('push-business-schema', () => runChild(
-    [prismaCli, 'db', 'push', '--config', 'prisma.config.ts'], environment, 120_000,
-  ));
+  if (probe === 'example-probe.mjs') {
+    await step('reserve-example-workspace', async () => {
+      exampleDirectory = await mkdtemp(path.join(os.tmpdir(), 'audit-mssql-example-'));
+      environment.MSSQL_EXAMPLE_DIRECTORY = exampleDirectory;
+      report.exampleWorkspaceCleanup = { status: 'pending' };
+    });
+    // The packed example applies its own migrations to the empty database.
+  } else {
+    await step('push-business-schema', () => runChild(
+      [prismaCli, 'db', 'push', '--config', 'prisma.config.ts'], environment, 120_000,
+    ));
+  }
   if (probe === 'least-privilege-probe.mjs') {
     await step('reserve-smoke-login-names', async () => {
       const token = database.slice('audit_preflight_'.length);
@@ -213,7 +226,7 @@ try {
     });
   }
   await step('run-real-database-probes', () => runChild(
-    ['--import', 'tsx', probe], environment, probe === 'manual-benchmark.mjs' ? 600_000 : 180_000,
+    ['--import', 'tsx', probe], environment, ['manual-benchmark.mjs', 'example-probe.mjs'].includes(probe) ? 600_000 : 180_000,
   ));
   report.status = 'passed';
 } catch (error) {
@@ -221,6 +234,16 @@ try {
   report.error = safeError(error);
   console.error(`[mssql-preflight] runner failed: ${JSON.stringify(report.error)}`);
 } finally {
+  if (exampleDirectory) {
+    try {
+      // The runner owns this exact mkdtemp result, including after child timeout.
+      await rm(exampleDirectory, { recursive: true, force: true });
+      report.exampleWorkspaceCleanup = { status: 'passed' };
+    } catch (error) {
+      report.status = 'failed';
+      report.exampleWorkspaceCleanup = { status: 'failed', error: safeError(error) };
+    }
+  }
   if (createdDatabase && bootstrap) {
     try {
       assert.match(database, /^audit_preflight_[a-f0-9]{32}$/);

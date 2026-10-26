@@ -2,7 +2,8 @@
 
 > NestJS audit logging with PostgreSQL change tracking and transactional manual logging for PostgreSQL and SQL Server.
 
-Documents @nestarc/audit-log version 0.7.1; the Quick Start pins that version.
+Documents @nestarc/audit-log release target 0.8.0; the Quick Start targets that version.
+This does not establish npm publication; use the local tarball procedure before registry availability.
 actorRequired and defineAuditConfig were introduced in 0.7.0. Locally packed candidates remain distinct
 from the registry artifact even when their versions match. Check the installed package source,
 declarations and [CHANGELOG](CHANGELOG.md) before choosing examples.
@@ -10,9 +11,10 @@ declarations and [CHANGELOG](CHANGELOG.md) before choosing examples.
 Require Node 22.23.4+ within 22.x or 24.22.1+ within 24.x; see [runtime requirements](README.md#requirements).
 The package's engines metadata does not replace the host runtime or restart running applications.
 
-Version 0.7.1 supports explicit provider: 'sqlserver' for manual logging and flat-table DDL.
-The Quick Start uses PostgreSQL. SQL Server automatic tracking,
-queries, export, retention and partitions are unsupported; use the dedicated guide below.
+Version 0.8.0 supports explicit provider: 'sqlserver' for manual logging, managed manual transactions,
+query/getById history reads, flat-table DDL, storage inspection and optional read indexes.
+The Quick Start uses PostgreSQL. SQL Server automatic tracking, scan/export, retention and
+partitions remain unsupported; use the dedicated guide below.
 
 ## Adoption and API guides
 
@@ -20,18 +22,21 @@ queries, export, retention and partitions are unsupported; use the dedicated gui
 - [Adoption guide](docs/adoption-guide.md): manual events, one-model tracking, role changes, authorized reads, and verification.
 - [Agent usage guide](docs/agent-guide.md): version boundaries and implementation recipes.
 - [Runnable example](examples/quick-start/README.md): Nest HTTP, Prisma generation, migrations, and smoke verification.
+- [SQL Server runnable example](examples/sql-server-quick-start/README.md): 0.8.0 manual logging, rollback, actor/tenant policy, masking, and authorized history access.
 - [API reference](docs/api-reference.md): public configuration and return contracts.
 - [Transactions](docs/transactions.md): atomic-required, unsupported operations, and lifecycle integration.
 - [Actor and tenancy](docs/context-and-tenancy.md): authenticated actors, jobs, and explicit query scope.
 - [Storage and retention](docs/storage-and-retention.md): privileges, partitions, and maintenance.
-- [SQL Server manual logging](docs/sql-server.md): provider configuration, same-transaction events, DDL batches, and support boundaries.
+- [SQL Server logging and history](docs/sql-server.md): provider configuration, same-transaction events, history queries, DDL batches, and support boundaries.
+- [0.8.0 product-quality APIs](docs/product-quality.md): managed manual transactions, opt-in validation, SQL Server reads and operational diagnostics introduced in 0.8.0.
 - [Export and streams](docs/export-and-streams.md): checkpoints, delivery retries, and late-commit limitations.
 - [Changelog](CHANGELOG.md): version changes.
 - [Candidate installation](docs/maintaining.md#candidate-documentation-example): build/pack and isolated consumer checks.
 
 ## Release references
 
-- [0.7.1 release notes](docs/releases/0.7.1.md): manual SQL Server support, verification, and current limits.
+- [0.8.0 release notes](docs/releases/0.8.0.md): managed manual transactions, SQL Server reads, diagnostics and scoped validation.
+- [0.7.1 release notes](docs/releases/0.7.1.md): historical introduction of manual SQL Server support and its release-specific limits.
 - [0.7.0 release](https://github.com/nestarc/nestjs-audit-log/releases/tag/v0.7.0)
 - [Official documentation](https://nestarc.dev/packages/audit-log/)
 - [npm package](https://www.npmjs.com/package/@nestarc/audit-log)

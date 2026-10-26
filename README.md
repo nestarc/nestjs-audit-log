@@ -1,29 +1,39 @@
-# NestJS audit logging with Prisma and PostgreSQL — @nestarc/audit-log
+# NestJS audit logging with Prisma — @nestarc/audit-log
 
 [![npm version](https://img.shields.io/npm/v/@nestarc/audit-log.svg)](https://www.npmjs.com/package/@nestarc/audit-log)
 [![npm downloads](https://img.shields.io/npm/dm/@nestarc/audit-log.svg)](https://www.npmjs.com/package/@nestarc/audit-log)
 [![CI](https://github.com/nestarc/nestjs-audit-log/actions/workflows/ci.yml/badge.svg)](https://github.com/nestarc/nestjs-audit-log/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Record who changed a Prisma model, what changed, and when in a NestJS application. Store automatic
-before/after diffs and manual business events in an append-only PostgreSQL audit trail, then query,
-export, or deliver the records to an external service.
+Record who changed what, and when, in a NestJS application. Commit manual business events with
+application writes and query tenant-scoped history on PostgreSQL or SQL Server. PostgreSQL also
+supports automatic before/after diffs, export, and delivery to external services.
 
-This README documents **`@nestarc/audit-log@0.7.1`**. The Quick Start pins that version.
-It includes `actorRequired`, `defineAuditConfig()`, and guards for unsupported returning
-bulk operations. See [CHANGELOG](CHANGELOG.md) and the
-[0.6 to 0.7 migration guide](docs/transactions.md#migrating-from-06-to-07).
+The Quick Start and public-API examples target **`@nestarc/audit-log@0.8.0`** and pin that version.
+Version 0.8.0 adds managed manual transactions, optional event validation, operation diagnostics,
+and SQL Server history queries. See [CHANGELOG](CHANGELOG.md), the
+[0.8.0 release notes](docs/releases/0.8.0.md), and the [feature guide](docs/product-quality.md).
+Versioned source documentation describes the target package; registry publication is verified separately.
 Maintainers can also verify a [locally packed candidate](docs/maintaining.md#candidate-documentation-example);
 verify its source and integrity separately from the registry artifact even when the version matches.
 
-Version 0.7.1 also supports
-[SQL Server manual audit logging](docs/sql-server.md) with explicit `provider: 'sqlserver'`,
-same-transaction events, and SQL Server DDL. See the [0.7.1 release notes](docs/releases/0.7.1.md)
-for validation and current limits. This support is not in 0.7.0. The Quick Start and
+Use [SQL Server support](docs/sql-server.md) with explicit `provider: 'sqlserver'` for
+same-transaction events, history reads, and SQL Server storage utilities. The Quick Start and
 automatic tracking examples below remain PostgreSQL-specific.
 
-Start with [a manual business event or one tracked model](docs/adoption-guide.md) in an existing app.
-The guide follows a role change through actor/tenant attribution and an authorized history query.
+## Choose your starting point
+
+| Your application | Start here | Verify the first result |
+|---|---|---|
+| PostgreSQL: keep existing transactions and add a business event | [Manual event adoption](docs/adoption-guide.md#start-with-a-manual-business-event) | [Runnable manual smoke](examples/quick-start/README.md#expected-first-records): actor, tenant, masking, and rollback |
+| PostgreSQL: record supported model changes automatically | [Quick Start](#quick-start) | [Runnable HTTP flow](examples/quick-start/README.md#try-the-http-flow): write, authorized history, and rollback |
+| SQL Server: record a business event in the same transaction | [SQL Server Quick Start](examples/sql-server-quick-start/README.md) | Commit an event, verify rollback, and read authorized history through application-owned SQL |
+
+Use one event or one tracked model first. The [adoption guide](docs/adoption-guide.md) shows how to
+expand after actor, tenant, redaction, and transaction behavior are verified.
+
+For the managed transaction helper, event validation, diagnostics, and SQL Server query APIs,
+see [new in 0.8.0](#new-in-080) and the [feature guide](docs/product-quality.md).
 
 **Choose `atomic-required` for automatic tracking:** supported tracked writes and their audit rows
 commit or roll back together inside `withAuditTransaction()`. Supported tracked writes outside the helper
@@ -40,13 +50,15 @@ audited client; see [tracking boundaries](docs/transactions.md).
 - [Tracking and storage boundaries](#tracking-and-storage-boundaries)
 - [Guides and API reference](#guides-and-api-reference)
 - [Tested ecosystem versions](#tested-ecosystem-versions)
+- [New in 0.8.0](#new-in-080)
 - [Performance and development](#performance-and-development)
 
 ## Requirements
 
 - An existing NestJS application using NestJS 10, 11, or 12.0.1+
-- Prisma 7 (primary), with Prisma 5/6 legacy peer compatibility
-- PostgreSQL
+- PostgreSQL with Prisma 7 (primary), or Prisma 5/6 legacy peer compatibility
+- Alternatively, SQL Server 2025 with Prisma CLI/client/MSSQL adapter 7.10.0 for manual logging;
+  follow its [separate setup and support boundaries](docs/sql-server.md)
 - Node.js 22.23.4+ within the 22.x line, or 24.22.1+ within the 24.x line
 
 These minimum versions include the Node.js fix for CVE-2026-111497 in its bundled Brotli decoder.
@@ -73,10 +85,10 @@ The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that m
 
 ### 1. Install and generate Prisma
 
-In your existing NestJS application, install version 0.7.1 and Prisma 7 runtime dependencies:
+In your existing NestJS application, install version 0.8.0 and Prisma 7 runtime dependencies:
 
 ```bash
-npm install --save-exact @nestarc/audit-log@0.7.1
+npm install --save-exact @nestarc/audit-log@0.8.0
 npm install @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
 npm install --save-dev prisma@7
 ```
@@ -131,7 +143,41 @@ using `prisma-client-js` can keep their existing generation/connection setup and
 
 The base Prisma client stores and queries audit rows. The extended view intercepts your application's
 business writes. Both views share the underlying Prisma client; do not create another connection
-pool solely for the extension.
+pool solely for the extension. Build module, extension, and table options from one definition:
+
+```typescript
+// audit.config.ts
+import { defineAuditConfig } from '@nestarc/audit-log';
+import { Prisma } from './generated/prisma/client';
+
+export const auditConfig = defineAuditConfig({
+  shared: {
+    provider: 'postgresql',
+    tableName: 'audit_logs',
+    prismaModule: { Prisma },
+    actorRequired: true,
+    sensitiveFields: ['password', 'ssn'],
+  },
+  module: {
+    actorExtractionStage: 'interceptor',
+    actorExtractor: req => ({
+      id: req.user?.id ?? null,
+      type: req.user ? 'user' : 'system',
+      ip: req.ip,
+    }),
+  },
+  extension: {
+    consistency: 'atomic-required',
+    trackedModels: ['User'],
+    databaseMapping: { User: { tableName: 'users' } },
+  },
+});
+```
+
+`actorRequired: true` rejects writes without an identifiable actor. Your authentication Guard must
+populate `req.user.id`; background jobs use `AuditContext.runAs()` with a system ID. For tenant-owned
+data, also set `tenantRequired` and a trusted `tenantResolver` in `shared`; the
+[runnable example](examples/quick-start/src/audit-options.ts) demonstrates both.
 
 ```typescript
 // prisma.service.ts
@@ -139,14 +185,8 @@ import 'dotenv/config';
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createAuditedClient } from '@nestarc/audit-log';
-import { Prisma, PrismaClient } from './generated/prisma/client';
-
-export const prismaModule = { Prisma };
-export const sharedAuditOptions = {
-  tableName: 'audit_logs',
-  sensitiveFields: ['password', 'ssn'],
-  prismaModule,
-};
+import { PrismaClient } from './generated/prisma/client';
+import { auditConfig } from './audit.config';
 
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {
@@ -154,12 +194,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
   });
 
-  readonly client = createAuditedClient(this.base, {
-    ...sharedAuditOptions,
-    consistency: 'atomic-required',
-    trackedModels: ['User'],
-    databaseMapping: { User: { tableName: 'users' } },
-  });
+  readonly client = createAuditedClient(this.base, auditConfig.extensionOptions);
 
   async onModuleInit() { await this.base.$connect(); }
   async onModuleDestroy() { await this.base.$disconnect(); }
@@ -180,11 +215,12 @@ Create the audit table through a migration or setup script using the **base** cl
 
 ```typescript
 import { applyAuditTableSchema } from '@nestarc/audit-log';
+import { auditConfig } from './audit.config';
 
-await applyAuditTableSchema(prismaService.base, { tableName: 'audit_logs' });
+await applyAuditTableSchema(prismaService.base, auditConfig.schemaOptions);
 ```
 
-`getAuditTableSQL({ tableName: 'audit_logs' })` provides the SQL for your migration tool. The runnable
+`getAuditTableSQL(auditConfig.schemaOptions)` provides the SQL for your migration tool. The runnable
 example includes this setup; production deployments should apply it through their migration process.
 See [storage setup](docs/storage-and-retention.md) for partitions and database permissions.
 
@@ -195,7 +231,8 @@ See [storage setup](docs/storage-and-retention.md) for partitions and database p
 import { Module } from '@nestjs/common';
 import { AuditLogModule } from '@nestarc/audit-log';
 import { PrismaModule } from './prisma.module';
-import { PrismaService, sharedAuditOptions } from './prisma.service';
+import { PrismaService } from './prisma.service';
+import { auditConfig } from './audit.config';
 
 @Module({
   imports: [
@@ -203,14 +240,8 @@ import { PrismaService, sharedAuditOptions } from './prisma.service';
     AuditLogModule.forRootAsync({
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) => ({
-        ...sharedAuditOptions,
+        ...auditConfig.moduleOptions,
         prisma: prisma.base,
-        actorExtractionStage: 'interceptor',
-        actorExtractor: (req) => ({
-          id: req.user?.id ?? null,
-          type: req.user ? 'user' : 'system',
-          ip: req.ip,
-        }),
       }),
     }),
   ],
@@ -225,12 +256,10 @@ resolve identity there. The default remains `'middleware'` for compatibility. Wr
 precede interceptor extraction; use earlier authentication middleware if those writes need an actor.
 See [actor context](docs/context-and-tenancy.md) for manual interceptor binding and background jobs.
 
-Module and extension options are **independent**. The shared object above configures both automatic
-field masking and manual metadata masking. Pass matching `tableName`, tenant options, and error
-reporting options to both paths when they should share behavior; schema utilities also need the same
-table name. Module options do not configure the extension automatically.
-In 0.7.0, [`defineAuditConfig()`](docs/api-reference.md#common-configuration-factory) can build these
-option objects from one shared definition; the direct registration above remains supported.
+[`defineAuditConfig()`](docs/api-reference.md#common-configuration-factory) keeps table, actor,
+tenant, masking, and error settings aligned across consumers. It does not open a connection or apply
+DDL. Direct module and extension registration remains supported, but those options are independent:
+setting a policy on the module alone does not configure the automatic extension.
 
 ## Read and write audit records
 
@@ -335,7 +364,7 @@ to `AuditService.log(input, tx)` as your business write. See the
 |---|---|
 | Automatic single-record tracking | `create`, `update`, `delete`, and `upsert` through the audited client; supported operations use the helper's transaction |
 | Bulk writes | Atomic `deleteMany` records individual rows within `maxBatchRecords`; atomic `createMany`/`updateMany` are rejected; see the [bulk matrix](docs/transactions.md#bulk-mutation-contract) |
-| Returning bulk writes | In 0.7.0, tracked `createManyAndReturn`/`updateManyAndReturn` are rejected in atomic mode; best-effort warns and produces no automatic audit row |
+| Returning bulk writes | Tracked `createManyAndReturn`/`updateManyAndReturn` are rejected in atomic mode; best-effort warns and produces no automatic audit row |
 | Nested writes | Use explicit related-model writes inside the helper for tracked relations; see [nested writes](docs/transactions.md#nested-writes) |
 | Other writes | Base-client writes, raw SQL, unsupported operations, and database-side cascades/triggers are outside automatic record coverage |
 | Append-only storage | Default row triggers block `UPDATE`/`DELETE`; runtime permissions and a separate owner are required to prevent privileged bypasses or `TRUNCATE` |
@@ -359,7 +388,8 @@ and [export guarantees](docs/export-and-streams.md).
 | Export CSV or deliver logs to HTTP, object storage, Datadog, or Splunk | [Export and streams](docs/export-and-streams.md) |
 | Use the package from an AI-assisted workflow | [Agent guide](docs/agent-guide.md) |
 | Check release changes | [CHANGELOG](CHANGELOG.md) |
-| Review 0.7.1 changes, validation, and support limits | [0.7.1 release notes](docs/releases/0.7.1.md) |
+| Review 0.8.0 changes, validation, and support limits | [0.8.0 release notes](docs/releases/0.8.0.md) |
+| Use managed manual transactions, validation, diagnostics, and SQL Server history | [Feature guide](docs/product-quality.md) |
 
 AI agents can start with [the agent guide](docs/agent-guide.md), [llms.txt](llms.txt), the runnable example,
 and the public TypeScript exports
@@ -368,24 +398,64 @@ historical; use the guides above for current behavior.
 
 ## Tested ecosystem versions
 
-The independent PostgreSQL release fixture verifies this last-known-good published tuple:
+The optional PostgreSQL compatibility fixture verifies this last-known-good published tuple:
 
-| Component | Exact gate version |
+| Component | Exact verified version |
 |---|---|
 | `@nestarc/tenancy` | `0.15.0` |
 | `@nestarc/audit-log` | `0.5.0` |
 | `@nestarc/soft-delete` | `0.7.3` |
 | Runtime lane | Node 24, NestJS 11.1.18, Prisma 7.9.1, PostgreSQL 16 |
 
-This is a coordinated integration test tuple, not the full peer-support matrix. The candidate gate
-also tests the current audit-log checkout as a packed package. See
-[maintaining and releasing](docs/maintaining.md) for fixture integrity checks and release procedures.
+This is a coordinated integration test tuple, not the full peer-support matrix or proof of 0.8.0
+integration support. Standalone audit-log CI and publication do not depend on this optional
+soft-delete integration; core validation, packed documentation consumers and MSSQL checks remain required.
+
+The manually dispatched `Ecosystem compatibility` workflow checks either that published tuple or
+the packed audit-log candidate with an explicitly selected exact published soft-delete version.
+Strict peer checks and lifecycle assertions must pass before a tuple is described as supported.
+Soft-delete 0.7.4 excludes audit-log 0.8.0 from its peer range, so that combination remains unsupported.
+See [compatibility verification](docs/maintaining.md#optional-ecosystem-compatibility) for commands,
+artifact checks and the separate release procedure.
+
+<a id="unreleased-improvements"></a>
+
+## New in 0.8.0
+
+Version 0.8.0 includes the following additions to the 0.7.1 API:
+
+- **Managed manual transactions:** `AuditService.withManualTransaction()` supplies a typed
+  transaction and bound writer. Caught audit failures still prevent commit, started writes settle
+  before completion, and expired writers reject.
+- **Event validation:** opt into `strictManualValidation` and `maxMetadataBytes` to validate
+  inputs and enforce a final redacted JSON budget in UTF-8 bytes before INSERT.
+- **Diagnostics and capabilities:** `onAuditOperation` reports outcomes and timing without event
+  contents; diagnostic callbacks are isolated from writes. `getCapabilities()` describes the
+  configured provider's supported APIs without database access.
+- **SQL Server history and storage tools:** `query()` and `getById()` support tenant-scoped reads,
+  full-precision cursors and exact text filtering. Optional read indexes and read-only storage
+  inspection help prepare the schema for history queries.
+
+See the [feature guide](docs/product-quality.md) for configuration, examples and boundaries.
+SQL Server automatic tracking, scan/export and retention remain unsupported.
 
 ## Performance and development
 
 Performance depends on operation, consistency mode, transaction overhead, schema, and workload.
 Use the [reproducible benchmark](docs/benchmarks.md) to compare direct writes, plain transactions,
 `atomic-required`, and explicit `best-effort`. No single latency number represents every mode.
+
+The development candidate recorded in the **2026-10-26 local validation** passed seven individual
+PostgreSQL scenarios against published 0.7.1. The limits stayed at mean latency ≤+10%, P95 ≤+15%,
+and throughput ≥−10%. Automatic create used a predeclared 32-process comparison with identical
+package calibration, balanced execution and confidence bounds; the other six scenarios passed
+both original formal runs.
+
+For automatic create, the one-sided 95% bounds on geometric mean process ratios were **+2.83% mean
+latency**, **+4.93% P95 latency**, and **−2.75% throughput**. This is approval for the recorded local
+candidate and scenarios, not a production SLO or SQL Server performance claim. The repository
+validation record, `docs/2026-10-26-performance-resolution.md`, identifies the exact artifact,
+environment, retained sequential results and historical failure.
 
 For repository setup and lint, typecheck, unit, PostgreSQL E2E, and ecosystem tests, see
 [development commands](docs/maintaining.md#development).

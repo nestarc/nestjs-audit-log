@@ -145,14 +145,46 @@ describe('defineAuditConfig', () => {
   it('rejects unsupported SQL Server settings before any runtime work', () => {
     const shared = { provider: 'sqlserver' as const };
     expect(() => defineAuditConfig({ module: { actorExtractor }, shared,
-      extension: { consistency: 'atomic-required' } })).toThrow('Automatic audit tracking');
+      extension: { consistency: 'atomic-required' } } as never)).toThrow('Automatic audit tracking');
     for (const schema of [{ partitioned: true }, { ginIndex: true }, { enforcement: 'rule' as const }]) {
-      expect(() => defineAuditConfig({ module: { actorExtractor }, shared, schema })).toThrow();
+      expect(() => defineAuditConfig({ module: { actorExtractor }, shared, schema } as never)).toThrow();
     }
     expect(() => defineAuditConfig({ module: { actorExtractor }, shared: { provider: 'mssql' as any } })).toThrow('provider');
     expect(() => defineAuditConfig({ module: { actorExtractor }, shared: {
       ...shared, tableName: `${'s'.repeat(129)}.events`,
     } })).toThrow();
     expect(actorExtractor).not.toHaveBeenCalled();
+  });
+
+  it('accepts portable manual settings for either runtime-selected provider', () => {
+    for (const provider of ['postgresql', 'sqlserver'] as const) {
+      const config = defineAuditConfig({
+        shared: { provider },
+        module: { actorExtractor },
+        schema: { partitioned: false, ginIndex: false, enforcement: 'trigger' },
+      });
+      expect(config.moduleOptions.provider).toBe(provider);
+      expect(config.schemaOptions).toEqual({ provider, partitioned: false, ginIndex: false, enforcement: 'trigger' });
+      expect(config.extensionOptions).toBeUndefined();
+    }
+  });
+
+  it('keeps strict manual settings and observers in the module configuration', () => {
+    const onAuditOperation = jest.fn();
+    const config = defineAuditConfig({
+      shared: { provider: 'sqlserver', actorRequired: true },
+      module: { actorExtractor, strictManualValidation: true, maxMetadataBytes: 16_384, onAuditOperation },
+    });
+    expect(config.moduleOptions).toMatchObject({ strictManualValidation: true, maxMetadataBytes: 16_384 });
+    expect(config.moduleOptions.onAuditOperation).toBe(onAuditOperation);
+    expect(config.schemaOptions).toEqual({ provider: 'sqlserver' });
+    expect(onAuditOperation).not.toHaveBeenCalled();
+    for (const module of [
+      { actorExtractor, strictManualValidation: 'true' },
+      { actorExtractor, maxMetadataBytes: 0 },
+      { actorExtractor, maxMetadataBytes: Number.MAX_SAFE_INTEGER + 1 },
+    ]) {
+      expect(() => defineAuditConfig({ module } as never)).toThrow();
+    }
   });
 });

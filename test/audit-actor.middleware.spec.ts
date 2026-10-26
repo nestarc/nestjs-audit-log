@@ -178,4 +178,54 @@ describe('AuditActorMiddleware', () => {
       );
     });
   });
+
+  it.each(['extractor', 'correlation'] as const)(
+    'isolates rejected observer and logger promises after a %s failure', async source => {
+      const original = new Error('context failure');
+      const observerError = new Error('observer rejection');
+      const onAuditError = jest.fn(function (this: AuditLogModuleOptions) {
+        return Promise.reject(observerError);
+      });
+      const logger = {
+        warn: jest.fn(),
+        error: jest.fn((): unknown => Promise.reject(new Error('logger rejection'))),
+      };
+      const configured: AuditLogModuleOptions = {
+        ...options, onAuditError, logger,
+        ...(source === 'extractor'
+          ? { actorExtractor: () => { throw original; } }
+          : { correlationIdGetter: () => { throw original; } }),
+      };
+      middleware = new AuditActorMiddleware(configured);
+      const next = jest.fn(() => {
+        expect(onAuditError).toHaveBeenCalledTimes(1);
+        expect(onAuditError).toHaveBeenCalledWith(original, { phase: 'context' });
+        expect(AuditContext.getMetadata()).toBeUndefined();
+        if (source === 'extractor') expect(AuditContext.getActor()).toBeNull();
+      });
+      await middleware.use({}, {}, next);
+      await new Promise(resolve => setImmediate(resolve));
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(onAuditError.mock.contexts[0]).toBe(configured);
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.error).toHaveBeenCalledWith(
+        '[@nestarc/audit-log] onAuditError callback threw: observer rejection',
+      );
+    },
+  );
+
+  it('isolates a rejected fallback logger promise while continuing with a null actor', async () => {
+    const logger = {
+      warn: jest.fn(),
+      error: jest.fn((): unknown => Promise.reject(new Error('logger rejection'))),
+    };
+    middleware = new AuditActorMiddleware({
+      ...options, logger, actorExtractor: () => { throw new Error('extractor failure'); },
+    });
+    const next = jest.fn(() => { expect(AuditContext.getActor()).toBeNull(); });
+    await middleware.use({}, {}, next);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
 });

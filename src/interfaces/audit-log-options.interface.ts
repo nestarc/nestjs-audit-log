@@ -1,7 +1,7 @@
 import { ModuleMetadata } from '@nestjs/common';
 import { RouteInfo } from '@nestjs/common/interfaces';
 import { ActorExtractor } from './actor.interface';
-import { AuditSharedOptions } from './audit-shared-options.interface';
+import { AuditSharedOptions, AuditOperationEvent } from './audit-shared-options.interface';
 import { PrismaModuleLike } from '../prisma/prisma-namespace';
 
 export interface AuditLogModuleOptions extends AuditSharedOptions {
@@ -21,6 +21,12 @@ export interface AuditLogModuleOptions extends AuditSharedOptions {
   registerGlobalInterceptor?: boolean;
   correlationIdHeader?: string;
   correlationIdGetter?: (req: any) => string | undefined;
+  /** Opt-in validation of manual event fields, identities and lossless JSON inputs. */
+  strictManualValidation?: boolean;
+  /** Maximum UTF-8 bytes of serialized, redacted manual metadata; never truncates. */
+  maxMetadataBytes?: number;
+  /** Optional manual-operation timings; observer failures never affect the operation. */
+  onAuditOperation?: (event: AuditOperationEvent) => unknown;
 }
 
 export interface AuditLogModuleAsyncOptions

@@ -1,0 +1,17 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "sqlserver"
+}
+
+model Invoice {
+  id       String @id @db.NVarChar(80)
+  tenantId String @db.NVarChar(80)
+  status   String @db.NVarChar(40)
+
+  @@map("audit_demo_invoices")
+}

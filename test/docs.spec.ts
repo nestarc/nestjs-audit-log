@@ -18,9 +18,11 @@ const guides = [
   'docs/benchmarks.md',
   'docs/maintaining.md',
   'docs/sql-server.md',
-  'docs/releases/0.7.1.md',
+  'docs/product-quality.md',
+  'docs/releases/0.8.0.md',
 ];
-const currentUsage = ['README.md', 'llms.txt', ...guides, 'examples/quick-start/README.md'];
+const currentUsage = ['README.md', 'llms.txt', ...guides,
+  'examples/quick-start/README.md', 'examples/sql-server-quick-start/README.md'];
 const packageFiles = (JSON.parse(read('package.json')) as { files: string[] }).files;
 // A dated changelog describes the version these files will accompany, not registry availability.
 // The --registry consumer check verifies publication separately after npm publish succeeds.
@@ -337,11 +339,12 @@ describe('documentation gates', () => {
     const readme = read('README.md');
     const changelog = read('CHANGELOG.md');
 
-    expect(packageJson.version).toBe('0.7.1');
+    expect(packageJson.version).toBe('0.8.0');
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages['']?.version).toBe(packageJson.version);
-    expect(changelog).toContain(`## [${packageJson.version}] - 2026-10-25`);
+    expect(changelog).toContain(`## [${packageJson.version}] - 2026-10-26`);
     expect(documentedVersion).toBe(packageJson.version);
+    expect(changelog).toContain('## [0.7.1] - 2026-10-25');
     expect(changelog).toContain('## [0.7.0] - 2026-09-29');
     expect(changelog).toContain('## [0.6.0] - 2026-09-10');
     expect(read('docs/maintaining.md')).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);

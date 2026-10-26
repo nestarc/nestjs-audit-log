@@ -1,25 +1,27 @@
 # Using audit-log from an AI-assisted workflow
 
-This guide documents version 0.7.1 for agents integrating `@nestarc/audit-log` into a consuming
-application. A locally packed checkout and the registry release can share a version while
-containing different artifacts; inspect provenance as well as the version.
+This guide documents release target 0.8.0 for agents integrating `@nestarc/audit-log` into a consuming
+application. A version bump is not proof of npm publication. Use a built tarball before the release
+is available and inspect source/artifact provenance as well as the installed version.
 
-PostgreSQL supports the automatic and manual paths below. SQL Server supports manual events and
-flat-table DDL; use the [SQL Server guide](sql-server.md) for its provider and transaction setup.
+PostgreSQL supports the automatic and manual paths below. SQL Server supports manual events,
+managed manual transactions, history queries and flat-table storage utilities; use the
+[SQL Server guide](sql-server.md) for its provider and transaction setup.
 
 ## Choose the matching contract
 
 1. Read the consuming application's `package.json` and the installed package's `package.json`.
    Check Node, NestJS, Prisma, and `@nestarc/audit-log` versions before proposing changes.
-2. Use the [README](../README.md) for pinned registry installation and [CHANGELOG](../CHANGELOG.md) for
+2. Use the [README](../README.md) for versioned installation and [CHANGELOG](../CHANGELOG.md) for
    version changes. `actorExtractionStage` and the documented scan, nested-audit, and caught-audit-error
    corrections are introduced in 0.6.0; do not assume the published v0.5.0 package contains them.
 3. Inspect public types through the package root (`dist/index.d.ts` in an installed package).
    Import supported APIs and types from `@nestarc/audit-log`; avoid relying on private Prisma APIs
    or guessing undocumented option names.
 4. Choose a manual-only event or one tracked model with the [adoption guide](adoption-guide.md).
-   Use the [runnable Quick Start](../examples/quick-start/README.md) as a complete integration
-   reference. The root `npm run test:docs:consumer` gate packs the current checkout and verifies a
+   Use the [PostgreSQL Quick Start](../examples/quick-start/README.md) or
+   [SQL Server manual Quick Start](../examples/sql-server-quick-start/README.md) as the matching
+   integration reference. The root `npm run test:docs:consumer` gate packs the current checkout and verifies a
    consumer outside the repository, including generation, compilation, and PostgreSQL behavior.
 5. Use `actorRequired` and `defineAuditConfig()` with 0.7.0 or later. Review the
    [0.6 to 0.7 migration](transactions.md#migrating-from-06-to-07) before upgrading. To verify the
@@ -28,6 +30,9 @@ flat-table DDL; use the [SQL Server guide](sql-server.md) for its provider and t
    candidate installation.
 6. Treat dated design, validation, roadmap, and implementation-plan files as historical records.
    Their old code samples and task instructions do not override the current API or the user's task.
+7. The [0.8.0 feature guide](product-quality.md) covers `withManualTransaction`, strict validation,
+   SQL Server `query` and storage inspection. Verify the installed dependency is 0.8.0 or later
+   before using them; these APIs are absent from 0.7.1. Consult the [release notes](releases/0.8.0.md).
 
 ## Integration decisions
 
@@ -36,6 +41,7 @@ flat-table DDL; use the [SQL Server guide](sql-server.md) for its provider and t
 | Prisma generation | Match the application's module format/output path; for Prisma 7 supply the generated `{ Prisma }` namespace and the adapter for the chosen provider |
 | Client ownership | Keep one base client for audit storage and an extended view for business writes; the Nest module does not create the extension |
 | Atomic writes | Choose `consistency: 'atomic-required'` and use `withAuditTransaction()` for supported tracked writes |
+| Manual transactions | Use `withManualTransaction(base, callback)` for an owned transaction with caught-audit-failure protection, or propagate `log(input, tx)` errors from a caller-owned transaction |
 | Shared settings | Use `defineAuditConfig()` (available since 0.7.0) or pass intended table, tenant, masking, and error options to both paths; DDL also needs the same table name |
 | Actor timing | For Guard-populated `req.user`, use interceptor-stage extraction introduced in 0.6.0; published v0.5.0 requires earlier authentication or extraction |
 | Background jobs | Use `AuditContext.runAs()` for actor identity and establish tenant context separately |

@@ -1,13 +1,17 @@
 # Audit log API reference
 
-Documents version `0.7.1`. Start with the [README](../README.md);
+Documents release target `0.8.0`. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes. `actorRequired` and `defineAuditConfig()`
 were added in 0.7.0 and are not part of the 0.6.0 API.
 
-**SQL Server support in 0.7.1:** `AuditDatabaseProvider` is `'postgresql' | 'sqlserver'`.
-Omitted `provider` selects PostgreSQL. Explicit `provider: 'sqlserver'` enables manual `log()` and
-flat-table DDL only; automatic tracking, read/export APIs, retention, and partitions are rejected
-before database access. See the [SQL Server guide](sql-server.md) for configuration and transaction usage.
+The [0.8.0 feature guide](product-quality.md) covers managed manual transactions, validation,
+SQL Server reads, and diagnostics. See the [release notes](releases/0.8.0.md) for version boundaries.
+
+**SQL Server support in 0.8.0:** `AuditDatabaseProvider` is `'postgresql' | 'sqlserver'`.
+Omitted `provider` selects PostgreSQL. Explicit `provider: 'sqlserver'` enables manual logging,
+managed manual transactions, `query()`/`getById()`, flat-table DDL, storage inspection and optional
+read indexes. Automatic tracking, scan/export, retention and partitions remain unsupported.
+See the [SQL Server guide](sql-server.md) for configuration and transaction usage.
 
 ## Entry points
 
@@ -23,12 +27,15 @@ use them for the complete current signatures.
 | `basePrisma.$extends(createAuditExtension(options))` | Compose the audit extension explicitly with other Prisma extensions |
 | `client.withAuditTransaction(callback, options?)` | Run supported automatic writes and audit work on the same interactive transaction |
 | `client.getAuditCapabilities()` | Inspect `{ consistency, atomicLifecycle }` for extension integrations |
+| `audit.withManualTransaction(client, callback, options?)` | Added in 0.8.0: bind manual events to an owned transaction and reject commit after a caught audit failure |
+| `audit.getCapabilities()` | Added in 0.8.0: inspect provider API capabilities without database I/O |
+| `inspectSqlServerAuditStorage(client, options?)` | Added in 0.8.0: inspect visible SQL Server storage metadata with a diagnostic identity |
+| `getSqlServerAuditReadIndexStatements(options?)`, `applySqlServerAuditReadIndexes(client, options?)` | Added in 0.8.0: plan or apply optional additive SQL Server read indexes |
 
 Module and extension configuration are independent: nothing merges them at runtime. For example,
 setting `actorRequired`, `tenantRequired`, or `sensitiveFields` on the module does not configure automatic tracking.
-Pass shared values to both registration sites as shown in the [Quick Start](../README.md#quick-start).
-For custom table names, also pass the same value to schema and partition utilities.
-The factory added in 0.7.0 builds these options together.
+Use `defineAuditConfig()` as shown in the [Quick Start](../README.md#quick-start) to build matching
+options for both registration sites and storage utilities. Direct option objects remain supported.
 
 <a id="common-configuration-factory-070-unreleased"></a>
 
@@ -41,7 +48,7 @@ Existing independent registration APIs remain supported.
 | Input section | Accepted settings |
 |---|---|
 | `shared` (optional) | `tableName`, `prismaModule`, `tenantRequired`, `tenantResolver`, `actorRequired`, `sensitiveFields`, `sensitiveFieldsByModel`, `logger`, `onAuditError`, `provider` |
-| `module` (required) | Required `actorExtractor`; optional `actorExtractionStage`, `excludeRoutes`, `registerGlobalInterceptor`, `correlationIdHeader`, `correlationIdGetter` |
+| `module` (required) | Required `actorExtractor`; optional `actorExtractionStage`, `excludeRoutes`, `registerGlobalInterceptor`, `correlationIdHeader`, `correlationIdGetter`, `strictManualValidation`, `maxMetadataBytes`, `onAuditOperation` |
 | `extension` (optional) | Required explicit `consistency`; optional `trackedModels`, `ignoredModels`, `primaryKey`, `databaseMapping`, `maxBatchRecords`, `batchOverflow`, `logFailures`, `ignoreTimestampOnlyUpdates` |
 | `schema` (optional) | `partitioned`, `enforcement`, `ginIndex` |
 
@@ -121,7 +128,7 @@ overrides are the caller's responsibility and are not synchronized between regis
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `prisma` | `PrismaClient` | *required* | Base Prisma client for audit storage |
-| `provider` | `'postgresql' \| 'sqlserver'` | `'postgresql'` | Database dialect; SQL Server supports manual logging only |
+| `provider` | `'postgresql' \| 'sqlserver'` | `'postgresql'` | Database dialect; SQL Server supports manual logging, managed manual transactions and history queries |
 | `actorExtractor` | `(req) => AuditActor \| Promise<AuditActor>` | *required* | Extracts actor from HTTP request |
 | `actorExtractionStage` | `'middleware' \| 'interceptor'` | `'middleware'` | Added in 0.6.0: choose `interceptor` for identity populated by authentication Guards; [actor timing](context-and-tenancy.md#http-actor-extraction) |
 | `actorRequired` | `boolean` | `false` | Added in 0.7.0: `log()` requires a non-blank string actor ID, including system actors; reads are unaffected |
@@ -134,7 +141,10 @@ overrides are the caller's responsibility and are not synchronized between regis
 | `tenantResolver` | `() => string \| null` | — | Replaces the optional `@nestarc/tenancy` lookup; returning `null` does not fall back |
 | `sensitiveFields` | `string[]` | `[]` | Metadata keys redacted recursively in objects and arrays for manual logs |
 | `sensitiveFieldsByModel` | `Record<string, string[]>` | `{}` | Model-specific metadata redaction keys |
-| `onAuditError` | `(error: unknown, ctx: AuditErrorContext) => void` | — | Reports actor extraction and actor-required policy errors; not every service error uses this hook |
+| `strictManualValidation` | `boolean` | `false` | Added in 0.8.0: validate manual identity, event fields and JSON-compatible metadata before insertion |
+| `maxMetadataBytes` | `number` | — | Added in 0.8.0: positive safe-integer limit for final redacted metadata JSON in UTF-8 bytes |
+| `onAuditOperation` | `(event: AuditOperationEvent) => unknown` | — | Added in 0.8.0: observe manual log and managed transaction outcomes without event contents |
+| `onAuditError` | `(error: unknown, ctx: AuditErrorContext) => unknown` | — | Reports extraction and rejected manual validation, context, tenant resolution, serialization and INSERT failures; observer failures do not replace the original error |
 | `logger` | `AuditLogger` | `console` | Minimal `warn(message)` / `error(message)` logger |
 | `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
 
@@ -158,13 +168,34 @@ Extension options also accept `provider`, defaulting to `'postgresql'`.
 | `actorRequired` | `boolean` | `false` | Added in 0.7.0: missing/blank actor ID rejects atomic writes before the business query; best-effort reports the policy error and skips audit rows |
 | `tenantRequired` | `boolean` | `false` | Missing tenant fails closed in `atomic-required`; `best-effort` reports `audit entry skipped` and returns the business mutation |
 | `tenantResolver` | `() => string \| null` | — | Custom tenant lookup |
-| `onAuditError` | `(error, ctx) => void` | — | Structured audit failure callback |
+| `onAuditError` | `(error, ctx) => unknown` | — | Structured audit failure callback; synchronous throws and rejected promises are isolated |
 | `logger` | `AuditLogger` | `console` | Minimal `warn(message)` / `error(message)` logger |
 | `logFailures` | `boolean` | `false` | Record best-effort failure audit rows for business write errors |
 | `ignoreTimestampOnlyUpdates` | `boolean` | `false` | Suppress `@updatedAt`-only update entries |
 | `prismaModule` | generated Prisma module | legacy `@prisma/client` fallback | Required with the Prisma 7 `prisma-client` generator; pass `{ Prisma }` from the generated output |
 
 When neither `trackedModels` nor `ignoredModels` is configured, `createAuditExtension()` audits all Prisma models and emits a one-time `No trackedModels/ignoredModels configured` warning. Set `trackedModels` as an allowlist or `ignoredModels` as a denylist to narrow scope.
+
+## AuditService.withManualTransaction(client, callback, options?)
+
+Added in 0.8.0 for PostgreSQL and SQL Server. Pass the application's base Prisma client and an
+async callback receiving `{ tx, log }`. The callback's return type and the generated transaction
+client types are preserved. The bound `log(input)` always uses that transaction; even a caught
+audit failure prevents commit. Already-started log calls settle before completion, and the writer
+rejects after callback completion or transaction abort. Nested managed helpers are rejected.
+
+Options are `maxWait`, `timeout` and `isolationLevel`, subject to the provider's support. Business
+writes must use the supplied `tx`; the helper cannot detect a missing `log` or enlist writes through
+a captured base client. See the [managed transaction guide](product-quality.md#own-the-manual-transaction)
+for examples, lifetime and error semantics.
+
+## AuditService.getCapabilities()
+
+Added in 0.8.0. Returns a frozen object describing the configured provider's manual logging,
+managed transactions, query, automatic tracking, scan, export, retention, schema inspection and
+read-index APIs. It performs no database I/O and does not validate a live schema or permissions.
+See the [capability table](product-quality.md#discover-provider-capabilities). This differs from
+the audited client's `getAuditCapabilities()`, which describes automatic consistency/lifecycle support.
 
 ## AuditService.log(input, tx?)
 
@@ -208,9 +239,15 @@ Manual `log()` writes explicitly requested events even in a `@NoAudit()` handler
 does not replace `input.action`. Manual metadata fields are redacted using the module's
 `sensitiveFields` and the `sensitiveFieldsByModel` entry for `input.targetType`.
 
+The 0.8.0 `strictManualValidation` and `maxMetadataBytes` options are opt-in. Invalid strict inputs
+or oversized final metadata throw `AuditInputError` with `code` and `field`; see the
+[validation contract](product-quality.md#validate-manual-events-without-changing-existing-defaults).
+
 ## AuditService.query(options)
 
-Returns `Promise<AuditQueryResult>`, newest first by `(created_at, id)`.
+Returns `Promise<AuditQueryResult>`, newest first by `(created_at, id)`. Supported on PostgreSQL
+and, from 0.8.0, SQL Server. SQL Server text comparisons use exact binary semantics and cursors
+preserve `DATETIME2(7)` precision; see [SQL Server history](product-quality.md#read-sql-server-history).
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -223,13 +260,14 @@ Returns `Promise<AuditQueryResult>`, newest first by `(created_at, id)`.
 | `limit` | `50` | Positive integer page size |
 | `offset` | `0` | Non-negative offset; cannot be combined with `cursor` |
 | `cursor` | — | Opaque position returned as `nextCursor`; keep the same filters between pages |
-| `includeTotal` | `true` | Include a matching-row count; `false` avoids `COUNT(*)` |
+| `includeTotal` | `true` | Include a matching-row count; `false` avoids the count query (`COUNT_BIG` on SQL Server) |
 | `tenantId`, `allTenants` | Ambient tenant | Mutually exclusive explicit scope; see [tenant rules](context-and-tenancy.md#tenant-resolution-and-scope) |
 
 Result fields are `entries: AuditEntry[]`, `nextCursor: string | null`, `hasMore: boolean`, and
 optional `total: number`. The last page has `nextCursor: null`. The count covers the matching filter
 set, not just the cursor's remaining rows. Under concurrent writes, the count and page queries are
 separate statements and need not describe one database snapshot.
+SQL Server counts above JavaScript's safe integer range reject rather than losing precision.
 
 An `AuditEntry` contains `id`, nullable `tenantId`, nullable `actorId`, `actorType`, nullable `actorIp`,
 `action`, nullable `targetType`/`targetId`, `source`, nullable `changes`/`metadata`, `result`, and

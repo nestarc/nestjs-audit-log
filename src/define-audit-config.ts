@@ -6,6 +6,7 @@ import type { AuditTableSQLOptions, EnsurePartitionsOptions } from './sql';
 import { getAuditTableStatements } from './sql';
 import { getSqlServerTableName, validateAuditTableName } from './sql/table-name';
 import { resolveAuditProvider } from './sql/provider';
+import { validateManualAuditOptions } from './services/manual-audit-validation';
 
 /** Settings applied to both manual and automatic audit paths. */
 export type AuditConfigSharedOptions = AuditSharedOptions & Pick<
@@ -25,12 +26,33 @@ export type AuditConfigExtensionOptions = ExtensionSettings &
 export type AuditConfigSchemaOptions = SchemaSettings &
   Forbidden<keyof AuditConfigSharedOptions>;
 
-export interface AuditConfigInput {
-  shared?: AuditConfigSharedOptions;
-  module: AuditConfigModuleOptions;
-  extension?: AuditConfigExtensionOptions;
-  schema?: AuditConfigSchemaOptions;
-}
+type PostgreSqlSharedOptions = Omit<AuditConfigSharedOptions, 'provider'> & {
+  provider?: 'postgresql';
+};
+type PortableSchemaOptions = Omit<AuditConfigSchemaOptions, 'partitioned' | 'ginIndex' | 'enforcement'> & {
+  partitioned?: false;
+  ginIndex?: false;
+  enforcement?: 'trigger';
+};
+
+/**
+ * PostgreSQL supports automatic tracking and every schema option. A SQL Server
+ * or dynamically selected provider supports the portable manual configuration;
+ * narrow the provider before enabling PostgreSQL-only features.
+ */
+export type AuditConfigInput =
+  | {
+    shared?: PostgreSqlSharedOptions;
+    module: AuditConfigModuleOptions;
+    extension?: AuditConfigExtensionOptions;
+    schema?: AuditConfigSchemaOptions;
+  }
+  | {
+    shared: AuditConfigSharedOptions;
+    module: AuditConfigModuleOptions;
+    extension?: undefined;
+    schema?: PortableSchemaOptions;
+  };
 
 export interface AuditConfig<T extends AuditExtensionOptions | undefined = AuditExtensionOptions | undefined> {
   moduleOptions: Omit<AuditLogModuleOptions, 'prisma'>;
@@ -48,6 +70,7 @@ const sharedKeys: Record<keyof AuditConfigSharedOptions, true> = {
 const moduleKeys: Record<keyof ModuleSettings, true> = {
   actorExtractor: true, actorExtractionStage: true, excludeRoutes: true,
   registerGlobalInterceptor: true, correlationIdHeader: true, correlationIdGetter: true,
+  strictManualValidation: true, maxMetadataBytes: true, onAuditOperation: true,
 };
 const extensionKeys: Record<keyof ExtensionSettings, true> = {
   consistency: true, trackedModels: true, ignoredModels: true, primaryKey: true,
@@ -105,6 +128,7 @@ export function defineAuditConfig(input: AuditConfigInput): AuditConfig;
 export function defineAuditConfig(input: AuditConfigInput): AuditConfig {
   checkSection(input, 'config', { shared: true, module: true, extension: true, schema: true });
   checkSection(input.module, 'module', moduleKeys);
+  validateManualAuditOptions(input.module);
   if (input.shared !== undefined) checkSection(input.shared, 'shared', sharedKeys);
   if (input.extension !== undefined) checkSection(input.extension, 'extension', extensionKeys);
   if (input.schema !== undefined) checkSection(input.schema, 'schema', schemaKeys);

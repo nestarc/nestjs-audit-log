@@ -1,14 +1,98 @@
 # Audit logging benchmark
 
-Documents performance verification for version `0.7.1`. The recorded checks below compare
-packed 0.7.1 artifacts with the published 0.7.0 baseline. See [CHANGELOG](../CHANGELOG.md) for version
-differences. The existing local source
-benchmark and recorded 2026-09-10 run remain below with their original commands and version context.
+Documents performance tooling for release target `0.8.0`, with historical results kept under their
+original artifact/version identities. The recorded 0.7.1 checks below compare packed 0.7.1 artifacts
+with the published 0.7.0 baseline. See [CHANGELOG](../CHANGELOG.md) for version differences. The
+existing local source benchmark and recorded 2026-09-10 run retain their original version context.
 
 New runs require Node 22.23.4+ in the 22.x line or 24.22.1+ in the 24.x line; performance CI is
 configured for 24.22.1 and the runtime security gate described in [maintaining](maintaining.md#prerequisites).
 The Node 24.11.1 measurements below retain their original provenance and numbers. They do not
 verify the security or performance of the patched runtime; report new executions separately.
+
+## Performance summaries and optional budgets
+
+The 0.8.0 repository tooling adds an advisory summary to `npm run bench:regression`. Run these
+maintainer commands from the repository checkout. New PostgreSQL runs default to the exact registry
+baseline `0.7.1`; set `BENCH_BASELINE_VERSION` to another exact published version to change it.
+Tags such as `latest` and version ranges are rejected. A candidate can still have the same
+manifest version as the baseline: the report records each artifact's source and integrity.
+
+After correctness and cleanup pass, the runner writes
+`benchmarks/results/postgresql-performance-summary.json` alongside the complete raw report.
+For every workload/operation/payload/concurrency combination, it recalculates mean, P95, P99
+and throughput from raw samples and elapsed batch time, pairs baseline and candidate within
+each repeat, and preserves each ratio plus its median and range. A latency ratio above 1 means
+the candidate was slower; a throughput ratio below 1 means throughput was lower.
+
+With no budget, the summary has `status: "advisory"`. No latency threshold is implied by a
+successful correctness run. Missing pairs, incomplete samples, mismatched payload sizes or a
+failed cleanup produce an error instead of a misleading performance verdict. Historical reports
+can be summarized without changing their original evidence:
+
+```sh
+node scripts/compare-performance.cjs \
+  docs/benchmarks/2026-10-25-release-0.7.1/postgresql-run-1.json \
+  --output /tmp/audit-performance-summary.json
+```
+
+An optional JSON budget makes the named scenarios an explicit gate. Calibrate it using repeated
+runs on the intended runner, runtime, database and data shapes; record that evidence in
+`calibration`. The evaluator checks the baseline version and evidence counts, but cannot verify
+that a free-form calibration description matches the machine. Keep budget execution on its
+calibrated environment rather than applying it indiscriminately to hosted runners.
+
+| Budget field | Required value |
+|---|---|
+| `schemaVersion` | `1` |
+| `baselineVersion` | Exact registry version measured by the report |
+| `calibration` | Nonempty description or reference identifying the calibration environment and evidence |
+| `minRepeats` | Integer of at least 2; choose sufficient repeats for measured runner variability |
+| `minIterations` | Integer of at least 100 per block; use enough samples for the percentile being assessed |
+| `scenarios` | Nonempty object keyed by `workload/operation/payload/concurrency`, for example `manual/create/small/1` |
+
+Each selected scenario supplies one or more positive finite ratio limits: `maxMeanRatio`,
+`maxP95Ratio`, `maxP99Ratio`, or `minThroughputRatio`. Limits apply to the **median of paired
+repeat ratios**. The unrounded pairs and ranges remain available to investigate individual
+stalls. Unknown fields and unknown limit names are rejected. A missing selected scenario or
+too few repeats/samples fails with `insufficient-evidence`; unselected scenarios remain advisory.
+There is no checked-in universal budget or production latency promise.
+
+```sh
+BENCH_BASELINE_VERSION=0.7.1 \
+  BENCH_BUDGET_PATH=/path/to/calibrated-budget.json npm run bench:regression
+
+# Reevaluate an existing successful report without running the database workload:
+node scripts/compare-performance.cjs benchmarks/results/postgresql-manual-regression.json \
+  --budget /path/to/calibrated-budget.json --output /tmp/audit-budget-result.json
+```
+
+The command preserves the original report, writes the evaluated summary even when limits fail,
+and exits nonzero on a failed budget. Malformed budgets and baseline mismatches fail before
+dependency installation when running through `bench:regression`. Compare a new failure with
+all raw repeats and reproduce it before attributing the change to library code. A passing budget
+only covers its named scenarios, baseline and environment; it does not establish statistical
+significance or a production SLA. SQL Server continues to report the whole-transaction increment
+against its unaudited control; this paired package budget format is PostgreSQL-specific.
+
+## Controlled local validation for the 0.8.0 feature set
+
+The repository record `docs/2026-10-26-performance-resolution.md` approves seven individually
+defined local PostgreSQL scenarios for the frozen implementation preceding the 0.8.0 version bump.
+Its measured tarball still declared 0.7.1 and is identified by its recorded integrity; a version
+change does not retroactively make it a measurement of a different tarball.
+
+Six scenarios passed both formal comparisons. The replacement automatic-create measurement used
+32 fresh processes with package assignment, module loading and starting-slot crossover. A/A
+calibration and A/B confidence-bound plus median checks passed under the unchanged mean +10%,
+P95 +15% and throughput -10% limits. Interleaved execution was selected before measurements;
+sequential results remain diagnostic, and CPU profiles do not enter the gate. The repository
+tools are `benchmarks/automatic-create-controlled.cjs`, `scripts/compare-controlled-performance.cjs`
+and `scripts/analyze-benchmark-cpu-profile.cjs`.
+
+This local decision does not establish production, SQL Server or full mixed-history performance.
+New artifacts and environments require their own identified validation; do not reinterpret the
+historical failure or silently substitute a later passing run.
 
 ## 0.7.1 performance checks
 
@@ -136,9 +220,13 @@ raw measurements, and cleanup result with any published figures.
 
 ### Run through GitHub Actions
 
-The `Database performance` workflow in `.github/workflows/performance.yml` runs on matching
-benchmark or workflow changes in a pull request targeting `main`, and supports manual dispatch
-when the workflow is available. A branch push alone does not trigger it. The workflow installs
+The commands in this and the following execution sections target the current 0.8.0 checkout.
+Use the recorded artifacts and environment when reproducing historical 0.7.1 measurements.
+
+The `Database performance` workflow in `.github/workflows/performance.yml` runs on library
+source, package dependencies, Prisma configuration/schema, benchmark and relevant workflow
+changes in a pull request targeting `main`. Manual dispatch accepts an exact `baseline_version`
+(default `0.7.1`). A branch push alone does not trigger it. The workflow installs
 dependencies, generates the PostgreSQL client, packs the candidate, and runs both suites.
 Its SQL Server job reuses MSSQL preflight with `run_benchmark: true`, so driver and packed-library
 correctness probes run before measurement. The standalone `MSSQL preflight` workflow also accepts
@@ -159,17 +247,19 @@ database. Run from the repository root after other tests have finished:
 npm ci
 npm run docker:up -- --wait --wait-timeout 60
 DATABASE_URL=postgresql://test:test@localhost:5433/audit_test npx prisma generate
-BENCH_WARMUP=50 BENCH_ITERATIONS=500 BENCH_REPEATS=4 \
+BENCH_BASELINE_VERSION=0.7.1 BENCH_WARMUP=50 BENCH_ITERATIONS=500 BENCH_REPEATS=4 \
   DATABASE_URL=postgresql://test:test@localhost:5433/audit_test npm run bench:regression
 npm run docker:down
 ```
 
 Run teardown even after a failure, once no other test is using the database. The wrapper accepts
 only the dedicated localhost `test:test` database `audit_test` on port 5432 or 5433. It installs
-exact published 0.7.0 and the candidate tarball into separate temporary consumers with strict
+the selected exact registry baseline and the candidate tarball into separate temporary consumers with strict
 peers, verifies registry/tarball integrity, and supplies both installed package paths to the
 benchmark. It builds the candidate automatically and removes those consumers afterward. The
 benchmark creates its own schema and business table; it does not require `prisma db push`.
+Set `BENCH_BASELINE_VERSION=0.7.0` when reproducing the historical 0.7.1 comparison;
+do not relabel new baseline measurements as that historical run.
 
 ### Reproduce SQL Server locally
 
@@ -185,7 +275,7 @@ npm run build
 npm pack --pack-destination /tmp
 cd fixtures/mssql-preflight
 npm ci --no-audit --no-fund
-npm install --no-save --package-lock=false --no-audit --no-fund /tmp/nestarc-audit-log-0.7.1.tgz
+npm install --no-save --package-lock=false --no-audit --no-fund /tmp/nestarc-audit-log-0.8.0.tgz
 export MSSQL_HOST=127.0.0.1 MSSQL_PORT=1433 MSSQL_USER=sa
 read -rs MSSQL_PASSWORD
 export MSSQL_PASSWORD
@@ -200,12 +290,14 @@ process can prevent cleanup from finishing.
 
 ### Interpret candidate results
 
-There is no universal latency or throughput threshold in these scripts. A successful result
-means the workload completed with valid audit evidence and cleanup; it does not establish a
+There is no universal latency or throughput threshold in these scripts. The historical successful
+results mean the workloads completed with valid audit evidence and cleanup; they do not establish a
 production service level or statistical significance. Compare paired baseline and candidate
 observations within each suite, retain all repeats, and investigate changes rather than selecting
-the fastest run. Candidate PostgreSQL changes should be assessed against published 0.7.0;
-SQL Server deltas describe the added cost of manual auditing in that workload.
+the fastest run. The historical PostgreSQL comparisons use published 0.7.0; new runs identify the
+selected registry baseline in their metadata. SQL Server deltas describe the added cost of manual
+auditing in that workload. The optional calibrated budget above adds a separate performance
+decision without changing historical results or the correctness status in raw measurement reports.
 
 The workloads use closed-loop workers at fixed concurrency. They do not measure maximum server
 capacity, remote database latency, long transactions, bulk writes, or production read/index

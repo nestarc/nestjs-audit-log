@@ -1,0 +1,104 @@
+name: Ecosystem compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Check the recorded published tuple or this ref's packed audit-log candidate
+        required: true
+        default: published
+        type: choice
+        options:
+          - published
+          - audit-log-candidate
+      soft_delete_version:
+        description: Exact published soft-delete X.Y.Z for candidate mode; leave empty for published mode
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Optional ecosystem compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: audit_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d audit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/audit_test
+      ECOSYSTEM_CHECK_MODE: ${{ inputs.mode }}
+      SOFT_DELETE_VERSION: ${{ inputs.soft_delete_version }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            fixtures/published-ecosystem/package-lock.json
+
+      - name: Verify patched Node runtime and Brotli decoding
+        timeout-minutes: 1
+        run: node scripts/verify-node-security.cjs
+
+      - name: Validate compatibility inputs
+        run: |
+          node <<'NODE'
+          const { parseArguments } = require('./scripts/run-ecosystem-e2e.cjs');
+          const mode = process.env.ECOSYSTEM_CHECK_MODE;
+          if (!['published', 'audit-log-candidate'].includes(mode)) {
+            throw new Error('Select published or audit-log-candidate mode');
+          }
+          const args = [`--${mode}`];
+          if (mode === 'audit-log-candidate' || process.env.SOFT_DELETE_VERSION) {
+            args.push('--soft-delete-version', process.env.SOFT_DELETE_VERSION || '');
+          }
+          parseArguments(args);
+          NODE
+
+      - name: Install audit-log dependencies
+        run: npm ci
+
+      - name: Test exact published tuple
+        if: inputs.mode == 'published'
+        run: |
+          set -o pipefail
+          npm run test:e2e:ecosystem 2>&1 | tee "$RUNNER_TEMP/ecosystem-compatibility.log"
+
+      - name: Test packed audit-log candidate with the selected companion
+        if: inputs.mode == 'audit-log-candidate'
+        run: |
+          set -o pipefail
+          npm run test:e2e:ecosystem:candidate -- --soft-delete-version "$SOFT_DELETE_VERSION" 2>&1 | tee "$RUNNER_TEMP/ecosystem-compatibility.log"
+
+      - name: Preserve compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ecosystem-compatibility-${{ inputs.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ecosystem-compatibility.log
+          if-no-files-found: ignore
+          retention-days: 30

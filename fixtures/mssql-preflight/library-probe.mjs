@@ -29,12 +29,18 @@ const report = {
 let library;
 let Test;
 let prisma;
+let prismaFactory;
 let Prisma;
 let config;
 let service;
 let txOnlyService;
 let schemaCreated = false;
 let forbiddenIo = 0;
+const readTableName = `dbo.reads_${runId.slice(0, 16)}`;
+const readTenant = `read_${runId}`;
+let readService;
+let expectedReadOrder;
+const longReadCases = [];
 const forbiddenClient = new Proxy({}, {
   get(_target, property) {
     if (typeof property !== 'string' || !property.startsWith('$')) return undefined;
@@ -62,6 +68,16 @@ function safeError(error) {
   }
   inspect(error);
   if (codes.size) result.codes = [...codes];
+  if (String(error?.code ?? '') === 'P2028') {
+    // Classify only fixed phrases; never copy transaction messages or SQL.
+    result.transactionReason = errorContains(error, 'Invalid isolation level')
+      ? 'invalid-isolation-level'
+      : errorContains(error, 'expired') || errorContains(error, 'timeout')
+        ? 'expired-or-timeout'
+        : errorContains(error, 'already closed')
+          ? 'already-closed'
+          : errorContains(error, 'not found') ? 'not-found' : 'unclassified';
+  }
   return result;
 }
 
@@ -196,14 +212,14 @@ async function main() {
     // tsx can create separate ESM/CJS Nest class identities. Match the installed
     // CommonJS library's Nest loading so Reflector remains the same DI token.
     ({ Test } = require('@nestjs/testing'));
-    for (const name of ['AuditService', 'AuditLogModule', 'AuditContext', 'defineAuditConfig', 'getAuditTableStatements', 'getAuditTableSQL', 'applyAuditTableSchema', 'ensurePartitions', 'createAuditExtension']) {
+    for (const name of ['AuditService', 'AuditLogModule', 'AuditContext', 'defineAuditConfig', 'getAuditTableStatements', 'getAuditTableSQL', 'applyAuditTableSchema', 'getSqlServerAuditReadIndexStatements', 'applySqlServerAuditReadIndexes', 'inspectSqlServerAuditStorage', 'AuditInputError', 'ensurePartitions', 'createAuditExtension']) {
       assert.equal(typeof library[name], 'function', `${name} is exported by the installed package`);
     }
     const generated = await import('./generated/client/client.ts');
     Prisma = generated.Prisma;
     assert.equal(Prisma.prismaVersion.client, '7.10.0', 'Generated client is Prisma 7.10.0');
     const { PrismaMssql } = await import('@prisma/adapter-mssql');
-    prisma = new generated.PrismaClient({
+    prismaFactory = () => new generated.PrismaClient({
       adapter: new PrismaMssql({
         server: process.env.MSSQL_HOST ?? 'localhost', port,
         user: process.env.MSSQL_USER, password: process.env.MSSQL_PASSWORD, database: process.env.MSSQL_DATABASE,
@@ -212,6 +228,7 @@ async function main() {
       }, { schema: 'dbo' }),
       transactionOptions: { maxWait: 10_000, timeout: 10_000 },
     });
+    prisma = prismaFactory();
     await prisma.$connect();
     const [server] = await prisma.$queryRaw`
       SELECT CAST(SERVERPROPERTY('ProductMajorVersion') AS NVARCHAR(10)) AS [major],
@@ -483,11 +500,327 @@ async function main() {
     return { error: safeError(failure), auditWriteCompleted, rows: await expectRows(id, { business: 0, audit: 0 }), recovery: await committedPair('timeout_recovered') };
   });
 
+  await probe('managed-helper-commit-snapshots-input-and-forwards-read-committed', async probeResult => {
+    probeResult.evidence = { stage: 'prepare-managed-transaction' };
+    const id = businessId('managed_commit');
+    const events = [];
+    const managed = new library.AuditService({ ...config.moduleOptions, prisma: forbiddenClient,
+      onAuditOperation: event => { events.push(event); return Promise.reject(new Error('Deliberate diagnostic rejection')); } });
+    const actor = { id: 'managed-original-actor', type: 'user' };
+    let retained;
+    probeResult.evidence.stage = 'start-managed-read-committed-transaction';
+    const result = await context(() => managed.withManualTransaction(prisma, async ({ tx, log }) => {
+      probeResult.evidence.stage = 'read-transaction-session';
+      const [session] = await tx.$queryRaw`SELECT @@SPID AS [session_id], [transaction_isolation_level] AS [isolation_level] FROM sys.dm_exec_sessions WHERE [session_id] = @@SPID`;
+      assert.equal(session.isolation_level, 2, 'Requested ReadCommitted isolation reaches the real SQL Server transaction');
+      await tx.probeBusiness.create({ data: { id, marker: 'managed' } });
+      const event = input(id, { action: 'Managed.original', metadata: { value: 'original' } });
+      const pending = log(event);
+      event.action = 'Managed.mutated';
+      event.metadata.value = 'mutated';
+      actor.id = 'managed-mutated-actor';
+      probeResult.evidence.stage = 'await-audit-insert';
+      await pending;
+      retained = log;
+      const [after] = await tx.$queryRaw`SELECT @@SPID AS [session_id]`;
+      assert.equal(after.session_id, session.session_id, 'Managed business and audit work use the same session');
+      assert.ok(!events.some(event => event.operation === 'transaction'), 'Transaction completion is observed after the host completes');
+      return { session: session.session_id, isolation: session.isolation_level };
+    }, { isolationLevel: 'ReadCommitted', maxWait: 10_000, timeout: 10_000 }), { actor, tenant: 'managed-original-tenant' });
+    probeResult.evidence.stage = 'verify-committed-rows';
+    const [row] = await auditRows(id);
+    assert.equal(row.action, 'Managed.original', 'Action is captured when the bound writer is called');
+    assert.equal(row.actor_id, 'managed-original-actor', 'Actor identity is captured when the bound writer is called');
+    assert.deepEqual(JSON.parse(row.metadata), { value: 'original' }, 'Metadata is serialized before later input mutation');
+    assert.equal(row.tenant_id, 'managed-original-tenant');
+    const expired = await expectFailure(() => retained(input(id, { action: 'Expired.writer' })), 'Escaped writer cannot write after commit');
+    assert.ok(errorContains(expired, 'scope has ended'));
+    await delay(0);
+    assert.ok(events.some(event => event.operation === 'transaction' && event.status === 'success' && event.transaction === 'managed'));
+    assert.ok(events.every(event => Object.isFrozen(event) && Number.isFinite(event.durationMs) && event.durationMs >= 0));
+    assert.ok(!JSON.stringify(events).includes(id), 'Operation telemetry contains no event identifiers');
+    assert.equal(forbiddenIo, 0, 'The managed writer never falls back to the configured base client');
+    return { ...result, requestedIsolation: 'ReadCommitted', rows: await expectRows(id, { business: 1, audit: 1 }), expiredWriterRejected: true, diagnosticRejectionIsolated: true };
+  });
+
+  await probe('pinned-prisma-snapshot-isolation-rejection-has-no-side-effects', async probeResult => {
+    probeResult.evidence = { stage: 'enable-server-snapshot-isolation' };
+    await prisma.$executeRawUnsafe(`ALTER DATABASE ${identifier(process.env.MSSQL_DATABASE)} SET ALLOW_SNAPSHOT_ISOLATION ON`);
+    const [database] = await prisma.$queryRaw`SELECT [snapshot_isolation_state] AS [state] FROM sys.databases WHERE [name] = DB_NAME()`;
+    assert.equal(database.state, 1, 'The disposable database enables Snapshot independently of Prisma host support');
+    const id = businessId('unsupported_snapshot');
+    let callbackCalls = 0;
+    const events = [];
+    const managed = new library.AuditService({ ...config.moduleOptions, prisma: forbiddenClient,
+      onAuditOperation: event => { events.push(event); } });
+    probeResult.evidence.stage = 'request-snapshot-from-pinned-prisma-host';
+    const failure = await expectFailure(() => context(() => managed.withManualTransaction(prisma, async ({ tx, log }) => {
+      callbackCalls += 1;
+      await tx.probeBusiness.create({ data: { id, marker: 'must-not-run' } });
+      await log(input(id));
+    }, { isolationLevel: 'Snapshot', maxWait: 10_000, timeout: 10_000 })), 'Pinned Prisma 7.10 rejects Snapshot before invoking the callback');
+    assert.equal(failure.code, 'P2028');
+    const classified = safeError(failure);
+    assert.equal(classified.transactionReason, 'invalid-isolation-level');
+    assert.ok(errorContains(failure, 'SNAPSHOT'), 'The host rejection identifies the requested Snapshot isolation');
+    assert.equal(callbackCalls, 0, 'An unsupported host option does not invoke business or audit work');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].operation, 'transaction');
+    assert.equal(events[0].status, 'failure');
+    assert.equal(forbiddenIo, 0);
+    return { requestedIsolation: 'Snapshot', hostSupportsRequestedIsolation: false, prismaVersion: '7.10.0', serverSnapshotEnabled: true,
+      callbackCalls, error: classified, rows: await expectRows(id, { business: 0, audit: 0 }), recovery: await committedPair('snapshot_rejection_recovery') };
+  });
+
+  await probe('managed-helper-caught-policy-serialization-and-sql-errors-roll-back', async () => {
+    const constraint = `ck_managed_${runId.slice(0, 16)}`;
+    await prisma.$executeRawUnsafe(`ALTER TABLE [dbo].[audit_logs] ADD CONSTRAINT ${identifier(constraint)} CHECK ([action] <> N'Managed.blocked')`);
+    const outcomes = [];
+    try {
+      for (const kind of ['actor', 'tenant', 'serialization', 'sql']) {
+        const id = businessId(`managed_${kind}`);
+        const observed = [];
+        const managed = new library.AuditService({ ...config.moduleOptions, prisma: forbiddenClient,
+          onAuditError: (error, details) => { observed.push({ error, details }); return Promise.reject(new Error('Deliberate diagnostic rejection')); } });
+        let caught;
+        const failure = await expectFailure(() => context(() => managed.withManualTransaction(prisma, async ({ tx, log }) => {
+          await tx.probeBusiness.create({ data: { id, marker: 'must-rollback' } });
+          await log(input(id));
+          try {
+            if (kind === 'actor') await library.AuditContext.run({ actor: null, noAudit: false }, () => log(input(id)));
+            else if (kind === 'tenant') await tenantContext.run(null, () => log(input(id)));
+            else if (kind === 'serialization') await log(input(id, { metadata: { bigint: 1n } }));
+            else await log(input(id, { action: 'Managed.blocked' }));
+          } catch (error) { caught = error; }
+          assert.ok(caught, 'The application deliberately catches the audit failure');
+        })), 'Caught audit failure still prevents managed commit');
+        assert.equal(failure, caught, 'Managed completion rejects with the original audit error');
+        if (kind === 'sql') assert.ok(errorContains(failure, constraint), 'SQL failure is the intended audit constraint');
+        assert.equal(observed.length, 1, 'Each failed manual call reports exactly once');
+        assert.equal(observed[0].error, failure, 'Error observer receives the original error');
+        assert.equal(observed[0].details.provider, 'sqlserver');
+        outcomes.push({ kind, error: safeError(failure), phase: observed[0].details.phase, rows: await expectRows(id, { business: 0, audit: 0 }) });
+      }
+    } finally {
+      await prisma.$executeRawUnsafe(`ALTER TABLE [dbo].[audit_logs] DROP CONSTRAINT ${identifier(constraint)}`);
+    }
+    await delay(0);
+    return { outcomes, recovery: await committedPair('managed_error_recovery') };
+  });
+
+  await probe('managed-helper-concurrent-context-and-rollback-isolation', async () => {
+    const ids = [businessId('managed_concurrent_ok'), businessId('managed_concurrent_bad')];
+    const sessions = [];
+    let release;
+    let arrivals = 0;
+    const bothWritten = new Promise(resolve => { release = resolve; });
+    const results = await Promise.allSettled(ids.map((id, index) => context(() => txOnlyService.withManualTransaction(prisma, async ({ tx, log }) => {
+      const [session] = await tx.$queryRaw`SELECT @@SPID AS [session_id]`;
+      sessions[index] = session.session_id;
+      await tx.probeBusiness.create({ data: { id, marker: 'managed-concurrent' } });
+      await log(input(id));
+      if (++arrivals === 2) release();
+      let timer;
+      try {
+        await Promise.race([bothWritten, new Promise((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('Managed rendezvous timed out')), 5_000);
+        })]);
+      } finally { clearTimeout(timer); }
+      if (index === 1) {
+        const caught = await expectFailure(() => library.AuditContext.run({ actor: null, noAudit: false }, () => log(input(id))), 'Second helper catches a policy error');
+        assert.ok(errorContains(caught, 'actorRequired'));
+      }
+    }), { actor: { id: `managed-actor-${index}`, type: 'user' }, tenant: `managed-tenant-${index}` })));
+    assert.equal(results[0].status, 'fulfilled');
+    assert.equal(results[1].status, 'rejected');
+    assert.notEqual(sessions[0], sessions[1], 'Managed helpers concurrently own different SQL sessions');
+    const [row] = await auditRows(ids[0]);
+    assert.equal(row.actor_id, 'managed-actor-0');
+    assert.equal(row.tenant_id, 'managed-tenant-0');
+    return { sessions, committed: await expectRows(ids[0], { business: 1, audit: 1 }), rolledBack: await expectRows(ids[1], { business: 0, audit: 0 }) };
+  });
+
+  await probe('strict-manual-input-size-budget-and-provider-capabilities', async () => {
+    const strict = new library.AuditService({ ...config.moduleOptions, prisma: forbiddenClient, strictManualValidation: true, maxMetadataBytes: 64 });
+    const capabilities = strict.getCapabilities();
+    assert.ok(Object.isFrozen(capabilities));
+    assert.equal(capabilities.provider, 'sqlserver');
+    for (const name of ['manualLogging', 'manualTransactions', 'query', 'schemaInspection', 'readIndexes']) assert.equal(capabilities[name], true);
+    for (const name of ['automaticTracking', 'scan', 'exportCsv', 'retention']) assert.equal(capabilities[name], false);
+    const outcomes = [];
+    const invalids = [
+      { label: 'blank_action', value: { action: ' ' }, code: 'AUDIT_INPUT_INVALID' },
+      { label: 'blank_target', value: { targetId: '' }, code: 'AUDIT_INPUT_INVALID' },
+      { label: 'invalid_result', value: { result: 'unknown' }, code: 'AUDIT_INPUT_INVALID' },
+      { label: 'nonfinite_metadata', value: { metadata: { number: NaN } }, code: 'AUDIT_INPUT_INVALID' },
+      { label: 'metadata_budget', value: { metadata: { text: '한글'.repeat(20) } }, code: 'AUDIT_METADATA_TOO_LARGE' },
+    ];
+    for (const invalid of invalids) {
+      const id = businessId(`strict_${invalid.label}`);
+      let caught;
+      const failure = await expectFailure(() => context(() => strict.withManualTransaction(prisma, async ({ tx, log }) => {
+        await tx.probeBusiness.create({ data: { id, marker: 'strict-invalid' } });
+        try { await log(input(id, invalid.value)); } catch (error) { caught = error; }
+      })), 'Caught strict validation still rolls back business writes');
+      assert.equal(failure, caught);
+      assert.ok(failure instanceof library.AuditInputError);
+      assert.equal(failure.code, invalid.code);
+      outcomes.push({ case: invalid.label, code: failure.code, rows: await expectRows(id, { business: 0, audit: 0 }) });
+    }
+    const validId = businessId('strict_valid');
+    await context(() => strict.withManualTransaction(prisma, async ({ tx, log }) => {
+      await tx.probeBusiness.create({ data: { id: validId, marker: 'strict-valid' } });
+      await log(input(validId, { metadata: { text: '한글', password: 'secret' } }));
+    }));
+    assert.deepEqual(JSON.parse((await auditRows(validId))[0].metadata), { text: '한글', password: '[REDACTED]' });
+    return { capabilities, invalid: outcomes, valid: await expectRows(validId, { business: 1, audit: 1 }) };
+  });
+
+  await probe('sqlserver-history-tenant-isolation-precision-guid-order-and-wildcards', async () => {
+    ownedTables.add(readTableName);
+    await library.applyAuditTableSchema(prisma, { provider: 'sqlserver', tableName: readTableName });
+    readService = new library.AuditService({ ...config.moduleOptions, prisma, tableName: readTableName });
+    const literalAction = 'History.[ok]_%\\written';
+    const seeded = [
+      { id: '00000000-0000-0000-0000-000000000002', ts: '2026-10-26T12:34:56.1234567', action: literalAction },
+      { id: 'ffffffff-0000-0000-0000-000000000001', ts: '2026-10-26T12:34:56.1234567', action: 'History.other' },
+      { id: 'ffffffff-ffff-ffff-ffff-000000000000', ts: '2026-10-26T12:34:56.1234567', action: 'History.okAother' },
+      { id: randomUUID(), ts: '2026-10-26T12:34:56.1234566', action: 'History.other' },
+      { id: randomUUID(), ts: '2026-10-26T12:34:56.1234565', action: 'History.other' },
+      { id: randomUUID(), ts: '2026-10-26T12:34:56.1234564', action: 'History.other' },
+    ];
+    for (let index = 0; index < seeded.length; index++) {
+      const entry = seeded[index];
+      await prisma.$executeRaw(Prisma.sql`
+        INSERT INTO ${tableRef(readTableName)}
+          ([id], [tenant_id], [actor_id], [actor_type], [action], [target_type], [target_id], [source], [changes], [metadata], [result], [created_at])
+        VALUES (CAST(${entry.id} AS UNIQUEIDENTIFIER), ${readTenant}, ${'read-actor'}, ${'api_key'}, ${entry.action}, ${'ReadTarget'}, ${`${runId}_read_${index}`}, ${'manual'}, ${JSON.stringify({ value: { before: null, after: '한글😀' } })}, ${JSON.stringify({ label: '한글😀', index })}, ${'success'}, CAST(${entry.ts} AS DATETIME2(7)))
+      `);
+    }
+    const native = await prisma.$queryRaw(Prisma.sql`
+      SELECT CONVERT(VARCHAR(36), history.[id]) AS [id] FROM ${tableRef(readTableName)} AS history
+      WHERE history.[tenant_id] = ${readTenant} ORDER BY history.[created_at] DESC, history.[id] DESC
+    `);
+    expectedReadOrder = native.map(row => row.id.toLowerCase());
+    assert.deepEqual(expectedReadOrder.slice(0, 3), seeded.slice(0, 3).map(row => row.id), 'Fixture exercises SQL Server GUID order, including lexical disagreement');
+    assert.notDeepEqual(expectedReadOrder.slice(0, 3), seeded.slice(0, 3).map(row => row.id).sort().reverse());
+    const collected = [];
+    let cursor;
+    const cursors = [];
+    for (let pageIndex = 0; pageIndex < seeded.length; pageIndex++) {
+      const page = await readService.query({ tenantId: readTenant, limit: 1, ...(cursor ? { cursor, includeTotal: false } : {}) });
+      assert.equal(page.entries.length, 1, 'Every precision-sensitive page contains exactly one row');
+      if (pageIndex === 0) assert.equal(page.total, seeded.length);
+      else assert.equal(page.total, undefined, 'includeTotal false omits a total');
+      const entry = page.entries[0];
+      assert.ok(entry.createdAt instanceof Date);
+      assert.deepEqual(entry.changes, { value: { before: null, after: '한글😀' } });
+      assert.equal(entry.metadata.label, '한글😀');
+      assert.equal(entry.tenantId, readTenant);
+      collected.push(entry);
+      if (page.hasMore) {
+        assert.ok(page.nextCursor);
+        const decoded = Buffer.from(page.nextCursor, 'base64url').toString('utf8');
+        assert.match(decoded, /^mssql1\|2026-10-26T12:34:56\.\d{7}Z\|/);
+        cursors.push(decoded);
+      } else assert.equal(page.nextCursor, null);
+      cursor = page.nextCursor;
+    }
+    assert.deepEqual(collected.map(row => row.id), expectedReadOrder, 'All rows appear once across same-timestamp GUID ties and sub-millisecond boundaries');
+    assert.equal(new Set(collected.map(row => row.createdAt.getTime())).size, 1, 'All timestamps share a JS millisecond, so Date-only cursors would fail');
+    assert.ok(cursors.some(cursor => cursor.includes('.1234567Z')) && cursors.some(cursor => cursor.includes('.1234566Z')));
+    const offsetPage = await readService.query({ tenantId: readTenant, offset: 2, limit: 2 });
+    assert.deepEqual(offsetPage.entries.map(row => row.id), expectedReadOrder.slice(2, 4));
+    const filtered = await readService.query({ tenantId: readTenant, actorId: 'read-actor', actorType: 'api_key', targetType: 'ReadTarget', source: 'manual', result: 'success', from: new Date('2026-10-26T12:34:56.123Z'), to: new Date('2026-10-26T12:34:56.124Z') });
+    assert.equal(filtered.total, seeded.length);
+    const wildcard = await readService.query({ tenantId: readTenant, action: 'History.[ok]_%\\*' });
+    assert.deepEqual(wildcard.entries.map(row => row.action), [literalAction], 'Only star is wildcard; brackets, percent, underscore and backslash stay literal');
+    const upperId = expectedReadOrder[0].toUpperCase();
+    assert.equal((await readService.getById(upperId, { tenantId: readTenant })).id, expectedReadOrder[0]);
+    assert.equal(await readService.getById(upperId, { tenantId: `${readTenant}_other` }), null);
+    assert.equal(await readService.getById('invalid-uuid', { tenantId: readTenant }), null);
+    await assert.rejects(readService.query({}), /tenant context required/);
+    for (const tenant of [readTenant.toUpperCase(), `${readTenant} `]) {
+      const targetId = `${runId}_tenant_variant_${longReadCases.length}`;
+      await context(() => readService.log(input(targetId)), { tenant });
+      const result = await readService.query({ tenantId: tenant });
+      assert.equal(result.total, 1, 'Tenant case and trailing-space variants remain distinct');
+      assert.equal(result.entries[0].tenantId, tenant);
+      assert.equal(await readService.getById(expectedReadOrder[0], { tenantId: tenant }), null);
+      longReadCases.push({ tenantId: tenant, targetId, expected: 1 });
+    }
+    const shared = '공통😀'.repeat(1_200);
+    const longTenant = `${shared}_tenant`;
+    for (const suffix of ['A', 'B']) {
+      const actorId = `${shared}_actor_${suffix}`;
+      const targetType = `${shared}_type_${suffix}`;
+      const targetId = `${shared}_target_${suffix}`;
+      await context(() => readService.log({ action: 'History.long', targetType, targetId, metadata: { suffix } }), { tenant: longTenant, actor: { id: actorId, type: 'user' } });
+      longReadCases.push({ tenantId: longTenant, actorId, targetType, targetId, expected: 1 });
+    }
+    for (const suffix of ['æ', 'ae']) {
+      const tenantId = `${'a'.repeat(127)}${suffix}`;
+      const targetId = `${runId}_ligature_${suffix}`;
+      await context(() => readService.log(input(targetId)), { tenant: tenantId });
+      longReadCases.push({ tenantId, targetId, expected: 1 });
+    }
+    for (const { expected, ...query } of longReadCases) {
+      const page = await readService.query(query);
+      assert.equal(page.total, expected, 'Exact full values remain distinct despite shared or linguistic-equivalent prefixes');
+      assert.equal(page.entries[0].targetId, query.targetId);
+    }
+    assert.equal((await readService.query({ tenantId: readTenant })).total, seeded.length, 'Other tenant data never enters the original history');
+    return { pages: collected.length, fullPrecisionCursors: cursors.length, sqlServerGuidOrderVerified: true, wildcardLiteralVerified: true, exactLongValueQueries: longReadCases.length };
+  });
+
+  await probe('sqlserver-read-indexes-inspection-and-fresh-writer-compatibility', async () => {
+    const options = { tableName: readTableName };
+    const baseline = await library.inspectSqlServerAuditStorage(prisma, options);
+    assert.equal(baseline.status, 'inspected');
+    assert.equal(baseline.metadataComplete, true);
+    assert.equal(baseline.enforcementVerified, false, 'Catalog inspection does not claim runtime trigger enforcement');
+    assert.deepEqual(baseline.issues, [], 'Fresh compatible schema has no catalog issues');
+    const before = await readService.query({ tenantId: readTenant });
+    const statements = library.getSqlServerAuditReadIndexStatements(options);
+    assert.ok(statements.length >= 4);
+    await library.applySqlServerAuditReadIndexes(prisma, options);
+    await library.applySqlServerAuditReadIndexes(prisma, options);
+    const inspected = await library.inspectSqlServerAuditStorage(prisma, options);
+    assert.equal(inspected.status, 'inspected');
+    assert.deepEqual(inspected.issues, []);
+    assert.equal(inspected.indexes.filter(index => index.name.includes('_read_')).length, 3);
+    assert.equal(inspected.columns.filter(column => column.name.startsWith('__audit_') && column.computed).length, 4);
+    assert.deepEqual((await readService.query({ tenantId: readTenant })).entries, before.entries, 'Index installation and reapplication preserve rows and ordering');
+    for (const { expected, ...query } of longReadCases) {
+      const page = await readService.query(query);
+      assert.equal(page.total, expected, 'Index installation preserves full-value and tenant exact matching');
+      assert.equal(page.entries[0].targetId, query.targetId);
+    }
+    const fresh = prismaFactory();
+    const freshService = new library.AuditService({ ...config.moduleOptions, prisma: fresh, tableName: readTableName });
+    const id = businessId('indexed_fresh_writer');
+    try {
+      await fresh.$connect();
+      await context(() => freshService.withManualTransaction(fresh, async ({ tx, log }) => {
+        await tx.probeBusiness.create({ data: { id, marker: 'after-indexes' } });
+        await log(input(id));
+      }));
+      await context(() => freshService.log(input(`${id}_standalone`)));
+      assert.equal((await freshService.query({ tenantId: 'tenant-default', targetId: id })).total, 1, 'A fresh pool can write and read indexed audit storage');
+    } finally { await fresh.$disconnect(); }
+    const table = readTableName.split('.')[1];
+    await prisma.$executeRawUnsafe(`DISABLE TRIGGER [dbo].${identifier(`${table}_no_update_trg`)} ON ${readTableName.split('.').map(identifier).join('.')}`);
+    const disabled = await library.inspectSqlServerAuditStorage(prisma, options);
+    assert.ok(disabled.issues.some(issue => issue.code === 'TRIGGER_DISABLED'));
+    await library.applyAuditTableSchema(prisma, { provider: 'sqlserver', ...options });
+    const restored = await library.inspectSqlServerAuditStorage(prisma, options);
+    assert.deepEqual(restored.issues, [], 'DDL reapplication restores trigger enforcement while preserving read indexes');
+    return { batches: statements.length, readIndexes: 3, prefixColumns: 4, freshPoolWrite: await expectRows(id, { business: 1, audit: 1 }, readTableName), triggerDiagnosticVerified: true };
+  });
+
   await probe('unsupported-features-reject-before-database-io', async () => {
     const unsupported = new library.AuditService({ ...config.moduleOptions, prisma: forbiddenClient });
     const operations = {
-      query: () => unsupported.query({ tenantId: 'tenant-default' }),
-      getById: () => unsupported.getById(randomUUID()),
       scan: async () => { for await (const page of unsupported.scan({ tenantId: 'tenant-default' })) void page; },
       exportCsv: async () => { for await (const chunk of unsupported.exportCsv({ tenantId: 'tenant-default' })) void chunk; },
       prune: () => unsupported.prune({ olderThan: new Date() }),
