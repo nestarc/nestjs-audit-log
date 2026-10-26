@@ -16,7 +16,14 @@ export { AUDIT_CSV_COLUMNS_V1 } from './services/audit-csv';
 export type {
   AuditPruneOptions,
   AuditPruneResult,
+  AuditServiceCapabilities,
 } from './services/audit.service';
+export { AuditInputError } from './services/manual-audit-validation';
+export type { AuditInputErrorCode } from './services/manual-audit-validation';
+export type {
+  ManualAuditTransactionClient, ManualAuditTransactionHost,
+  ManualAuditTransactionOptions, ManualAuditTransactionScope,
+} from './services/manual-audit-transaction';
 
 // Context
 export { AuditContext, mergeContextMetadata } from './services/audit-context';
@@ -69,6 +76,8 @@ export type {
   AuditSharedOptions,
   AuditErrorContext,
   AuditErrorPhase,
+  AuditErrorCode,
+  AuditOperationEvent,
   AuditLogger,
 } from './interfaces/audit-shared-options.interface';
 
@@ -131,3 +140,16 @@ export type {
   AuditTableSQLOptions,
   EnsurePartitionsOptions,
 } from './sql';
+export {
+  getSqlServerAuditReadIndexStatements,
+  applySqlServerAuditReadIndexes,
+  inspectSqlServerAuditStorage,
+} from './sql/sqlserver-maintenance';
+export type {
+  SqlServerAuditStorageOptions,
+  SqlServerAuditStorageInspection,
+  SqlServerAuditColumnInspection,
+  SqlServerAuditIndexInspection,
+  SqlServerAuditTriggerInspection,
+  SqlServerAuditConstraintInspection,
+} from './sql/sqlserver-maintenance';

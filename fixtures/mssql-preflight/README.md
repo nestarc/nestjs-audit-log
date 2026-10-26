@@ -40,7 +40,32 @@ To run the library integration probe, build and pack the repository root, instal
 MSSQL_PROBE=library-probe.mjs MSSQL_REPORT_PATH=results/library/report.json npm test
 ```
 
-The library probe verifies module registration, configuration propagation, DDL reapplication, manual commit/rollback, context policies, long values, append-only triggers, and rejection of unsupported APIs. It rejects a symlinked source checkout so the test exercises the distributable package. CI builds and installs this tarball automatically.
+The library probe verifies module registration, configuration propagation, DDL reapplication, manual commit/rollback, context policies, long values, append-only triggers, and rejection of unsupported APIs. The unreleased candidate also verifies managed transactions, strict validation, diagnostics, tenant-scoped reads, precise timestamp/GUID cursors, and optional read indexes with fresh-pool writes. Prisma 7.10's Snapshot rejection is tested separately from a successful ReadCommitted transaction. It rejects a symlinked source checkout so the test exercises the distributable package. CI builds and installs this tarball automatically.
+
+After installing the candidate tarball, verify the packaged SQL Server Quick Start against that
+current-version candidate:
+
+```sh
+MSSQL_PROBE=example-probe.mjs MSSQL_EXAMPLE_MODE=candidate MSSQL_REPORT_PATH=results/example/report.json npm test
+```
+
+Candidate mode is the default and is selected explicitly in CI. It copies the example from the
+installed package into an isolated temporary consumer and checks that its exact dependency pin
+matches the candidate version. It repacks the installed distributable, substitutes that local
+tarball before resolving dependencies, installs with strict peers, and verifies the installed
+version and lockfile integrity against the new pack result. That integrity identifies the repacked
+artifact, not the original input tarball.
+
+After that version is published, run the explicit registry mode:
+
+```sh
+MSSQL_PROBE=example-probe.mjs MSSQL_EXAMPLE_MODE=registry MSSQL_REPORT_PATH=results/example-registry/report.json npm test
+```
+
+Registry mode installs the example's exact version from npm and verifies its public registry URL
+and integrity. Both modes execute the same migrations, build and seven smoke assertions. They use
+an empty runner-owned database instead of pushing the fixture schema. The runner removes the
+consumer workspace and database on completion.
 
 After installing the same tarball, run the separate-identity smoke with:
 
@@ -68,7 +93,8 @@ Results are written under `results/` and uploaded by CI even when probes fail:
 - `sqlserver.log`: server diagnostic log from CI.
 - `library/report.json` and `library/runner-report.json`: packed-library outcomes and isolated database cleanup.
 - `least-privilege/report.json` and `least-privilege/runner-report.json`: separate-identity outcomes, effective grants, denied-operation evidence, and user/login/database cleanup.
+- `example/report.json` and `example/runner-report.json`: candidate dependency mode, version, resolved artifact and integrity, migration/build/smoke outcomes, and consumer/database cleanup. The explicit registry command above writes corresponding publication evidence under `example-registry/`.
 
 `MSSQL_REPORT_PATH` can choose a different probe report path; the runner report is written beside it. Keep the image digest with results when reproducing a run because a tag alone is not immutable.
 
-Driver and general library probes use the administrative test account. The additional smoke verifies the specific restricted installer/runtime grants above, not every production identity, authentication method, permission arrangement or SQL Server 2025 build. MSSQL query, automatic tracking and retention APIs remain unsupported and are checked for explicit rejection.
+Driver and general library probes use the administrative test account. The additional smoke verifies the specific restricted installer/runtime grants above, not every production identity, authentication method, permission arrangement or SQL Server 2025 build. The candidate supports SQL Server query/getById; automatic tracking, scan/export and retention remain unsupported and are checked for explicit rejection. Published 0.7.1 still uses the application-owned SQL history example.

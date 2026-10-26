@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "baselineVersion": "0.7.1",
+  "calibration": "Initial release-regression policy accepted on 2026-10-26 after three exploratory local runs: Apple M1 Pro / macOS arm64, Node 24.22.1, Prisma and pg adapter 7.9.1, Docker PostgreSQL 16, pool max 4, concurrency 1 and 4. Formal protocol: 100 warmups and 1000 measured operations per block, 5 paired repeats. This policy is local to the recorded environment, not a statistically calibrated production SLO. P99 above 1.25 is advisory and deliberately excluded from gating rules.",
+  "minRepeats": 5,
+  "minIterations": 1000,
+  "scenarios": {
+    "manual/create/small/1": { "maxMeanRatio": 1.10, "maxP95Ratio": 1.15, "minThroughputRatio": 0.90 },
+    "manual/create/small/4": { "maxMeanRatio": 1.10, "maxP95Ratio": 1.15, "minThroughputRatio": 0.90 },
+    "manual/create/64k/1": { "maxMeanRatio": 1.10, "maxP95Ratio": 1.15, "minThroughputRatio": 0.90 },
+    "manual/create/64k/4": { "maxMeanRatio": 1.10, "maxP95Ratio": 1.15, "minThroughputRatio": 0.90 },
+    "atomic-required/create/small/1": { "maxMeanRatio": 1.10, "maxP95Ratio": 1.15, "minThroughputRatio": 0.90 },
+    "atomic-required/update/small/1": { "maxMeanRatio": 1.10, "maxP95Ratio": 1.15, "minThroughputRatio": 0.90 },
+    "atomic-required/delete/small/1": { "maxMeanRatio": 1.10, "maxP95Ratio": 1.15, "minThroughputRatio": 0.90 }
+  }
+}

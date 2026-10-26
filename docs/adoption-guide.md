@@ -1,13 +1,25 @@
 # Adopt audit logging one workflow at a time
 
-These recipes document **`@nestarc/audit-log@0.7.1`**.
+These recipes document release target **`@nestarc/audit-log@0.8.0`**; use a built tarball before
+registry publication, as described in the [installation guide](../README.md#quick-start).
 `actorRequired` and `defineAuditConfig()` were introduced in 0.7.0. See
 [CHANGELOG](../CHANGELOG.md) and the [0.6 to 0.7 migration](transactions.md#migrating-from-06-to-07).
 
-Start with an existing NestJS + Prisma + PostgreSQL application. Choose one business event when
+Choose the path that matches your application:
+
+| Database and goal | Runnable starting point |
+|---|---|
+| PostgreSQL manual business events | [Manual smoke](../examples/quick-start/README.md#expected-first-records), then the first recipe below |
+| PostgreSQL automatic model history | [HTTP Quick Start](../examples/quick-start/README.md#try-the-http-flow), then one tracked model |
+| SQL Server manual business events | [SQL Server Quick Start](../examples/sql-server-quick-start/README.md), including application-owned authorized history reads |
+
+The recipes below use an existing NestJS + Prisma + PostgreSQL application. Choose one business event when
 rewriting existing transactions is costly, or one model when you need automatic field diffs.
 The [Quick Start](../README.md#quick-start) covers pinned installation, Prisma generation, and DDL.
 The [runnable example](../examples/quick-start/README.md) includes both paths and their assertions.
+For a new manual workflow, the [0.8.0 managed transaction helper](product-quality.md#own-the-manual-transaction)
+binds the writer to its transaction and rejects commit even after a caught audit failure. The
+first recipe below shows how to add an event to an existing caller-owned transaction.
 
 ## Start with a manual business event
 
@@ -17,17 +29,26 @@ Keep your existing base Prisma client and ordinary `$transaction()`. No automati
 migration/setup step. For HTTP, extract the actor after your authentication Guard:
 
 ```typescript
-// Nest module imports; base, Prisma and tenantScope belong to your application.
-AuditLogModule.forRoot({
-  prisma: base,
-  prismaModule: { Prisma },
-  tableName: 'audit_logs',
-  sensitiveFields: ['password'],
-  tenantRequired: true,
-  tenantResolver: () => tenantScope.getStore()?.tenantId ?? null,
-  actorExtractionStage: 'interceptor',
-  actorExtractor: req => ({ id: req.user?.id ?? null, type: 'user' }),
+import { AuditLogModule, defineAuditConfig } from '@nestarc/audit-log';
+
+// base, Prisma and tenantScope belong to your application.
+const manualConfig = defineAuditConfig({
+  shared: {
+    prismaModule: { Prisma },
+    tableName: 'audit_logs',
+    sensitiveFields: ['password'],
+    actorRequired: true,
+    tenantRequired: true,
+    tenantResolver: () => tenantScope.getStore()?.tenantId ?? null,
+  },
+  module: {
+    actorExtractionStage: 'interceptor',
+    actorExtractor: req => ({ id: req.user?.id ?? null, type: 'user' }),
+  },
 });
+AuditLogModule.forRoot({ ...manualConfig.moduleOptions, prisma: base });
+// In the separate migration/setup step:
+// await applyAuditTableSchema(setupPrisma, manualConfig.schemaOptions);
 ```
 
 First authenticate and authorize the operator to change roles in the selected tenant. Include the
@@ -215,7 +236,7 @@ Use only a disposable test database/schema. Both smokes leave demonstration reco
 [Expected output and setup](../examples/quick-start/README.md) describe actor, tenant, redaction,
 role before/after and rollback assertions. Maintainers run these same packaged examples through
 `npm run test:docs:consumer` (local tarball) and, after publication,
-`npm run test:docs:consumer -- --registry` (the example's exact 0.7.1 registry dependency).
+`npm run test:docs:consumer -- --registry` (the example's exact 0.8.0 registry dependency).
 The [consumer gate](maintaining.md#run-tests) installs outside the repository with strict peers and
 removes its temporary schema. This verifies the example, not every write path in your application.
 
@@ -245,7 +266,7 @@ The baseline `smoke:manual` also verifies a successful manual-only role change a
 rollback without creating an automatic extension. The adoption suite prints `mode: "candidate-adoption"`,
 all eight scenario names, and `result: "passed"` only after every assertion succeeds. The consumer
 runner separately prints installed version, mode, resolved artifact and integrity. Candidate mode
-installs the local tarball; registry mode installs the example's exact 0.7.1 dependency from npm. Use the runner's mode
+installs the local tarball; after publication, registry mode installs the example's exact 0.8.0 dependency from npm. Use the runner's mode
 and artifact metadata, not the suite's legacy output label, to distinguish the two sources.
 
 To adapt these assertions, use your test authentication, tenant resolver and models. For example,
@@ -272,7 +293,7 @@ Keep these boundaries available during adoption:
 |---|---|
 | Base client, raw SQL, DB cascades/triggers | Not automatically recorded by the audited view; see [tracking contracts](transactions.md) |
 | Nested and bulk writes | Explicit rewrites and supported-operation limits; see [nested/bulk contracts](transactions.md#bulk-mutation-contract) |
-| Manual errors caught inside a transaction | Ordinary transaction may commit; propagate failures for rollback |
+| Manual errors caught inside a transaction | Ordinary transaction may commit; propagate failures for rollback, or use the 0.8.0 managed helper with its bound writer |
 | Tenant and actor | Scope and attribution are separate from authentication/authorization; see [context](context-and-tenancy.md) |
 | Storage privileges | Append-only triggers need restricted runtime credentials; see [hardening](storage-and-retention.md#database-hardening) |
 | Export streams | Timestamp scans can miss late commits behind a checkpoint; see [delivery limits](export-and-streams.md) |

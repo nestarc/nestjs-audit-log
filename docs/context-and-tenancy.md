@@ -1,6 +1,10 @@
 # Actor context, decorators, and tenant scope
 
-Documents version `0.7.1`. Start with the [README](../README.md);
+The [0.8.0 feature guide](product-quality.md) describes opt-in strict identity/input checks and
+operation timing hooks that omit event contents. The context and actor/tenant policies below
+also apply to managed manual transactions.
+
+Documents release target `0.8.0`. Start with the [README](../README.md);
 see [CHANGELOG](../CHANGELOG.md) for version changes.
 
 ## HTTP actor extraction
@@ -70,6 +74,7 @@ are invalid. Valid IDs are stored unchanged, including surrounding whitespace.
 | Tracked automatic `atomic-required` write | Rejects before the business query; catching the error inside `withAuditTransaction()` still rolls back earlier business and audit rows |
 | Tracked automatic `best-effort` write | Reports the policy error, executes the business query, and omits the automatic audit row, including failure rows |
 | Explicit `AuditService.log(input, tx?)` | Rejects before the audit INSERT, even in `@NoAudit()`; transaction commit depends on the caller propagating the error |
+| Bound `log(input)` in `AuditService.withManualTransaction()` | Rejects before the audit INSERT; catching the failure still prevents commit and rolls back the managed transaction |
 | Excluded model or `@NoAudit()` automatic write | Retains the existing tracking exclusion |
 | Query, scan, or CSV export | No actor-required write check; tenant scope and host authorization remain necessary |
 
@@ -171,6 +176,6 @@ them from the business mutation.
 | `query()` / `getById()` with explicit `tenantId` | Scopes to that tenant |
 | `query()` / `getById()` with `allTenants: true` | Omits tenant filtering for authorized cross-tenant reads |
 | `query()` / `getById()` with `tenantRequired: true` and no tenant | Throws unless `tenantId` or `allTenants` is explicit |
-| `scan()` / `exportCsv()` | Never uses ambient scope; requires exactly one of explicit `tenantId` or `allTenants: true` |
+| PostgreSQL `scan()` / `exportCsv()` | Never uses ambient scope; requires exactly one of explicit `tenantId` or `allTenants: true` |
 
 `tenantId` and `allTenants` are mutually exclusive; the thrown error includes `tenantId and allTenants are mutually exclusive`. Without `tenantRequired`, an ambient query with no tenant context is allowed but logs a one-time warning because it is unscoped.

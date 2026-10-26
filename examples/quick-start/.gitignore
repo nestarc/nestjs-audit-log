@@ -4,3 +4,4 @@ src/generated/
 .env
 package-lock.json
 dist-candidate/
+dist-product-quality/

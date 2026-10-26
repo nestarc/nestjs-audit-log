@@ -9,7 +9,7 @@ import type {
   AuditConsistency,
   AuditExtensionOptions,
 } from './audit-types';
-import { errorMessage, reportAuditError } from './audit-errors';
+import { errorMessage, invokeAuditObserver, reportAuditError } from './audit-errors';
 
 const NO_CONTEXT_WARNING_MESSAGE =
   '[@nestarc/audit-log] audited write executed without an audit context store — actorId will be null. Wrap background work in AuditContext.runAs(actor, fn). (warned once per process)';
@@ -164,29 +164,19 @@ function warnForMissingContextStore(
   };
   const logger = options.logger ?? console;
 
-  if (options.onAuditError) {
-    try {
-      options.onAuditError(error, ctx);
-      return;
-    } catch (callbackError) {
-      try {
-        logger.error(
-          `[@nestarc/audit-log] onAuditError callback threw: ${errorMessage(
-            callbackError,
-          )}`,
-        );
-      } catch {
-        // Reporting must never affect the caller's mutation.
-      }
-      return;
-    }
+  const onAuditError = options.onAuditError;
+  if (onAuditError) {
+    invokeAuditObserver(
+      (reportedError, context) => onAuditError.call(options, reportedError, context),
+      [error, ctx],
+      callbackError => logger.error(
+        `[@nestarc/audit-log] onAuditError callback threw: ${errorMessage(callbackError)}`,
+      ),
+    );
+    return;
   }
 
-  try {
-    logger.warn(NO_CONTEXT_WARNING_MESSAGE);
-  } catch {
-    // Reporting must never affect the caller's mutation.
-  }
+  invokeAuditObserver(() => logger.warn(NO_CONTEXT_WARNING_MESSAGE), []);
 }
 
 async function insertAuditLog(

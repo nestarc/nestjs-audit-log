@@ -234,6 +234,7 @@ function comparisons() {
       meanDeltaMs: candidate.meanMs - baseline.meanMs,
       meanRatio: candidate.meanMs / baseline.meanMs,
       p95Ratio: candidate.p95Ms / baseline.p95Ms,
+      p99Ratio: candidate.p99Ms / baseline.p99Ms,
       throughputRatio: candidate.operationsPerSecond / baseline.operationsPerSecond,
       ...(control ? {
         baselineAuditIncrementMs: baseline.meanMs - control.meanMs,
@@ -245,7 +246,8 @@ function comparisons() {
   report.comparisons = keys.map(key => {
     const selected = pairs.filter(pair => [pair.workload, pair.operation, pair.payload, pair.concurrency].join('/') === key);
     return { scenario: key, repeats: selected.length, medianMeanRatio: median(selected.map(pair => pair.meanRatio)),
-      medianP95Ratio: median(selected.map(pair => pair.p95Ratio)), medianThroughputRatio: median(selected.map(pair => pair.throughputRatio)), pairs: selected };
+      medianP95Ratio: median(selected.map(pair => pair.p95Ratio)), medianP99Ratio: median(selected.map(pair => pair.p99Ratio)),
+      medianThroughputRatio: median(selected.map(pair => pair.throughputRatio)), pairs: selected };
   });
 }
 
@@ -255,12 +257,17 @@ async function main() {
   const iterations = count('BENCH_ITERATIONS', 500, 100, 5000);
   const repeats = count('BENCH_REPEATS', 4, 2, 10);
   assert.ok((warmup + iterations) * repeats * 18 <= 100_000, 'The complete benchmark stays below 100000 operations');
-  const baseline = loadPackage('BENCH_BASELINE_PACKAGE_PATH', '0.7.0');
+  const baselineVersion = process.env.BENCH_BASELINE_VERSION || '0.7.1';
+  assert.match(baselineVersion, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/,
+    'BENCH_BASELINE_VERSION must be an exact published version');
+  const baseline = loadPackage('BENCH_BASELINE_PACKAGE_PATH', baselineVersion);
   const candidateVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
   const candidate = loadPackage('BENCH_CANDIDATE_PACKAGE_PATH', candidateVersion);
   assert.match(baseline.artifact.resolved, /^https:\/\/registry\.npmjs\.org\/@nestarc\/audit-log\//, 'The baseline originates in the npm registry');
   assert.match(candidate.artifact.resolved, /^file:.*\.tgz$/, 'The candidate originates in a packed tarball');
-  assert.notEqual(candidateVersion, baseline.version, 'The candidate version differs from the published 0.7.0 baseline');
+  // An unreleased working tree can still carry the published version. The
+  // registry and packed-tarball provenance, rather than version inequality,
+  // identify the two artifacts; identical artifacts also permit noise calibration.
   const { PrismaClient, Prisma } = require(path.join(root, 'test/e2e/generated/prisma/client.ts'));
   bootstrap = new Client({ connectionString, connectionTimeoutMillis: 10_000, statement_timeout: 30_000 });
   await bootstrap.connect();

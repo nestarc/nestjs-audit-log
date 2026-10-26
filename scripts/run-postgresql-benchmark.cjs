@@ -5,9 +5,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { readBudget } = require('./compare-performance.cjs');
 
 const root = path.resolve(__dirname, '..');
-const baselineVersion = '0.7.0';
+const baselineVersion = process.env.BENCH_BASELINE_VERSION || '0.7.1';
 const reportDirectory = path.join(root, 'benchmarks/results');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 
@@ -30,6 +31,13 @@ function npm(args, cwd, capture = false) {
 }
 
 function main() {
+  assert.match(baselineVersion, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/,
+    'BENCH_BASELINE_VERSION must be an exact published version, not a tag or range');
+  // Fail malformed budgets before database setup or fetching dependencies.
+  if (process.env.BENCH_BUDGET_PATH) {
+    const budget = readBudget(process.env.BENCH_BUDGET_PATH);
+    assert.equal(budget.baselineVersion, baselineVersion, 'Budget calibration must match BENCH_BASELINE_VERSION');
+  }
   // Reject external targets before fetching or installing benchmark dependencies.
   const url = new URL(process.env.DATABASE_URL || 'postgresql://test:test@localhost:5433/audit_test');
   assert.ok(['postgres:', 'postgresql:'].includes(url.protocol) &&
@@ -80,9 +88,15 @@ function main() {
     save();
     run(process.execPath, ['-r', 'ts-node/register/transpile-only', 'benchmarks/manual-audit-regression.cjs'], root, {
       ...process.env, DATABASE_URL: url.href,
+      BENCH_BASELINE_VERSION: baselineVersion,
       BENCH_BASELINE_PACKAGE_PATH: installed.baseline,
       BENCH_CANDIDATE_PACKAGE_PATH: installed.candidate,
     }, false, 600_000);
+    const report = process.env.BENCH_REPORT_PATH || path.join(reportDirectory, 'postgresql-manual-regression.json');
+    const compareArgs = [path.join(root, 'scripts/compare-performance.cjs'), report,
+      '--output', path.join(reportDirectory, 'postgresql-performance-summary.json')];
+    if (process.env.BENCH_BUDGET_PATH) compareArgs.push('--budget', process.env.BENCH_BUDGET_PATH);
+    run(process.execPath, compareArgs, root, process.env);
   } catch (error) {
     evidence.status = 'failed';
     evidence.error = { name: error.name, message: error.message.slice(0, 240) };

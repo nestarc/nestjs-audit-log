@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   {
-    ignores: ['coverage/**', 'dist/**', 'test/e2e/generated/**'],
+    ignores: ['coverage/**', 'dist/**', 'test/e2e/generated/**', 'benchmarks/results/**'],
   },
   {
     files: ['src/**/*.ts', 'test/**/*.ts', 'benchmarks/**/*.ts'],

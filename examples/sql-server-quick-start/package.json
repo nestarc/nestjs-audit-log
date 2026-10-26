@@ -1,0 +1,28 @@
+{
+  "name": "audit-log-sql-server-quick-start",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Runnable manual audit logging example targeting audit-log 0.8.0",
+  "engines": { "node": "^22.23.4 || ^24.22.1" },
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "tsc -p tsconfig.json",
+    "db:setup": "prisma migrate deploy && npm run generate && npm run build && node dist/setup.js",
+    "smoke": "npm run build && node dist/smoke.js"
+  },
+  "dependencies": {
+    "@nestarc/audit-log": "0.8.0",
+    "@nestjs/common": "12.0.1",
+    "@nestjs/core": "12.0.1",
+    "@prisma/adapter-mssql": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "dotenv": "16.6.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "prisma": "7.10.0",
+    "typescript": "5.9.3"
+  }
+}

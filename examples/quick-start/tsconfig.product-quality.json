@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": ".", "outDir": "dist-product-quality" },
+  "include": ["product-quality/**/*.ts"]
+}

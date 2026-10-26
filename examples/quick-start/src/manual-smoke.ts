@@ -6,13 +6,13 @@ import { NestFactory } from '@nestjs/core';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { AuditContext, AuditLogModule, AuditService } from '@nestarc/audit-log';
 import { PrismaClient } from './generated/prisma/client';
-import { connectionString, databaseSchema, sharedAuditOptions, tenantScope } from './audit-options';
+import { connectionString, databaseSchema, auditConfig, tenantScope } from './audit-options';
 import { changeRoleWithEvent } from './manual-role';
 
 // This module creates no automatic extension or audited client.
 const base = new PrismaClient({ adapter: new PrismaPg({ connectionString }, { schema: databaseSchema }) });
 @Module({ imports: [AuditLogModule.forRoot({
-  ...sharedAuditOptions, prisma: base, actorExtractor: () => ({ id: null, type: 'system' }),
+  ...auditConfig.moduleOptions, prisma: base,
 })] })
 class ManualModule {}
 

@@ -2,12 +2,29 @@ name: Database performance
 
 on:
   workflow_dispatch:
+    inputs:
+      baseline_version:
+        description: Exact published audit-log version to compare
+        type: string
+        default: '0.7.1'
   pull_request:
     branches: [main]
     paths:
+      - src/**
+      - package.json
+      - package-lock.json
+      - tsconfig*.json
+      - prisma.config.ts
+      - test/e2e/prisma/**
       - benchmarks/**
       - scripts/run-postgresql-benchmark.cjs
+      - scripts/compare-performance.cjs
       - scripts/verify-node-security.cjs
+      - fixtures/mssql-preflight/package.json
+      - fixtures/mssql-preflight/package-lock.json
+      - fixtures/mssql-preflight/prisma/**
+      - fixtures/mssql-preflight/schema.prisma
+      - fixtures/mssql-preflight/prisma.config.*
       - fixtures/mssql-preflight/manual-benchmark.mjs
       - fixtures/mssql-preflight/run.mjs
       - .github/workflows/mssql-preflight.yml
@@ -43,6 +60,7 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://test:test@localhost:5433/audit_test
+      BENCH_BASELINE_VERSION: ${{ inputs.baseline_version || '0.7.1' }}
       BENCH_WARMUP: '50'
       BENCH_ITERATIONS: '500'
       BENCH_REPEATS: '4'

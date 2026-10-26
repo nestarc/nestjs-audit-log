@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.8.0] - 2026-10-26
+
+Version 0.8.0 adds managed manual transactions, validation and diagnostics, and SQL Server history
+queries. See the [release notes](docs/releases/0.8.0.md) for compatibility and validation scope.
+
+### Added
+
+- Add `AuditService.withManualTransaction(client, callback, options?)` with a typed transaction
+  and bound manual writer. Caught audit failures prevent commit; started writes settle before
+  completion and expired writers reject. Keep `log(input, tx?)` available for caller-owned transactions.
+- Add opt-in `strictManualValidation` and `maxMetadataBytes` for event validation and a redacted
+  metadata UTF-8 byte budget, structured `AuditInputError` diagnostics, `onAuditOperation` observers,
+  and provider capability discovery through `AuditService.getCapabilities()`.
+- Add SQL Server tenant-scoped history queries and ID lookup with full-precision cursors,
+  exact binary text filters, and JSON/UTC normalization. Provide optional additive read indexes
+  and read-only storage inspection without expanding runtime logging privileges.
+- Add a runnable SQL Server consumer example and clearer provider adoption paths, with examples
+  pinned to 0.8.0 and the new APIs covered in the [feature guide](docs/product-quality.md).
+- Add controlled PostgreSQL benchmarks with A/A calibration, package/load/order crossover and
+  independent process replicates, an offline confidence-bound comparator, and separate CPU-profile
+  analysis with validated clock alignment.
+
+### Changed
+
+- Report manual validation, context, serialization and INSERT failures with phase/code/duration
+  diagnostics while preserving the original error. Isolate asynchronous diagnostic observer
+  failures as well as synchronous exceptions.
+- Run performance checks for library and dependency changes, compare against an explicit
+  registry baseline, and support opt-in calibrated performance budgets alongside raw evidence.
+- Verify the SQL Server Quick Start against a packed candidate before publication, with an
+  explicit registry mode after publication. Run the PostgreSQL product-quality assertions in
+  both packed and registry consumer modes.
+- Separate optional soft-delete ecosystem compatibility from standalone CI and publication.
+  Keep core and MSSQL release checks, and provide a manually dispatched compatibility workflow.
+  Candidate integration checks require an explicit exact published soft-delete version, retain
+  strict peer validation, and must pass before claiming support for that package tuple.
+
+### Validation
+
+- Record the 2026-10-26 approval of the tested candidate's seven individual local PostgreSQL
+  performance scenarios under unchanged mean/P95/throughput limits. A predeclared controlled
+  comparison replaces the automatic-create measurement; the other six scenarios retain both
+  formal passes. Results and boundaries are in
+  the repository validation record `docs/2026-10-26-performance-resolution.md`; see also the
+  [benchmark guide](docs/benchmarks.md).
+
 ## [0.7.1] - 2026-10-25
 
 Version 0.7.1 adds SQL Server manual audit logging. See the

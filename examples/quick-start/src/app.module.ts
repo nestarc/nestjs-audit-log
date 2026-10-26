@@ -2,7 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuditLogModule } from '@nestarc/audit-log';
 import { PrismaModule } from './prisma.module';
 import { PrismaService } from './prisma.service';
-import { sharedAuditOptions, tenantScope } from './audit-options';
+import { auditConfig, tenantScope } from './audit-options';
 import { DemoIdentityGuard, UserController } from './user.controller';
 
 @Module({
@@ -11,14 +11,8 @@ import { DemoIdentityGuard, UserController } from './user.controller';
     AuditLogModule.forRootAsync({
       inject: [PrismaService],
       useFactory: (prisma: PrismaService) => ({
-        ...sharedAuditOptions,
+        ...auditConfig.moduleOptions,
         prisma: prisma.base,
-        actorExtractionStage: 'interceptor',
-        actorExtractor: req => ({
-          id: req.user?.id ?? null,
-          type: req.user ? 'user' : 'system',
-          ip: req.ip,
-        }),
       }),
     }),
   ],

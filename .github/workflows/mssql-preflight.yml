@@ -16,6 +16,8 @@ on:
     branches: [main]
     paths:
       - fixtures/mssql-preflight/**
+      - examples/sql-server-quick-start/**
+      - scripts/verify-docs-consumer.cjs
       - scripts/verify-node-security.cjs
       - .github/workflows/mssql-preflight.yml
       - src/**
@@ -27,6 +29,8 @@ on:
     branches: [main]
     paths:
       - fixtures/mssql-preflight/**
+      - examples/sql-server-quick-start/**
+      - scripts/verify-docs-consumer.cjs
       - scripts/verify-node-security.cjs
       - .github/workflows/mssql-preflight.yml
       - src/**
@@ -131,6 +135,13 @@ jobs:
         env:
           MSSQL_PROBE: least-privilege-probe.mjs
           MSSQL_REPORT_PATH: results/least-privilege/report.json
+        run: npm test
+
+      - name: Verify the SQL Server Quick Start with the packed current-version candidate
+        env:
+          MSSQL_PROBE: example-probe.mjs
+          MSSQL_EXAMPLE_MODE: candidate
+          MSSQL_REPORT_PATH: results/example/report.json
         run: npm test
 
       - name: Measure manual audit transaction overhead

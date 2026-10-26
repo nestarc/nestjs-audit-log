@@ -3,7 +3,6 @@ import { AuditLogModuleOptions } from '../src/interfaces/audit-log-options.inter
 import { PrismaModuleLike } from '../src/prisma/prisma-namespace';
 import { AuditContext } from '../src/services/audit-context';
 import { AuditMaintenanceService } from '../src/services/audit-maintenance.service';
-import { AuditQueryService } from '../src/services/audit-query.service';
 import { AuditScanService } from '../src/services/audit-scan.service';
 import { AuditService } from '../src/services/audit.service';
 
@@ -194,18 +193,12 @@ describe('SQL Server manual audit service', () => {
 });
 
 describe('SQL Server unsupported service operations', () => {
-  it('rejects query, invalid-ID lookup and prune with no database or resolver calls', async () => {
+  it('rejects prune with no database or resolver calls', async () => {
     const tenantResolver = jest.fn(() => 'tenant-1');
     const { service, prisma } = fixture({ tenantResolver });
     const otherClient = { $queryRaw: jest.fn(), $executeRaw: jest.fn(), $transaction: jest.fn() };
-    const query = service.query({});
-    const lookup = service.getById('not-a-uuid');
     const prune = service.prune({ olderThan: new Date(), client: otherClient });
-    expect(query).toBeInstanceOf(Promise);
-    expect(lookup).toBeInstanceOf(Promise);
     expect(prune).toBeInstanceOf(Promise);
-    await expect(query).rejects.toThrow('AuditService.query');
-    await expect(lookup).rejects.toThrow('AuditService.getById');
     await expect(prune).rejects.toThrow('AuditService.prune');
     expect(tenantResolver).not.toHaveBeenCalled();
     expectNoDatabaseCalls(prisma);
@@ -232,13 +225,10 @@ describe('SQL Server unsupported service operations', () => {
 
   it('also guards directly constructed internal services and an injected CSV scan callback', async () => {
     const { options, Prisma, prisma } = fixture();
-    const query = new AuditQueryService(options, Prisma, null);
     const scan = new AuditScanService(options, Prisma, null);
     const maintenance = new AuditMaintenanceService(options, Prisma, 'audit_logs', null);
     const injectedScan = jest.fn();
     const chunks: unknown[] = [];
-    await expect(query.query({})).rejects.toThrow('AuditService.query');
-    await expect(query.getById('not-a-uuid')).rejects.toThrow('AuditService.getById');
     await expect(maintenance.prune({ olderThan: new Date() })).rejects.toThrow('AuditService.prune');
     await expect(scan.scan({ allTenants: true })[Symbol.asyncIterator]().next()).rejects.toThrow('AuditService.scan');
     await expect(consumeStream(scan.exportCsv({ allTenants: true, includeBom: true }, injectedScan), chunks))
@@ -251,7 +241,7 @@ describe('SQL Server unsupported service operations', () => {
   it('captures the provider at construction instead of trusting later option mutation', async () => {
     const { service, options, prisma } = fixture();
     options.provider = 'postgresql';
-    await expect(service.query({})).rejects.toThrow('sqlserver');
+    await expect(service.prune({ olderThan: new Date() })).rejects.toThrow('sqlserver');
     await service.log({ action: 'still-mssql' });
     expect((prisma.$executeRaw.mock.calls[0][0] as SqlFragment).strings.join('')).not.toContain('::jsonb');
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
