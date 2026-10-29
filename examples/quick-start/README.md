@@ -2,12 +2,12 @@
 
 This standalone example documents and pins the **`@nestarc/audit-log@0.8.0` release target**.
 The registry installation below is for after publication. Before publication, install the
-[prepared candidate tarball](../../docs/maintaining.md#candidate-documentation-example) instead.
+[prepared candidate tarball](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example) instead.
 The default `src` build contains the introductory app; the
 separately compiled `candidate` directory tests additional released adoption contracts, including
 `defineAuditConfig` and `actorRequired`. See the
-[changelog](../../CHANGELOG.md), [adoption guide](../../docs/adoption-guide.md) and
-[candidate instructions](../../docs/maintaining.md#candidate-documentation-example).
+[changelog](../../CHANGELOG.md), [adoption guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md) and
+[candidate instructions](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example).
 
 ## Install version 0.8.0 after publication
 
@@ -38,7 +38,7 @@ docker compose -f test/e2e/docker-compose.yml up -d --wait --wait-timeout 60
 
 `db:setup` applies the included users/role migrations, generates the Prisma 7 CommonJS client,
 builds the app, and creates the audit table. Use a schema-owning setup connection, then provision a
-restricted runtime connection as described in the [storage guide](../../docs/storage-and-retention.md).
+restricted runtime connection as described in the [storage guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/storage-and-retention.md).
 Smoke commands leave demonstration rows; use only a disposable database/schema. Repeated runs use
 unique user emails. Keep the generated lockfile for repeat installs with `npm ci`.
 
@@ -154,7 +154,7 @@ It requires the gate's unique local `audit_test` schema and the 0.7.0
 Use `npm run test:docs:consumer` from the repository root to get installation, schema isolation and
 teardown, or add `-- --registry` after publication to run the same assertions against npm version 0.8.0.
 
-The [scenario-to-assertion map](../../docs/adoption-guide.md#adoption-assertions-070)
+The [scenario-to-assertion map](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md#adoption-assertions-070)
 explains the eight named results: concurrent HTTP/worker identities, masking/tenant policies,
 business and audit failures, caught N01/N02 errors, manual catch boundaries, tracking exclusions,
 and custom table storage. Success prints `mode: "candidate-adoption"`, eight `scenarios`, and
@@ -171,4 +171,4 @@ operation observer isolation/privacy, and provider capabilities.
 
 The root consumer runner executes it for both a packed candidate and the exact registry artifact
 after publication. It is compiled separately from the introductory build and `smoke:candidate`.
-See the [0.8.0 product-quality guide](../../docs/product-quality.md) for the public API contracts.
+See the [0.8.0 product-quality guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md) for the public API contracts.

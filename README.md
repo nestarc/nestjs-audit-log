@@ -12,12 +12,12 @@ supports automatic before/after diffs, export, and delivery to external services
 The Quick Start and public-API examples target **`@nestarc/audit-log@0.8.0`** and pin that version.
 Version 0.8.0 adds managed manual transactions, optional event validation, operation diagnostics,
 and SQL Server history queries. See [CHANGELOG](CHANGELOG.md), the
-[0.8.0 release notes](docs/releases/0.8.0.md), and the [feature guide](docs/product-quality.md).
+[0.8.0 release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.8.0.md), and the [feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md).
 Versioned source documentation describes the target package; registry publication is verified separately.
-Maintainers can also verify a [locally packed candidate](docs/maintaining.md#candidate-documentation-example);
+Maintainers can also verify a [locally packed candidate](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example);
 verify its source and integrity separately from the registry artifact even when the version matches.
 
-Use [SQL Server support](docs/sql-server.md) with explicit `provider: 'sqlserver'` for
+Use [SQL Server support](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/sql-server.md) with explicit `provider: 'sqlserver'` for
 same-transaction events, history reads, and SQL Server storage utilities. The Quick Start and
 automatic tracking examples below remain PostgreSQL-specific.
 
@@ -25,21 +25,21 @@ automatic tracking examples below remain PostgreSQL-specific.
 
 | Your application | Start here | Verify the first result |
 |---|---|---|
-| PostgreSQL: keep existing transactions and add a business event | [Manual event adoption](docs/adoption-guide.md#start-with-a-manual-business-event) | [Runnable manual smoke](examples/quick-start/README.md#expected-first-records): actor, tenant, masking, and rollback |
+| PostgreSQL: keep existing transactions and add a business event | [Manual event adoption](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md#start-with-a-manual-business-event) | [Runnable manual smoke](examples/quick-start/README.md#expected-first-records): actor, tenant, masking, and rollback |
 | PostgreSQL: record supported model changes automatically | [Quick Start](#quick-start) | [Runnable HTTP flow](examples/quick-start/README.md#try-the-http-flow): write, authorized history, and rollback |
 | SQL Server: record a business event in the same transaction | [SQL Server Quick Start](examples/sql-server-quick-start/README.md) | Commit an event, verify rollback, and read authorized history through application-owned SQL |
 
-Use one event or one tracked model first. The [adoption guide](docs/adoption-guide.md) shows how to
+Use one event or one tracked model first. The [adoption guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md) shows how to
 expand after actor, tenant, redaction, and transaction behavior are verified.
 
 For the managed transaction helper, event validation, diagnostics, and SQL Server query APIs,
-see [new in 0.8.0](#new-in-080) and the [feature guide](docs/product-quality.md).
+see [new in 0.8.0](#new-in-080) and the [feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md).
 
 **Choose `atomic-required` for automatic tracking:** supported tracked writes and their audit rows
 commit or roll back together inside `withAuditTransaction()`. Supported tracked writes outside the helper
 are rejected. Explicit `best-effort` is non-atomic: rollback can leave orphan success rows and
 transaction-local diffs can be stale. Coverage is limited to supported operations through the
-audited client; see [tracking boundaries](docs/transactions.md).
+audited client; see [tracking boundaries](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md).
 
 ## Contents
 
@@ -58,7 +58,7 @@ audited client; see [tracking boundaries](docs/transactions.md).
 - An existing NestJS application using NestJS 10, 11, or 12.0.1+
 - PostgreSQL with Prisma 7 (primary), or Prisma 5/6 legacy peer compatibility
 - Alternatively, SQL Server 2025 with Prisma CLI/client/MSSQL adapter 7.10.0 for manual logging;
-  follow its [separate setup and support boundaries](docs/sql-server.md)
+  follow its [separate setup and support boundaries](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/sql-server.md)
 - Node.js 22.23.4+ within the 22.x line, or 24.22.1+ within the 24.x line
 
 These minimum versions include the Node.js fix for CVE-2026-111497 in its bundled Brotli decoder.
@@ -96,7 +96,7 @@ npm install --save-dev prisma@7
 The [runnable example](examples/quick-start/README.md) pins its complete dependency tuple. Existing
 Prisma 5/6 applications should keep their generation setup and compatible Prisma dependencies.
 Contributors testing local changes use the separate
-[build/pack instructions](docs/maintaining.md#candidate-documentation-example).
+[build/pack instructions](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example).
 
 ```dotenv
 # .env — replace with your local database credentials
@@ -222,7 +222,7 @@ await applyAuditTableSchema(prismaService.base, auditConfig.schemaOptions);
 
 `getAuditTableSQL(auditConfig.schemaOptions)` provides the SQL for your migration tool. The runnable
 example includes this setup; production deployments should apply it through their migration process.
-See [storage setup](docs/storage-and-retention.md) for partitions and database permissions.
+See [storage setup](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/storage-and-retention.md) for partitions and database permissions.
 
 ### 3. Register the NestJS module
 
@@ -254,9 +254,9 @@ and before the route handler runs. **This option is introduced in 0.6.0.** Publi
 v0.5.0 extracts in middleware: authenticate before that middleware or provide an extractor that can
 resolve identity there. The default remains `'middleware'` for compatibility. Writes inside Guards
 precede interceptor extraction; use earlier authentication middleware if those writes need an actor.
-See [actor context](docs/context-and-tenancy.md) for manual interceptor binding and background jobs.
+See [actor context](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/context-and-tenancy.md) for manual interceptor binding and background jobs.
 
-[`defineAuditConfig()`](docs/api-reference.md#common-configuration-factory) keeps table, actor,
+[`defineAuditConfig()`](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/api-reference.md#common-configuration-factory) keeps table, actor,
 tenant, masking, and error settings aligned across consumers. It does not open a connection or apply
 DDL. Direct module and extension registration remains supported, but those options are independent:
 setting a policy on the module alone does not configure the automatic extension.
@@ -343,7 +343,7 @@ if (page.nextCursor) {
 `includeTotal: false` skips `COUNT(*)` and omits `total`. Keep the same filters on every cursor page;
 cursors contain a position, not filters. For atomic manual events, pass the same transaction client
 to `AuditService.log(input, tx)` as your business write. See the
-[API reference](docs/api-reference.md) for query options, result types, and manual transaction examples.
+[API reference](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/api-reference.md) for query options, result types, and manual transaction examples.
 
 ## Configuration and context
 
@@ -352,7 +352,7 @@ to `AuditService.log(input, tx)` as your business write. See the
 - `@NoAudit()` suppresses automatic tracking; `@AuditAction()` overrides automatic action names.
   `@AuditReason()` adds a reason to context metadata. They apply to handlers or controllers.
 - `AuditContext.runAs(actor, callback)` supplies an actor for worker/cron code. HTTP extraction does
-  not run in background jobs. [Context examples](docs/context-and-tenancy.md) cover actor, metadata,
+  not run in background jobs. [Context examples](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/context-and-tenancy.md) cover actor, metadata,
   reason, and tenant setup.
 - Tenant scope is explicit where needed: `query()`/`getById()` accept `tenantId` or deliberately
   authorized `allTenants: true`; `scan()`/`exportCsv()` require exactly one of them. A custom
@@ -363,38 +363,39 @@ to `AuditService.log(input, tx)` as your business write. See the
 | Capability | Contract |
 |---|---|
 | Automatic single-record tracking | `create`, `update`, `delete`, and `upsert` through the audited client; supported operations use the helper's transaction |
-| Bulk writes | Atomic `deleteMany` records individual rows within `maxBatchRecords`; atomic `createMany`/`updateMany` are rejected; see the [bulk matrix](docs/transactions.md#bulk-mutation-contract) |
+| Bulk writes | Atomic `deleteMany` records individual rows within `maxBatchRecords`; atomic `createMany`/`updateMany` are rejected; see the [bulk matrix](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md#bulk-mutation-contract) |
 | Returning bulk writes | Tracked `createManyAndReturn`/`updateManyAndReturn` are rejected in atomic mode; best-effort warns and produces no automatic audit row |
-| Nested writes | Use explicit related-model writes inside the helper for tracked relations; see [nested writes](docs/transactions.md#nested-writes) |
+| Nested writes | Use explicit related-model writes inside the helper for tracked relations; see [nested writes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md#nested-writes) |
 | Other writes | Base-client writes, raw SQL, unsupported operations, and database-side cascades/triggers are outside automatic record coverage |
 | Append-only storage | Default row triggers block `UPDATE`/`DELETE`; runtime permissions and a separate owner are required to prevent privileged bypasses or `TRUNCATE` |
 | Export and delivery | CSV and checkpointed streams scan rows by `(created_at, id)`; this is not a commit-ordered change feed, and late commits can be missed behind a checkpoint |
 
 These boundaries matter when deciding whether the records meet your application's audit requirements.
-See [transactions](docs/transactions.md), [database hardening](docs/storage-and-retention.md#database-hardening),
-and [export guarantees](docs/export-and-streams.md).
+See [transactions](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md), [database hardening](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/storage-and-retention.md#database-hardening),
+and [export guarantees](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/export-and-streams.md).
 
 ## Guides and API reference
 
 | Task | Reference |
 |---|---|
-| Adopt one event or model, including a role-change workflow | [Adoption guide](docs/adoption-guide.md) |
+| Adopt one event or model, including a role-change workflow | [Adoption guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md) |
 | Run a complete integration | [Quick Start application](examples/quick-start/README.md) |
-| Configure the module, extension, queries, and manual logging | [API reference](docs/api-reference.md) |
-| Understand transactions, bulk operations, soft-delete, and the v0.5 migration | [Tracking contracts](docs/transactions.md) |
-| Set actors, reasons, correlation metadata, and tenant scope | [Context and tenancy](docs/context-and-tenancy.md) |
-| Create tables, manage partitions, prune, and configure privileges | [Storage and retention](docs/storage-and-retention.md) |
-| Use SQL Server manual events and table installation | [SQL Server guide](docs/sql-server.md) |
-| Export CSV or deliver logs to HTTP, object storage, Datadog, or Splunk | [Export and streams](docs/export-and-streams.md) |
-| Use the package from an AI-assisted workflow | [Agent guide](docs/agent-guide.md) |
+| Configure the module, extension, queries, and manual logging | [API reference](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/api-reference.md) |
+| Understand transactions, bulk operations, soft-delete, and the v0.5 migration | [Tracking contracts](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md) |
+| Set actors, reasons, correlation metadata, and tenant scope | [Context and tenancy](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/context-and-tenancy.md) |
+| Create tables, manage partitions, prune, and configure privileges | [Storage and retention](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/storage-and-retention.md) |
+| Use SQL Server manual events and table installation | [SQL Server guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/sql-server.md) |
+| Export CSV or deliver logs to HTTP, object storage, Datadog, or Splunk | [Export and streams](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/export-and-streams.md) |
+| Use the package from an AI-assisted workflow | [Agent guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/agent-guide.md) |
 | Check release changes | [CHANGELOG](CHANGELOG.md) |
-| Review 0.8.0 changes, validation, and support limits | [0.8.0 release notes](docs/releases/0.8.0.md) |
-| Use managed manual transactions, validation, diagnostics, and SQL Server history | [Feature guide](docs/product-quality.md) |
+| Review 0.8.0 changes, validation, and support limits | [0.8.0 release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.8.0.md) |
+| Use managed manual transactions, validation, diagnostics, and SQL Server history | [Feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md) |
 
-AI agents can start with [the agent guide](docs/agent-guide.md), [llms.txt](llms.txt), the runnable example,
+AI agents can start with [the agent guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/agent-guide.md), [llms.txt](llms.txt), the runnable example,
 and the public TypeScript exports
-in `@nestarc/audit-log`. Historical plans under `docs/` preserve earlier designs and are marked as
-historical; use the guides above for current behavior.
+in `@nestarc/audit-log`. Guide links above point to the preserved `v0.8.0` documentation.
+The local `docs/` directory is excluded from Git and future npm packages; historical plans in
+the release snapshot preserve earlier designs and are marked as historical.
 
 ## Tested ecosystem versions
 
@@ -415,7 +416,7 @@ The manually dispatched `Ecosystem compatibility` workflow checks either that pu
 the packed audit-log candidate with an explicitly selected exact published soft-delete version.
 Strict peer checks and lifecycle assertions must pass before a tuple is described as supported.
 Soft-delete 0.7.4 excludes audit-log 0.8.0 from its peer range, so that combination remains unsupported.
-See [compatibility verification](docs/maintaining.md#optional-ecosystem-compatibility) for commands,
+See [compatibility verification](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#optional-ecosystem-compatibility) for commands,
 artifact checks and the separate release procedure.
 
 <a id="unreleased-improvements"></a>
@@ -436,13 +437,13 @@ Version 0.8.0 includes the following additions to the 0.7.1 API:
   full-precision cursors and exact text filtering. Optional read indexes and read-only storage
   inspection help prepare the schema for history queries.
 
-See the [feature guide](docs/product-quality.md) for configuration, examples and boundaries.
+See the [feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md) for configuration, examples and boundaries.
 SQL Server automatic tracking, scan/export and retention remain unsupported.
 
 ## Performance and development
 
 Performance depends on operation, consistency mode, transaction overhead, schema, and workload.
-Use the [reproducible benchmark](docs/benchmarks.md) to compare direct writes, plain transactions,
+Use the [reproducible benchmark](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/benchmarks.md) to compare direct writes, plain transactions,
 `atomic-required`, and explicit `best-effort`. No single latency number represents every mode.
 
 The development candidate recorded in the **2026-10-26 local validation** passed seven individual
@@ -454,11 +455,11 @@ both original formal runs.
 For automatic create, the one-sided 95% bounds on geometric mean process ratios were **+2.83% mean
 latency**, **+4.93% P95 latency**, and **−2.75% throughput**. This is approval for the recorded local
 candidate and scenarios, not a production SLO or SQL Server performance claim. The repository
-validation record, `docs/2026-10-26-performance-resolution.md`, identifies the exact artifact,
+validation record, [performance resolution](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/2026-10-26-performance-resolution.md), identifies the exact artifact,
 environment, retained sequential results and historical failure.
 
 For repository setup and lint, typecheck, unit, PostgreSQL E2E, and ecosystem tests, see
-[development commands](docs/maintaining.md#development).
+[development commands](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#development).
 
 ## License
 

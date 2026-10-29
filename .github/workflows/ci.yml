@@ -76,7 +76,7 @@ jobs:
       - name: E2E tests
         run: npm run test:e2e
 
-      - name: Verify packed documentation and adoption scenarios
+      - name: Verify packed package and adoption scenarios
         if: matrix.node-version == '24.22.1'
         run: npm run test:docs:consumer
 

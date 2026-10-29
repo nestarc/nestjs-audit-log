@@ -18,25 +18,28 @@ partitions remain unsupported; use the dedicated guide below.
 
 ## Adoption and API guides
 
+Guide links refer to the preserved v0.8.0 documentation. Local docs/ files are excluded from Git
+and future npm packages; use the linked release snapshot for these guides.
+
 - [README](README.md): requirements, setup, first event, and guide index.
-- [Adoption guide](docs/adoption-guide.md): manual events, one-model tracking, role changes, authorized reads, and verification.
-- [Agent usage guide](docs/agent-guide.md): version boundaries and implementation recipes.
+- [Adoption guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md): manual events, one-model tracking, role changes, authorized reads, and verification.
+- [Agent usage guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/agent-guide.md): version boundaries and implementation recipes.
 - [Runnable example](examples/quick-start/README.md): Nest HTTP, Prisma generation, migrations, and smoke verification.
 - [SQL Server runnable example](examples/sql-server-quick-start/README.md): 0.8.0 manual logging, rollback, actor/tenant policy, masking, and authorized history access.
-- [API reference](docs/api-reference.md): public configuration and return contracts.
-- [Transactions](docs/transactions.md): atomic-required, unsupported operations, and lifecycle integration.
-- [Actor and tenancy](docs/context-and-tenancy.md): authenticated actors, jobs, and explicit query scope.
-- [Storage and retention](docs/storage-and-retention.md): privileges, partitions, and maintenance.
-- [SQL Server logging and history](docs/sql-server.md): provider configuration, same-transaction events, history queries, DDL batches, and support boundaries.
-- [0.8.0 product-quality APIs](docs/product-quality.md): managed manual transactions, opt-in validation, SQL Server reads and operational diagnostics introduced in 0.8.0.
-- [Export and streams](docs/export-and-streams.md): checkpoints, delivery retries, and late-commit limitations.
+- [API reference](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/api-reference.md): public configuration and return contracts.
+- [Transactions](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md): atomic-required, unsupported operations, and lifecycle integration.
+- [Actor and tenancy](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/context-and-tenancy.md): authenticated actors, jobs, and explicit query scope.
+- [Storage and retention](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/storage-and-retention.md): privileges, partitions, and maintenance.
+- [SQL Server logging and history](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/sql-server.md): provider configuration, same-transaction events, history queries, DDL batches, and support boundaries.
+- [0.8.0 product-quality APIs](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md): managed manual transactions, opt-in validation, SQL Server reads and operational diagnostics introduced in 0.8.0.
+- [Export and streams](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/export-and-streams.md): checkpoints, delivery retries, and late-commit limitations.
 - [Changelog](CHANGELOG.md): version changes.
-- [Candidate installation](docs/maintaining.md#candidate-documentation-example): build/pack and isolated consumer checks.
+- [Candidate installation](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example): build/pack and isolated consumer checks.
 
 ## Release references
 
-- [0.8.0 release notes](docs/releases/0.8.0.md): managed manual transactions, SQL Server reads, diagnostics and scoped validation.
-- [0.7.1 release notes](docs/releases/0.7.1.md): historical introduction of manual SQL Server support and its release-specific limits.
+- [0.8.0 release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.8.0.md): managed manual transactions, SQL Server reads, diagnostics and scoped validation.
+- [0.7.1 release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.7.1.md): historical introduction of manual SQL Server support and its release-specific limits.
 - [0.7.0 release](https://github.com/nestarc/nestjs-audit-log/releases/tag/v0.7.0)
 - [Official documentation](https://nestarc.dev/packages/audit-log/)
 - [npm package](https://www.npmjs.com/package/@nestarc/audit-log)

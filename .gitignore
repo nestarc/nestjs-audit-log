@@ -4,6 +4,9 @@
 /build
 /tmp
 
+# Local documentation and investigation notes
+/docs/
+
 # Logs
 logs
 *.log

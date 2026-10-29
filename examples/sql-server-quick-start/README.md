@@ -8,7 +8,7 @@ and proves rollback, actor/tenant policy, masking, Unicode, and authorized histo
 See [CHANGELOG](../../CHANGELOG.md) for release differences.
 
 Use Node 22.23.4+ within 22.x or 24.22.1+ within 24.x. The library's recorded SQL Server environment
-is Linux x64 SQL Server 2025 CU10; see [supported boundaries](../../docs/sql-server.md).
+is Linux x64 SQL Server 2025 CU10; see [supported boundaries](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/sql-server.md).
 
 ## Run from a copy of this directory
 
@@ -61,19 +61,19 @@ Expected output:
 - [smoke.ts](src/smoke.ts) shows `await audit.log(input, tx)` inside the business transaction.
   Propagate its error to roll back: this caller-owned transaction does not force rollback after a
   caught JavaScript policy error. In 0.8.0, `withManualTransaction()` also offers a bound logger
-  that prevents commit after a caught audit failure; see the [managed manual contract](../../docs/product-quality.md#own-the-manual-transaction).
+  that prevents commit after a caught audit failure; see the [managed manual contract](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md#own-the-manual-transaction).
 - [history.ts](src/history.ts) shows a bounded, parameterized **application-owned SQL query**.
   It deliberately demonstrates a host-controlled read: the application checks the read permission
   and authorized tenant before executing SQL and includes tenant predicates. This example returns
-  the latest 50 matching rows. In 0.8.0, [SQL Server `AuditService.query()`](../../docs/product-quality.md#read-sql-server-history)
+  the latest 50 matching rows. In 0.8.0, [SQL Server `AuditService.query()`](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md#read-sql-server-history)
   is also available for filtered history and cursor pagination with the same host authorization responsibility.
 
 The fixed `demo-operator` principal and tenant membership are test data, not authentication.
 Replace them with trusted application identity and authorization. The smoke uses one connection
 identity for convenience. Deployments should use separate setup, writer, and authorized reader
 identities: a writer needs audit INSERT, while this history reader also needs SELECT. See the
-[permission guide](../../docs/sql-server.md#separate-installation-and-runtime-identities).
-Version 0.8.0 includes [optional read indexes and storage inspection](../../docs/product-quality.md#add-read-indexes-explicitly).
+[permission guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/sql-server.md#separate-installation-and-runtime-identities).
+Version 0.8.0 includes [optional read indexes and storage inspection](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md#add-read-indexes-explicitly).
 Enable indexes through an explicit migration after checking session settings and workload costs.
 
 After reviewing the results, remove the disposable database through the tool that created it.
@@ -97,4 +97,4 @@ npm run smoke
 Record the candidate commit and tarball integrity separately. A local 0.8.0 manifest is not evidence
 that the registry artifact exists or contains the same files. The same smoke runs against a packed
 candidate and, after publication, the registry version. See the
-[0.8.0 product-quality guide](../../docs/product-quality.md) for the additional public APIs.
+[0.8.0 product-quality guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md) for the additional public APIs.

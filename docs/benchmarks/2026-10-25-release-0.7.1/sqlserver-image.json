@@ -1,8 +1,0 @@
-{
-  "id": "sha256:f634a44c5d75eac1a13cc81a3dd9021b2c4517db552bac3eda7215bc9722f12b",
-  "os": "linux",
-  "architecture": "amd64",
-  "repoDigests": [
-    "mcr.microsoft.com/mssql/server@sha256:245f6b1c8903edae52cb20fa31419cefcde1a49938bb8c3447099011fc871ca3"
-  ]
-}

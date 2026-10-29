@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.8.0] - 2026-10-26
 
 Version 0.8.0 adds managed manual transactions, validation and diagnostics, and SQL Server history
-queries. See the [release notes](docs/releases/0.8.0.md) for compatibility and validation scope.
+queries. See the [release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.8.0.md) for compatibility and validation scope.
 
 ### Added
 
@@ -24,7 +24,7 @@ queries. See the [release notes](docs/releases/0.8.0.md) for compatibility and v
   exact binary text filters, and JSON/UTC normalization. Provide optional additive read indexes
   and read-only storage inspection without expanding runtime logging privileges.
 - Add a runnable SQL Server consumer example and clearer provider adoption paths, with examples
-  pinned to 0.8.0 and the new APIs covered in the [feature guide](docs/product-quality.md).
+  pinned to 0.8.0 and the new APIs covered in the [feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md).
 - Add controlled PostgreSQL benchmarks with A/A calibration, package/load/order crossover and
   independent process replicates, an offline confidence-bound comparator, and separate CPU-profile
   analysis with validated clock alignment.
@@ -50,13 +50,13 @@ queries. See the [release notes](docs/releases/0.8.0.md) for compatibility and v
   performance scenarios under unchanged mean/P95/throughput limits. A predeclared controlled
   comparison replaces the automatic-create measurement; the other six scenarios retain both
   formal passes. Results and boundaries are in
-  the repository validation record `docs/2026-10-26-performance-resolution.md`; see also the
-  [benchmark guide](docs/benchmarks.md).
+  the [repository validation record](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/2026-10-26-performance-resolution.md); see also the
+  [benchmark guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/benchmarks.md).
 
 ## [0.7.1] - 2026-10-25
 
 Version 0.7.1 adds SQL Server manual audit logging. See the
-[release notes](docs/releases/0.7.1.md) for validation and support boundaries.
+[release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.7.1.md) for validation and support boundaries.
 
 ### Security
 
@@ -75,7 +75,7 @@ Version 0.7.1 adds SQL Server manual audit logging. See the
   separately, validate existing layouts, and restore trigger enforcement on reapplication.
 - Carry `provider` through `defineAuditConfig()` and reject unsupported SQL Server automatic
   tracking, reads, export, retention, partitions, GIN indexes, and rule enforcement before database
-  access. See the [SQL Server guide](docs/sql-server.md) for configuration and current boundaries.
+  access. See the [SQL Server guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/sql-server.md) for configuration and current boundaries.
 
 ## [0.7.0] - 2026-09-29
 
@@ -85,7 +85,7 @@ Version 0.7.1 adds SQL Server manual audit logging. See the
   context, shared masking/tenant policy, custom storage, caught policy/audit failures, manual
   transaction boundaries, and tracking exclusions; run the gate before publishing.
 
-- Add a published-0.6.0 Quick Start and [incremental adoption guide](docs/adoption-guide.md),
+- Add a published-0.6.0 Quick Start and [incremental adoption guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md),
   separated from candidate build/pack instructions. Expand the packaged example with manual-only
   transactions, tenant-scoped role changes and authorized history reads, plus runnable assertions
   for actor, tenant, redaction and rollback. The consumer gate executes the packaged example and
@@ -97,14 +97,14 @@ Version 0.7.1 adds SQL Server manual audit logging. See the
   defaults, requires explicit extension consistency, rejects misplaced shared fields, and copies
   mutable configuration independently while retaining callback/logger/Prisma namespace identity.
   It performs no client creation, DB I/O or Nest registration. See the
-  [configuration factory](docs/api-reference.md#common-configuration-factory).
+  [configuration factory](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/api-reference.md#common-configuration-factory).
 - Add opt-in `actorRequired` to module and extension shared options (default `false`). All actor
   types require a non-blank string ID, preserved without trimming. Automatic writes snapshot
   identity before the business query. Atomic policy failures reject before mutation and mark
   helper completion as failed even when caught; best-effort preserves business behavior, reports
   the error, and omits the audit row. Manual `log()` rejects before INSERT but leaves transaction
   rollback to the caller. Reads and intentional automatic tracking exclusions retain existing
-  behavior. See the [actor policy](docs/context-and-tenancy.md#requiring-an-identifiable-actor).
+  behavior. See the [actor policy](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/context-and-tenancy.md#requiring-an-identifiable-actor).
 
 ### Breaking Changes
 
@@ -112,7 +112,7 @@ Version 0.7.1 adds SQL Server manual audit logging. See the
   before the business query, inside or outside `withAuditTransaction()`. Catching this policy error
   inside the helper still rolls back the entire transaction, including prior business and audit rows.
   Excluded models and `@NoAudit()` retain their intentional bypass. See the
-  [0.6 to 0.7 migration guidance](docs/transactions.md#migrating-from-06-to-07).
+  [0.6 to 0.7 migration guidance](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md#migrating-from-06-to-07).
 
 ### Changed
 
@@ -167,7 +167,7 @@ Version 0.7.1 adds SQL Server manual audit logging. See the
   automatic tracking to `atomic-required` plus `withAuditTransaction()`, or remove the option and
   retain explicit non-atomic `best-effort`. During 0.5.x, JavaScript or untyped options that retain
   their own legacy key, including `false`, fail fast instead of silently downgrading; see the
-  [removal ADR](docs/2026-08-28-experimental-tx-audit-removal-adr.md).
+  [removal ADR](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/2026-08-28-experimental-tx-audit-removal-adr.md).
 - Drop Node.js 20 after its end of life and require Node.js 22.13+ within the 22.x line,
   or Node.js 24.x. Version 0.4.1 remains the final Node.js 20-compatible release; this
   contract change is reserved for 0.5.0.

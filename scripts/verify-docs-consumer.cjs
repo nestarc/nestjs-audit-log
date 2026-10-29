@@ -46,8 +46,7 @@ async function main() {
     await connection.query(`CREATE SCHEMA "${schema}"`);
     const [pack] = JSON.parse(npm(['pack', '--json', '--pack-destination', temp], root, process.env, true));
     assert.equal(pack.name, '@nestarc/audit-log');
-    const guides = ['agent-guide', 'adoption-guide', 'api-reference', 'transactions', 'context-and-tenancy',
-      'storage-and-retention', 'sql-server', 'product-quality', 'export-and-streams', 'benchmarks', 'maintaining'];
+    assert.ok(pack.files.every(file => !file.path.startsWith('docs/')), 'Local docs must not be published.');
     const exampleFiles = ['README.md', 'package.json', '.env.example', 'tsconfig.json', 'prisma.config.ts',
       'prisma/schema.prisma', 'prisma/migrations/20260910000000_users/migration.sql',
       'prisma/migrations/20260929000000_user_roles/migration.sql',
@@ -56,11 +55,6 @@ async function main() {
       'product-quality/consumer-smoke.ts', 'tsconfig.product-quality.json',
       'src/main.ts', 'src/setup.ts', 'src/smoke.ts', 'src/audit-options.ts', 'src/manual-role.ts', 'src/manual-smoke.ts'];
     for (const expected of ['README.md', 'llms.txt', 'dist/index.js', 'dist/index.d.ts',
-      'docs/benchmarks/2026-09-10-local.json', 'docs/releases/0.7.1.md', `docs/releases/${pack.version}.md`,
-      ...['postgresql-run-1.json', 'postgresql-run-2.json', 'postgresql-run-3.json',
-        'sqlserver.json', 'sqlserver-runner.json', 'sqlserver-image.json', 'sqlserver-container.json', 'provenance.json']
-        .map(name => `docs/benchmarks/2026-10-25-release-0.7.1/${name}`),
-      ...guides.map(name => `docs/${name}.md`),
       ...['README.md', 'package.json', '.env.example', 'prisma/schema.prisma',
         'src/setup.ts', 'src/smoke.ts'].map(name => `examples/sql-server-quick-start/${name}`),
       ...exampleFiles.map(name => `examples/quick-start/${name}`)]) {

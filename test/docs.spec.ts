@@ -7,21 +7,7 @@ function read(path: string): string {
   return readFileSync(join(root, path), 'utf8');
 }
 
-const guides = [
-  'docs/agent-guide.md',
-  'docs/adoption-guide.md',
-  'docs/api-reference.md',
-  'docs/transactions.md',
-  'docs/context-and-tenancy.md',
-  'docs/storage-and-retention.md',
-  'docs/export-and-streams.md',
-  'docs/benchmarks.md',
-  'docs/maintaining.md',
-  'docs/sql-server.md',
-  'docs/product-quality.md',
-  'docs/releases/0.8.0.md',
-];
-const currentUsage = ['README.md', 'llms.txt', ...guides,
+const currentUsage = ['README.md', 'llms.txt',
   'examples/quick-start/README.md', 'examples/sql-server-quick-start/README.md'];
 const packageFiles = (JSON.parse(read('package.json')) as { files: string[] }).files;
 // A dated changelog describes the version these files will accompany, not registry availability.
@@ -91,7 +77,6 @@ describe('documentation gates', () => {
     const requiredFiles = [
       ...currentUsage,
       'CHANGELOG.md',
-      'docs/2026-08-28-experimental-tx-audit-removal-adr.md',
       'examples/quick-start/.env.example',
       'examples/quick-start/package.json',
       'examples/quick-start/tsconfig.json',
@@ -137,7 +122,7 @@ describe('documentation gates', () => {
         expect({ path, version: install[1] }).toEqual({ path, version });
       }
     }
-    for (const path of ['README.md', 'docs/agent-guide.md', 'llms.txt']) {
+    for (const path of ['README.md', 'llms.txt']) {
       expect(linkTargets(read(path)).some(target => target.endsWith('adoption-guide.md'))).toBe(true);
     }
     expect(example.scripts['smoke:manual']).toContain('dist/manual-smoke.js');
@@ -169,9 +154,6 @@ describe('documentation gates', () => {
     }
     const release = read('.github/workflows/release.yml');
     expect(release.indexOf('npm run test:docs:consumer')).toBeLessThan(release.indexOf('npm publish'));
-    for (const match of fixture.matchAll(/passed\.push\('([^']+)'\)/g)) {
-      expect(read('docs/adoption-guide.md')).toContain(match[1]);
-    }
   });
 
   it('keeps local Markdown links and heading anchors valid in published documentation', () => {
@@ -207,77 +189,13 @@ describe('documentation gates', () => {
     expect(failures).toEqual([]);
   });
 
-  it('routes current transaction guidance to the supported and explicit legacy modes', () => {
-    const transactions = read('docs/transactions.md');
-    const api = read('docs/api-reference.md');
-
-    expect(transactions).toContain("consistency: 'atomic-required'");
-    expect(transactions).toContain("consistency: 'best-effort'");
-    expect(transactions).toContain('withAuditTransaction()');
-    expect(transactions).toContain('AuditService.log(input, tx)');
-    expect(transactions).toMatch(/experimentalTxAudit.*removed in v0\.5\.0/);
-    expect(transactions).toMatch(/including `false`, fail\s+fast/);
-    expect(api).not.toMatch(/^\| `experimentalTxAudit` \|/m);
-    expect(transactions).not.toContain('Preview — choose the automatic tracking consistency explicitly');
-  });
-
-  it('records the v0.5.0 experimental transaction routing removal policy', () => {
-    const adr = read('docs/2026-08-28-experimental-tx-audit-removal-adr.md');
+  it('records the v0.5.0 experimental transaction routing removal in CHANGELOG', () => {
     const changelog = read('CHANGELOG.md');
 
-    expect(adr).toContain('Status: Accepted');
-    expect(adr).toContain('Target release: `0.5.0`');
-    expect(adr).toContain("consistency: 'atomic-required'");
-    expect(adr).toContain("consistency: 'best-effort'");
-    expect(adr).toContain('AuditService.log(input, tx)');
-    expect(adr).toContain('runtime tombstone');
     expect(changelog).toContain(
       'Remove the deprecated `AuditExtensionOptions.experimentalTxAudit`',
     );
     expect(changelog).toContain('including `false`, fail fast');
-  });
-
-  it('marks pre-release v0.2 planning documents as historical', () => {
-    const roadmap = read('docs/2026-06-11-v0.2.0-roadmap.md');
-    const overview = read('docs/specs/v0.2.0/00-overview.md');
-    const specs = [
-      '01-storage-retention.md',
-      '02-extension-reliability.md',
-      '03-tenant-isolation.md',
-      '04-actor-context.md',
-      '05-query-api-v2.md',
-      '06-transactions-and-release-gates.md',
-    ].map((name) => read(`docs/specs/v0.2.0/${name}`));
-
-    expect(roadmap).toContain('Status: Historical roadmap');
-    expect(roadmap).not.toContain('Status: Proposed');
-    expect(overview).toContain('Status: Historical implementation specification');
-    for (const spec of specs) {
-      expect(spec).toContain('Status: Historical v0.2.0 implementation specification');
-      expect(spec).not.toContain('Status: Draft');
-    }
-  });
-
-  it('removes obsolete atomicity claims from the design document', () => {
-    const design = read('docs/2026-04-04-audit-log-design.md');
-
-    expect(design).not.toContain('audit_logs INSERT (같은 트랜잭션)');
-    expect(design).not.toContain(
-      'audit_logs INSERT는 원본 쿼리와 같은 batch transaction으로 실행 → 원자성 보장',
-    );
-    expect(design).toContain('2026-06-12');
-    expect(design).toContain(
-      'automatic audit INSERT는 caller transaction에 참여하지 않는다',
-    );
-  });
-
-  it('adds a dated disposition appendix to the validation report', () => {
-    const report = read('docs/2026-04-04-v0.1.0-validation-report.md');
-
-    expect(report).toContain('## Disposition (2026-06-12)');
-    expect(report).toContain('0.1.0 was released on 2026-04-05');
-    expect(report).toContain('Finding 1');
-    expect(report).toContain('spec 06 Tier 1/2/3');
   });
 
   it('defines a peer dependency CI matrix for Nest and Prisma combinations', () => {
@@ -347,7 +265,6 @@ describe('documentation gates', () => {
     expect(changelog).toContain('## [0.7.1] - 2026-10-25');
     expect(changelog).toContain('## [0.7.0] - 2026-09-29');
     expect(changelog).toContain('## [0.6.0] - 2026-09-10');
-    expect(read('docs/maintaining.md')).toContain(`nestarc-audit-log-${packageJson.version}.tgz`);
     expect(changelog).toContain('## [0.5.0] - 2026-08-28');
     expect(changelog).toContain('rejected thenables');
     expect(fixture.dependencies['@nestarc/tenancy']).toBe('0.15.0');
@@ -454,22 +371,5 @@ describe('documentation gates', () => {
     expect(v020).toMatch(
       /they\s+do not establish transaction-atomic automatic auditing/,
     );
-  });
-
-  it('keeps the design document aligned with v0.2.0 query, storage, and tenancy contracts', () => {
-    const design = read('docs/2026-04-04-audit-log-design.md');
-
-    expect(design).toContain('nextCursor');
-    expect(design).toContain('includeTotal: false');
-    expect(design).toContain('trigger enforcement');
-    expect(design).toContain('resolveTenantId');
-    expect(design).toContain('tenantResolver');
-    expect(design).toContain('audit entry skipped');
-    expect(design).not.toContain('offset: 0');
-    expect(design).not.toContain('{ entries: AuditEntry[], total: number }');
-    expect(design).not.toContain(
-      'CREATE RULE audit_logs_no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING',
-    );
-    expect(design).not.toContain('Retention/archival policy (v0.2.0)');
   });
 });
