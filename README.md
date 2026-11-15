@@ -9,10 +9,11 @@ Record who changed what, and when, in a NestJS application. Commit manual busine
 application writes and query tenant-scoped history on PostgreSQL or SQL Server. PostgreSQL also
 supports automatic before/after diffs, export, and delivery to external services.
 
-The Quick Start and public-API examples target **`@nestarc/audit-log@0.8.0`** and pin that version.
-Version 0.8.0 adds managed manual transactions, optional event validation, operation diagnostics,
-and SQL Server history queries. See [CHANGELOG](CHANGELOG.md), the
-[0.8.0 release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.8.0.md), and the [feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md).
+The Quick Start and release examples target **`@nestarc/audit-log@0.9.0`** and pin that version.
+Version 0.9.0 adds optional [atomic Outbox delivery](#atomic-outbox-delivery): business data, audit
+records, and delivery events commit together, with stable identities for consumer deduplication.
+See [CHANGELOG](CHANGELOG.md) for release differences. The [0.8.0 feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md)
+continues to describe managed manual transactions, validation, diagnostics, and SQL Server history.
 Versioned source documentation describes the target package; registry publication is verified separately.
 Maintainers can also verify a [locally packed candidate](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example);
 verify its source and integrity separately from the registry artifact even when the version matches.
@@ -50,6 +51,7 @@ audited client; see [tracking boundaries](https://github.com/nestarc/nestjs-audi
 - [Tracking and storage boundaries](#tracking-and-storage-boundaries)
 - [Guides and API reference](#guides-and-api-reference)
 - [Tested ecosystem versions](#tested-ecosystem-versions)
+- [Atomic Outbox delivery (0.9.0)](#atomic-outbox-delivery)
 - [New in 0.8.0](#new-in-080)
 - [Performance and development](#performance-and-development)
 
@@ -85,10 +87,10 @@ The [runnable schema](examples/quick-start/prisma/schema.prisma) provides that m
 
 ### 1. Install and generate Prisma
 
-In your existing NestJS application, install version 0.8.0 and Prisma 7 runtime dependencies:
+In your existing NestJS application, install version 0.9.0 and Prisma 7 runtime dependencies:
 
 ```bash
-npm install --save-exact @nestarc/audit-log@0.8.0
+npm install --save-exact @nestarc/audit-log@0.9.0
 npm install @prisma/client@7 @prisma/adapter-pg@7 pg dotenv
 npm install --save-dev prisma@7
 ```
@@ -389,6 +391,7 @@ and [export guarantees](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/
 | Use the package from an AI-assisted workflow | [Agent guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/agent-guide.md) |
 | Check release changes | [CHANGELOG](CHANGELOG.md) |
 | Review 0.8.0 changes, validation, and support limits | [0.8.0 release notes](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/releases/0.8.0.md) |
+| Commit audit delivery events with business data | [Atomic Outbox delivery](#atomic-outbox-delivery) · [Runnable example](examples/atomic-outbox/README.md) |
 | Use managed manual transactions, validation, diagnostics, and SQL Server history | [Feature guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/product-quality.md) |
 
 AI agents can start with [the agent guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/agent-guide.md), [llms.txt](llms.txt), the runnable example,
@@ -408,7 +411,7 @@ The optional PostgreSQL compatibility fixture verifies this last-known-good publ
 | `@nestarc/soft-delete` | `0.7.3` |
 | Runtime lane | Node 24, NestJS 11.1.18, Prisma 7.9.1, PostgreSQL 16 |
 
-This is a coordinated integration test tuple, not the full peer-support matrix or proof of 0.8.0
+This is a coordinated integration test tuple, not the full peer-support matrix or proof of 0.9.0
 integration support. Standalone audit-log CI and publication do not depend on this optional
 soft-delete integration; core validation, packed documentation consumers and MSSQL checks remain required.
 
@@ -420,6 +423,65 @@ See [compatibility verification](https://github.com/nestarc/nestjs-audit-log/blo
 artifact checks and the separate release procedure.
 
 <a id="unreleased-improvements"></a>
+
+## Atomic Outbox delivery
+
+Introduced in **0.9.0**, `createOutboxAuditDelivery()` adds opt-in delivery for **PostgreSQL**.
+Use the [runnable Outbox example](examples/atomic-outbox/README.md) with exact audit-log 0.9.0 and
+Outbox 0.4.1. It includes separate registry and locally packed candidate installation paths;
+use the candidate path until registry publication has been verified.
+
+Set `delivery` in the shared audit configuration so manual and automatic records use the same
+policy. `emitter` must be an Outbox emitter for the same database; it receives the exact Prisma
+transaction that inserted the audit row:
+
+```typescript
+import { createOutboxAuditDelivery, defineAuditConfig } from '@nestarc/audit-log';
+import { OutboxEmitter } from '@nestarc/outbox';
+
+const emitter = new OutboxEmitter({ prisma: base });
+const config = defineAuditConfig({
+  shared: {
+    provider: 'postgresql',
+    prismaModule: { Prisma },
+    tenantRequired: true,
+    tenantResolver: () => authorizedTenantId(),
+    delivery: createOutboxAuditDelivery(emitter),
+  },
+  module: { actorExtractor: req => ({ id: req.user.id, type: 'user' }) },
+  extension: {
+    consistency: 'atomic-required',
+    trackedModels: ['User'],
+    databaseMapping: { User: { tableName: 'users' } },
+  },
+});
+```
+
+Supply `config.moduleOptions` and the base client to `AuditLogModule`, and pass
+`config.extensionOptions` to `createAuditedClient()`. Manual writes use
+`audit.withManualTransaction(base, async ({ tx, log }) => { /* business write; await log(...) */ })`;
+automatic writes use `client.withAuditTransaction(tx => tx.user.update(...))`.
+
+The business write, audit INSERT, and Outbox enqueue commit or roll back together. With delivery
+enabled, standalone `log()`, caller-owned manual transactions, and `best-effort` automatic tracking
+are rejected. Enqueue errors prevent commit even when caught inside a managed callback. With
+`delivery` omitted, existing manual and automatic behavior stays unchanged; audit-log does not
+require or import the Outbox runtime.
+
+An Outbox worker performs external delivery after commit. Keep network calls out of managed
+callbacks and emitter hooks. The fixed `nestarc.audit.recorded.v1` payload contains only
+`schemaVersion: 1`, `auditId`, tenant/actor identifiers and actor type, action, target type/ID,
+source, result, and correlation ID. It excludes full changes, arbitrary metadata, and actor IP.
+The audit ID is the stable Outbox idempotency/causation key. Tenant events carry the resolved
+audit tenant explicitly, and global events use explicit global scope.
+
+Delivery is **at least once**. Consumers must deduplicate by tenant and audit ID; the example
+persists the receipt and consumer effect together, restarts a worker after producer termination,
+and exercises a lost acknowledgement. The Outbox idempotency key is metadata, not INSERT deduplication. There
+is no exactly-once or commit-order guarantee, historical backfill, SQL Server Outbox adapter,
+or automatic export of full audit records. Install the Outbox schema through migrations before
+enabling this option. Existing scan/export APIs keep their documented ordering and checkpoint
+boundaries; the new path starts at the producer transaction.
 
 ## New in 0.8.0
 

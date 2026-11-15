@@ -54,3 +54,12 @@ model AuditGuardLeaf {
   branchId String
   branch   AuditGuardBranch @relation(fields: [branchId], references: [id])
 }
+
+model DeliveryAccount {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id")
+  label    String
+  secret   String
+
+  @@map("delivery_accounts")
+}

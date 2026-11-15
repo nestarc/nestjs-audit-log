@@ -1,4 +1,5 @@
 import type { AuditDatabaseProvider } from '../sql/provider';
+import type { AuditDeliveryAdapter } from '../delivery/audit-delivery';
 
 /** Minimal logger compatible with console and NestJS LoggerService. */
 export interface AuditLogger {
@@ -13,7 +14,8 @@ export type AuditErrorPhase =
   | 'tenant-resolution'
   | 'context'
   | 'validation'
-  | 'serialization';
+  | 'serialization'
+  | 'delivery';
 
 /** Stable diagnostic classifications; the original thrown error is preserved. */
 export type AuditErrorCode =
@@ -23,7 +25,8 @@ export type AuditErrorCode =
   | 'AUDIT_SERIALIZATION_FAILED'
   | 'AUDIT_METADATA_TOO_LARGE'
   | 'AUDIT_INSERT_FAILED'
-  | 'AUDIT_TRANSACTION_FAILED';
+  | 'AUDIT_TRANSACTION_FAILED'
+  | 'AUDIT_DELIVERY_FAILED';
 
 export interface AuditErrorContext {
   phase: AuditErrorPhase;
@@ -58,6 +61,12 @@ export interface AuditSharedOptions {
   /** Defaults to PostgreSQL. SQL Server currently supports manual logging only. */
   provider?: AuditDatabaseProvider;
   tableName?: string;
+  /**
+   * Stage allowlisted audit events in the same PostgreSQL transaction. Requires
+   * withManualTransaction() or atomic-required tracking; standalone/manual
+   * external writes, best-effort tracking and SQL Server are unsupported.
+   */
+  delivery?: AuditDeliveryAdapter;
   /** Require a non-blank string actor ID for audit writes. Defaults to false. */
   actorRequired?: boolean;
   tenantRequired?: boolean;

@@ -1,3 +1,4 @@
+import { validateAuditDeliveryOptions } from './delivery/audit-delivery';
 import type { AuditLogModuleOptions } from './interfaces/audit-log-options.interface';
 import type { AuditSharedOptions } from './interfaces/audit-shared-options.interface';
 import type { AuditExtensionOptions } from './prisma/audit-extension/audit-types';
@@ -65,7 +66,7 @@ export interface AuditConfig<T extends AuditExtensionOptions | undefined = Audit
 const sharedKeys: Record<keyof AuditConfigSharedOptions, true> = {
   provider: true, tableName: true, prismaModule: true, actorRequired: true, tenantRequired: true,
   tenantResolver: true, sensitiveFields: true, sensitiveFieldsByModel: true,
-  logger: true, onAuditError: true,
+  logger: true, onAuditError: true, delivery: true,
 };
 const moduleKeys: Record<keyof ModuleSettings, true> = {
   actorExtractor: true, actorExtractionStage: true, excludeRoutes: true,
@@ -108,10 +109,11 @@ function cloneSettings<T>(value: T): T {
 }
 
 function cloneShared(shared: AuditConfigSharedOptions): AuditConfigSharedOptions {
-  const { logger, prismaModule, ...settings } = shared;
+  const { logger, prismaModule, delivery, ...settings } = shared;
   return {
     ...cloneSettings(settings),
     ...('logger' in shared ? { logger } : {}),
+    ...('delivery' in shared ? { delivery } : {}),
     // The wrapper is configuration; the generated namespace is opaque runtime state.
     ...('prismaModule' in shared ? { prismaModule: prismaModule && { Prisma: prismaModule.Prisma } } : {}),
   };
@@ -134,6 +136,7 @@ export function defineAuditConfig(input: AuditConfigInput): AuditConfig {
   if (input.schema !== undefined) checkSection(input.schema, 'schema', schemaKeys);
   const shared = input.shared ?? {};
   const provider = resolveAuditProvider(shared.provider);
+  validateAuditDeliveryOptions(shared);
   if (provider === 'sqlserver') getSqlServerTableName(shared.tableName);
   else validateAuditTableName(shared.tableName);
   if (input.extension !== undefined) {

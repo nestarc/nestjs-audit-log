@@ -153,3 +153,16 @@ export type {
   SqlServerAuditTriggerInspection,
   SqlServerAuditConstraintInspection,
 } from './sql/sqlserver-maintenance';
+
+// Atomic audit delivery
+export type {
+  AuditDeliveryAdapter,
+  AuditDeliveryRecord,
+  AuditDeliveryTransaction,
+} from './delivery/audit-delivery';
+export { createOutboxAuditDelivery, AUDIT_OUTBOX_EVENT_TYPE } from './delivery/outbox-audit-delivery';
+export type {
+  AuditOutboxEmitter,
+  AuditOutboxEvent,
+  AuditOutboxEmitOptions,
+} from './delivery/outbox-audit-delivery';

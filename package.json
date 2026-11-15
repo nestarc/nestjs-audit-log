@@ -1,6 +1,6 @@
 {
   "name": "@nestarc/audit-log",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "NestJS audit logging with automatic PostgreSQL tracking and transactional manual logging for PostgreSQL and SQL Server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +17,8 @@
     "llms.txt",
     "CHANGELOG.md",
     "examples/quick-start",
-    "examples/sql-server-quick-start"
+    "examples/sql-server-quick-start",
+    "examples/atomic-outbox"
   ],
   "keywords": [
     "nestjs",
@@ -58,7 +59,8 @@
     "bench:compare": "node scripts/compare-performance.cjs",
     "test:e2e:setup": "npm run docker:up -- --wait --wait-timeout 60 && npm run prisma:test:push && npm run prisma:test:generate",
     "test:e2e:full": "node scripts/run-e2e.cjs",
-    "test:e2e:teardown": "npm run docker:down"
+    "test:e2e:teardown": "npm run docker:down",
+    "test:consumer:outbox": "npm run build && node scripts/verify-atomic-outbox-consumer.cjs"
   },
   "peerDependencies": {
     "@nestarc/tenancy": ">=0.1.0",

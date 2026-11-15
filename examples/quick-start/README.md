@@ -1,15 +1,16 @@
 # Run the audit-log Quick Start
 
-This standalone example documents and pins the **`@nestarc/audit-log@0.8.0` release target**.
+This standalone example documents and pins the **`@nestarc/audit-log@0.9.0` release target**.
 The registry installation below is for after publication. Before publication, install the
 [prepared candidate tarball](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example) instead.
 The default `src` build contains the introductory app; the
 separately compiled `candidate` directory tests additional released adoption contracts, including
-`defineAuditConfig` and `actorRequired`. See the
+`defineAuditConfig` and `actorRequired`. The optional Outbox path has its own
+[atomic delivery example](../atomic-outbox/README.md). See the
 [changelog](../../CHANGELOG.md), [adoption guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md) and
 [candidate instructions](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example).
 
-## Install version 0.8.0 after publication
+## Install version 0.9.0 after publication
 
 Requirements: Node.js 22.23.4+ in the 22.x line or 24.22.1+ in the 24.x line, npm, and a disposable PostgreSQL database.
 Use a patched Node executable as described in the [runtime requirements](../../README.md#requirements).
@@ -44,7 +45,7 @@ unique user emails. Keep the generated lockfile for repeat installs with `npm ci
 
 The already published **0.7.0 registry tarball** contains an older copy of this example that still
 pins 0.6.0. The 0.6.0 tarball has a local file dependency and only the original creation smoke.
-Use this directory from the current repository for the 0.8.0 instructions and complete smoke flows.
+Use this directory from the current repository for the 0.9.0 instructions and complete smoke flows.
 Changing a dependency version in an older example does not add the new verification suites or
 modify the example bundled in an already published tarball.
 
@@ -129,13 +130,13 @@ With the local `audit_test` database running, execute from the repository root:
 
 ```sh
 npm run test:docs:consumer
-# After 0.8.0 is available from npm:
+# After 0.9.0 is available from npm:
 npm run test:docs:consumer -- --registry
 ```
 
 The first command packs the current checkout and extracts this example from that candidate tarball,
 then installs with strict peers outside the repository. The second uses the same updated example
-against its pinned 0.8.0 registry dependency and verifies its origin/integrity against npm metadata.
+against its pinned 0.9.0 registry dependency and verifies its origin/integrity against npm metadata.
 Both run setup, manual and HTTP smokes, adoption assertions, and 0.8.0 product-quality checks.
 Each prints artifact
 origin/integrity and removes only its own unique temporary schema/directory, including on failure.
@@ -152,7 +153,7 @@ Both consumer modes run `smoke:candidate`, which compiles with
 It requires the gate's unique local `audit_test` schema and the 0.7.0
 `defineAuditConfig`/`actorRequired` APIs. It is compiled separately from the introductory app.
 Use `npm run test:docs:consumer` from the repository root to get installation, schema isolation and
-teardown, or add `-- --registry` after publication to run the same assertions against npm version 0.8.0.
+teardown, or add `-- --registry` after publication to run the same assertions against npm version 0.9.0.
 
 The [scenario-to-assertion map](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md#adoption-assertions-070)
 explains the eight named results: concurrent HTTP/worker identities, masking/tenant policies,

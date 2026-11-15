@@ -1,6 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { AUDIT_LOG_OPTIONS } from '../audit-log.constants';
+import {
+  createAuditDeliveryRecord, validateAuditDeliveryOptions,
+  type AuditDeliveryAdapter,
+} from '../delivery/audit-delivery';
 import { AuditLogModuleOptions } from '../interfaces/audit-log-options.interface';
 import {
   AuditEntry,
@@ -72,7 +76,7 @@ export interface AuditServiceCapabilities {
 const manualErrorCodes: Partial<Record<AuditErrorPhase, AuditErrorCode>> = {
   validation: 'AUDIT_INPUT_INVALID', context: 'AUDIT_CONTEXT_INVALID',
   'tenant-resolution': 'AUDIT_TENANT_INVALID', serialization: 'AUDIT_SERIALIZATION_FAILED',
-  insert: 'AUDIT_INSERT_FAILED',
+  insert: 'AUDIT_INSERT_FAILED', delivery: 'AUDIT_DELIVERY_FAILED',
 };
 
 /** Diagnostics must not evaluate failed DTO accessors or replace the real error. */
@@ -95,6 +99,7 @@ function manualErrorDetails(input: unknown): { model?: string; action?: string; 
 @Injectable()
 export class AuditService {
   private readonly provider: AuditDatabaseProvider;
+  private readonly enqueueDelivery: AuditDeliveryAdapter['enqueue'] | undefined;
   private readonly Prisma: ReturnType<typeof resolvePrismaNamespace>;
   private readonly tableName: string;
   private readonly tableRef: unknown | null;
@@ -107,6 +112,8 @@ export class AuditService {
     private readonly options: AuditLogModuleOptions,
   ) {
     validateManualAuditOptions(options);
+    validateAuditDeliveryOptions(options);
+    this.enqueueDelivery = options.delivery?.enqueue.bind(options.delivery);
     this.provider = resolveAuditProvider(options.provider);
     this.Prisma = resolvePrismaNamespace({
       prismaModule: options.prismaModule,
@@ -134,12 +141,27 @@ export class AuditService {
   }
 
   async log(input: ManualAuditLogInput, tx?: any): Promise<void> {
+    return this.logInContext(input, tx, false);
+  }
+
+  // Only the managed scope's writer can enter with its exact transaction.
+  // Ambient transaction state never authorizes public log(input, tx) calls.
+  private async logInContext(
+    input: ManualAuditLogInput, tx: any, managed: boolean,
+  ): Promise<void> {
     const observe = Boolean(this.options.onAuditOperation);
     const started = observe || this.options.onAuditError ? performance.now() : undefined;
     const stage: { phase: AuditErrorPhase } = { phase: 'validation' };
     let code: AuditErrorCode | undefined;
     let status: 'success' | 'failure' = 'success';
     try {
+      if (this.enqueueDelivery && (!managed || tx == null)) {
+        stage.phase = 'delivery';
+        throw new Error(
+          '[@nestarc/audit-log] delivery requires the writer provided by withManualTransaction(); ' +
+          'standalone and external log() writes are not supported',
+        );
+      }
       await this.writeManualLog(input, tx, value => { stage.phase = value; });
     } catch (error) {
       const phase = stage.phase;
@@ -176,7 +198,11 @@ export class AuditService {
     const started = this.options.onAuditOperation ? performance.now() : undefined;
     let status: 'success' | 'failure' = 'success';
     try {
-      return await runManualAuditTransaction(client, (input, tx) => this.log(input, tx), callback, options);
+      return await runManualAuditTransaction(
+        client,
+        (input, tx) => this.enqueueDelivery ? this.logInContext(input, tx, true) : this.log(input, tx),
+        callback, options,
+      );
     } catch (error) {
       status = 'failure';
       throw error;
@@ -267,8 +293,65 @@ export class AuditService {
       : null;
     enforceManualMetadataSize(metadataJson, this.options.maxMetadataBytes);
 
+    // Snapshot the allowlisted delivery fields before the first asynchronous write.
+    // The same values are inserted into the audit row and passed to the adapter.
+    const deliveryRecord = this.enqueueDelivery ? createAuditDeliveryRecord({
+      tenantId,
+      actorId: actor?.id ?? null,
+      actorType: actor?.type ?? 'system',
+      action: input.action,
+      targetType: input.targetType ?? null,
+      targetId: input.targetId ?? null,
+      source: 'manual',
+      result: input.result ?? 'success',
+      correlationId: typeof metadata?.correlationId === 'string' ? metadata.correlationId : null,
+    }) : null;
+
     markPhase('insert');
     const Prisma = this.Prisma;
+    if (deliveryRecord) {
+      const insertSql = this.tableRef
+        ? Prisma.sql!`
+        INSERT INTO ${this.tableRef}
+          (id, tenant_id, actor_id, actor_type, actor_ip, action,
+           target_type, target_id, source, metadata, result)
+        VALUES (
+          ${deliveryRecord.auditId}::uuid,
+          ${deliveryRecord.tenantId},
+          ${deliveryRecord.actorId},
+          ${deliveryRecord.actorType},
+          ${actor?.ip ?? null},
+          ${deliveryRecord.action},
+          ${deliveryRecord.targetType},
+          ${deliveryRecord.targetId},
+          ${deliveryRecord.source},
+          ${metadataJson}::jsonb,
+          ${deliveryRecord.result}
+        )
+      `
+        : Prisma.sql!`
+        INSERT INTO audit_logs
+          (id, tenant_id, actor_id, actor_type, actor_ip, action,
+           target_type, target_id, source, metadata, result)
+        VALUES (
+          ${deliveryRecord.auditId}::uuid,
+          ${deliveryRecord.tenantId},
+          ${deliveryRecord.actorId},
+          ${deliveryRecord.actorType},
+          ${actor?.ip ?? null},
+          ${deliveryRecord.action},
+          ${deliveryRecord.targetType},
+          ${deliveryRecord.targetId},
+          ${deliveryRecord.source},
+          ${metadataJson}::jsonb,
+          ${deliveryRecord.result}
+        )
+      `;
+      await client.$executeRaw(insertSql);
+      markPhase('delivery');
+      await this.enqueueDelivery!(client, deliveryRecord);
+      return;
+    }
     if (this.provider === 'sqlserver') {
       await client.$executeRaw(Prisma.sql!`
         INSERT INTO ${this.tableRef}
