@@ -99,6 +99,9 @@ export function createAuditExtension(options: AuditExtensionOptions): any {
   }>();
   const runtimeOptions: AuditRuntimeOptions = {
     ...options,
+    delivery: options.delivery
+      ? Object.freeze({ enqueue: options.delivery.enqueue.bind(options.delivery) })
+      : undefined,
     markAtomicFailure(error) {
       const scope = transactionContext.getStore();
       if (scope && !scope.failed) {

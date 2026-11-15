@@ -88,11 +88,17 @@ jobs:
       - name: Verify packed adoption scenarios
         run: npm run test:docs:consumer
 
+      - name: Verify atomic Outbox packed consumer and standalone install
+        run: npm run test:consumer:outbox
+
       - name: Verify package contents
         run: npm pack --dry-run
 
       - name: Publish to npm
         run: npm publish --access public
+
+      - name: Verify published npm package with atomic Outbox consumer
+        run: node scripts/verify-atomic-outbox-consumer.cjs --registry
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

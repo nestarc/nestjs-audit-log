@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-15
+
+### Added
+
+- Add opt-in PostgreSQL audit delivery through `createOutboxAuditDelivery()` and shared `delivery`
+  configuration for managed manual transactions and `atomic-required` automatic tracking. Audit
+  and Outbox rows use the same transaction; enqueue failure prevents commit even when caught.
+- Emit the fixed `nestarc.audit.recorded.v1` summary with stable audit identity and explicit tenant
+  scope. Exclude full changes, arbitrary metadata, and actor IP; require consumer deduplication
+  for at-least-once worker delivery.
+- Add a consumer example with pinned audit-log 0.9.0 and Outbox 0.4.1, two tenants, rollback, the actual
+  Outbox poller, recovery after producer termination following commit, and a lost-acknowledgement
+  retry with durable consumer deduplication.
+
+### Boundaries
+
+- Delivery configuration rejects standalone/caller-owned manual logging, SQL Server delivery,
+  and `best-effort` automatic tracking. Existing behavior without delivery is preserved.
+- No required Outbox runtime dependency, historical backfill, exactly-once execution, or
+  commit-order guarantee. These APIs are introduced in 0.9.0 and are absent from 0.8.0.
+
+### Validation
+
+- Add PostgreSQL cases for business/audit/Outbox rollback, including caught enqueue failures,
+  and RLS tenant isolation. Keep these database isolation assertions separate from the
+  runnable example's two-tenant attribution checks.
+- Exercise the actual Outbox poller with lost acknowledgements, durable consumer deduplication,
+  and recovery after terminating the producer following commit. Verify a separate standalone
+  installation can load audit-log without Outbox installed.
+- Add the packed-consumer gate to CI and the release workflow, plus a post-publication registry
+  check of the published artifact and integrity. These configured gates do not by themselves
+  establish a successful CI run or registry publication.
+
 ## [0.8.0] - 2026-10-26
 
 Version 0.8.0 adds managed manual transactions, validation and diagnostics, and SQL Server history

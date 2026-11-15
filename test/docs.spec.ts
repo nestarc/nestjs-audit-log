@@ -8,7 +8,8 @@ function read(path: string): string {
 }
 
 const currentUsage = ['README.md', 'llms.txt',
-  'examples/quick-start/README.md', 'examples/sql-server-quick-start/README.md'];
+  'examples/quick-start/README.md', 'examples/sql-server-quick-start/README.md',
+  'examples/atomic-outbox/README.md'];
 const packageFiles = (JSON.parse(read('package.json')) as { files: string[] }).files;
 // A dated changelog describes the version these files will accompany, not registry availability.
 // The --registry consumer check verifies publication separately after npm publish succeeds.
@@ -108,6 +109,10 @@ describe('documentation gates', () => {
     };
     const version = example.dependencies['@nestarc/audit-log'];
     expect(version).toBe(documentedVersion);
+    for (const path of ['examples/sql-server-quick-start/package.json', 'examples/atomic-outbox/package.json']) {
+      const manifest = JSON.parse(read(path)) as { dependencies: Record<string, string> };
+      expect({ path, version: manifest.dependencies['@nestarc/audit-log'] }).toEqual({ path, version });
+    }
     const readme = read('README.md');
     expect(readme).toContain(`npm install --save-exact @nestarc/audit-log@${version}`);
     const quickStart = readme.split('## Quick Start')[1].split('## Read and write')[0];
@@ -257,10 +262,10 @@ describe('documentation gates', () => {
     const readme = read('README.md');
     const changelog = read('CHANGELOG.md');
 
-    expect(packageJson.version).toBe('0.8.0');
+    expect(packageJson.version).toBe('0.9.0');
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages['']?.version).toBe(packageJson.version);
-    expect(changelog).toContain(`## [${packageJson.version}] - 2026-10-26`);
+    expect(changelog).toContain(`## [${packageJson.version}] - 2026-11-15`);
     expect(documentedVersion).toBe(packageJson.version);
     expect(changelog).toContain('## [0.7.1] - 2026-10-25');
     expect(changelog).toContain('## [0.7.0] - 2026-09-29');

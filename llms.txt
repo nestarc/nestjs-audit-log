@@ -2,7 +2,7 @@
 
 > NestJS audit logging with PostgreSQL change tracking and transactional manual logging for PostgreSQL and SQL Server.
 
-Documents @nestarc/audit-log release target 0.8.0; the Quick Start targets that version.
+Documents @nestarc/audit-log release target 0.9.0; the Quick Start targets that version.
 This does not establish npm publication; use the local tarball procedure before registry availability.
 actorRequired and defineAuditConfig were introduced in 0.7.0. Locally packed candidates remain distinct
 from the registry artifact even when their versions match. Check the installed package source,
@@ -11,7 +11,7 @@ declarations and [CHANGELOG](CHANGELOG.md) before choosing examples.
 Require Node 22.23.4+ within 22.x or 24.22.1+ within 24.x; see [runtime requirements](README.md#requirements).
 The package's engines metadata does not replace the host runtime or restart running applications.
 
-Version 0.8.0 supports explicit provider: 'sqlserver' for manual logging, managed manual transactions,
+Since 0.8.0, the package supports explicit provider: 'sqlserver' for manual logging, managed manual transactions,
 query/getById history reads, flat-table DDL, storage inspection and optional read indexes.
 The Quick Start uses PostgreSQL. SQL Server automatic tracking, scan/export, retention and
 partitions remain unsupported; use the dedicated guide below.
@@ -25,7 +25,7 @@ and future npm packages; use the linked release snapshot for these guides.
 - [Adoption guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/adoption-guide.md): manual events, one-model tracking, role changes, authorized reads, and verification.
 - [Agent usage guide](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/agent-guide.md): version boundaries and implementation recipes.
 - [Runnable example](examples/quick-start/README.md): Nest HTTP, Prisma generation, migrations, and smoke verification.
-- [SQL Server runnable example](examples/sql-server-quick-start/README.md): 0.8.0 manual logging, rollback, actor/tenant policy, masking, and authorized history access.
+- [SQL Server runnable example](examples/sql-server-quick-start/README.md): 0.9.0 manual logging, rollback, actor/tenant policy, masking, and authorized history access.
 - [API reference](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/api-reference.md): public configuration and return contracts.
 - [Transactions](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/transactions.md): atomic-required, unsupported operations, and lifecycle integration.
 - [Actor and tenancy](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/context-and-tenancy.md): authenticated actors, jobs, and explicit query scope.
@@ -35,6 +35,27 @@ and future npm packages; use the linked release snapshot for these guides.
 - [Export and streams](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/export-and-streams.md): checkpoints, delivery retries, and late-commit limitations.
 - [Changelog](CHANGELOG.md): version changes.
 - [Candidate installation](https://github.com/nestarc/nestjs-audit-log/blob/v0.8.0/docs/maintaining.md#candidate-documentation-example): build/pack and isolated consumer checks.
+
+## Atomic Outbox delivery (0.9.0)
+
+`createOutboxAuditDelivery(emitter)` is introduced in 0.9.0 and absent from 0.8.0. Configure
+`delivery` in `defineAuditConfig().shared` or the corresponding service/extension options.
+Use the same PostgreSQL database and managed Prisma transaction for business, audit, and Outbox
+rows. Manual calls require `withManualTransaction()`; automatic writes require
+`consistency: 'atomic-required'` plus `withAuditTransaction()`. With delivery configured,
+standalone `log()` and caller-owned transactions reject before INSERT. Enqueue failures poison
+the managed transaction even when caught. Existing no-delivery behavior remains supported.
+
+The `nestarc.audit.recorded.v1` event carries a versioned summary and stable `auditId`, with
+explicit tenant/global scope. Full changes, arbitrary metadata, and actor IP are not delivered.
+An actual Outbox poller delivers after commit, at least once; receivers need durable deduplication
+by tenant/audit ID. This is not an exactly-once or commit-order contract, historical backfill,
+or SQL Server Outbox integration. No Outbox runtime dependency is loaded by audit-log itself.
+
+- [Delivery contract](README.md#atomic-outbox-delivery)
+- [Runnable audit-log 0.9.0 + Outbox 0.4.1](examples/atomic-outbox/README.md): registry installation
+  after publication or an explicitly selected candidate tarball, two tenants, rollback, producer loss
+  after commit, lost ACK redelivery, and durable receiver deduplication.
 
 ## Release references
 

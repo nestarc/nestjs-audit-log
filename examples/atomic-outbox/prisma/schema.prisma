@@ -1,0 +1,17 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model BusinessWrite {
+  id       String @id
+  tenantId String @map("tenant_id")
+  name     String
+
+  @@map("business_writes")
+}

@@ -1,4 +1,6 @@
 import { AuditContext, mergeContextMetadata } from '../../services/audit-context';
+import { createAuditDeliveryRecord } from '../../delivery/audit-delivery';
+import type { AuditDeliveryRecord } from '../../delivery/audit-delivery';
 import { resolveTenantId } from '../../utils/tenant';
 import { snapshotAuditActor } from '../../utils/actor';
 import type { AuditActor } from '../../interfaces/actor.interface';
@@ -183,11 +185,57 @@ async function insertAuditLog(
   client: any,
   params: AuditInsertParams,
   tableRef?: unknown,
+  auditId?: string,
 ): Promise<void> {
   const changesJson = JSON.stringify(params.changes);
   const metadataJson = params.metadata
     ? JSON.stringify(params.metadata)
     : null;
+
+  if (auditId !== undefined) {
+    if (tableRef) {
+      await client.$executeRaw`
+      INSERT INTO ${tableRef}
+        (id, tenant_id, actor_id, actor_type, actor_ip, action,
+         target_type, target_id, source, changes, metadata, result)
+      VALUES (
+        ${auditId}::uuid,
+        ${params.tenantId},
+        ${params.actorId},
+        ${params.actorType},
+        ${params.actorIp},
+        ${params.action},
+        ${params.targetType},
+        ${params.targetId},
+        ${params.source},
+        ${changesJson}::jsonb,
+        ${metadataJson}::jsonb,
+        ${params.result}
+      )
+    `;
+    } else {
+      await client.$executeRaw`
+      INSERT INTO audit_logs
+        (id, tenant_id, actor_id, actor_type, actor_ip, action,
+         target_type, target_id, source, changes, metadata, result)
+      VALUES (
+        ${auditId}::uuid,
+        ${params.tenantId},
+        ${params.actorId},
+        ${params.actorType},
+        ${params.actorIp},
+        ${params.action},
+        ${params.targetType},
+        ${params.targetId},
+        ${params.source},
+        ${changesJson}::jsonb,
+        ${metadataJson}::jsonb,
+        ${params.result}
+      )
+    `;
+    }
+    return;
+  }
 
   if (tableRef) {
     await client.$executeRaw`
@@ -350,8 +398,24 @@ export async function tryAuditLog(
     return;
   }
 
+  let deliveryRecord: AuditDeliveryRecord | undefined;
   try {
-    await insertAuditLog(client, params, tableRef);
+    if (options.delivery) {
+      deliveryRecord = createAuditDeliveryRecord({
+        tenantId: params.tenantId,
+        actorId: params.actorId,
+        actorType: params.actorType,
+        action: params.action,
+        targetType: params.targetType,
+        targetId: params.targetId,
+        source: params.source,
+        result: params.result,
+        correlationId: typeof params.metadata?.correlationId === 'string'
+          ? params.metadata.correlationId
+          : null,
+      });
+    }
+    await insertAuditLog(client, params, tableRef, deliveryRecord?.auditId);
   } catch (error) {
     reportAuditError(options, error, {
       ...ctx,
@@ -362,6 +426,22 @@ export async function tryAuditLog(
     });
     if (options.consistency === 'atomic-required') {
       throw error;
+    }
+    return;
+  }
+
+  if (deliveryRecord && options.delivery) {
+    try {
+      await options.delivery.enqueue(client, deliveryRecord);
+    } catch (error) {
+      reportAuditError(options, error, {
+        ...ctx,
+        phase: 'delivery',
+        code: 'AUDIT_DELIVERY_FAILED',
+        action: params.action,
+        targetId: params.targetId,
+        tenantId: params.tenantId,
+      });
     }
   }
 }
